@@ -11178,22 +11178,32 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // Rev.16.36: 거리두기 2 3 위 0.6 - 2-3 선을 위/아래로 평행복제 (새 선 끝점 번호 부여)
+  // Rev.16.43: 거리두기 4 5 좌 1 - 4→5 진행방향 기준 좌/우로 dmm 평행복제 (새 선 끝점 번호 부여)
+  //   예) 거리두기 4 5 좌 1  →  4에서 5로 가는 방향의 왼쪽으로 1mm 떨어진 평행선
   if ((toks[0] === '거리두기' || toks[0] === 'OFFSET') && toks.length >= 5
       && parsePenIdx(toks[1]) != null && parsePenIdx(toks[2]) != null){
     const i1 = parsePenIdx(toks[1]), i2 = parsePenIdx(toks[2]);
-    const ud = toks[3];
+    const lr = toks[3];
     const dmm = evalExpr(toks[4]);
-    if (!penPoints[i1] || !penPoints[i2] || (ud!=='위'&&ud!=='아래') || !isFinite(dmm)) return false;
-    const ln = penFindLineByEndpoints(i1, i2);
-    if (!ln){ document.getElementById('statusHint').textContent = `거리두기 실패: ${i1}-${i2} 선이 없음`; return true; }
-    const dpx = dmm/mmPerPixel * (ud==='위' ? -1 : 1);  // 화면 위=Y감소
-    const nx1 = ln.p1.x, ny1 = ln.p1.y + dpx;
-    const nx2 = ln.p2.x, ny2 = ln.p2.y + dpx;
-    penAddLine(nx1, ny1, nx2, ny2);
-    penAddPoint(nx1, ny1);
-    penAddPoint(nx2, ny2);
-    penFinish(`⫴ ${i1}-${i2} 선 ${ud} ${dmm}mm 평행복제`);
+    const isLeft  = (lr === '좌' || lr === 'L');
+    const isRight = (lr === '우' || lr === 'R');
+    if (!penPoints[i1] || !penPoints[i2] || (!isLeft && !isRight) || !isFinite(dmm)) return false;
+    const a = penPoints[i1], b = penPoints[i2];
+    const dx = b.x - a.x, dy = b.y - a.y;        // 진행방향 (i1 → i2)
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6){ document.getElementById('statusHint').textContent = `거리두기 실패: ${i1},${i2}가 같은 위치`; return true; }
+    const ux = dx/len, uy = dy/len;
+    // 화면 좌표(Y 아래로 +) 기준: 진행방향의 좌측 법선 = (uy, -ux), 우측 = (-uy, ux)
+    const nx = isLeft ? uy : -uy;
+    const ny = isLeft ? -ux : ux;
+    const offPx = dmm / mmPerPixel;
+    const ox = nx * offPx, oy = ny * offPx;
+    const p1x = a.x + ox, p1y = a.y + oy;
+    const p2x = b.x + ox, p2y = b.y + oy;
+    penAddLine(p1x, p1y, p2x, p2y);
+    penAddPoint(p1x, p1y);
+    penAddPoint(p2x, p2y);
+    penFinish(`⫴ ${i1}→${i2} 진행방향 ${isLeft ? '좌' : '우'}측 ${dmm}mm 평행복제`);
     return true;
   }
 
@@ -11250,10 +11260,16 @@ function tryPenCommand(cmdStr){
   }
   const sp = penPoints[startIdx];
 
-  // 거리두기 위/아래 D : 마지막 선 평행복제 (한붓그리기 흐름 밖)
+  // 거리두기 위/아래 D : 마지막 선 평행복제 (점번호 없이 한붓그리기 흐름)
+  //   ※ 점번호 2개 좌/우 형식(거리두기 4 5 좌 1)은 위쪽 Rev.16.43 분기에서 먼저 처리됨
   if (dir === '거리두기'){
     const ud = toks[off+1];
     const dmm = evalExpr(toks[off+2]);
+    if (ud === '좌' || ud === '우' || ud === 'L' || ud === 'R'){
+      document.getElementById('statusHint').textContent =
+        '⚠ 좌/우 거리두기는 점번호 2개로: 예) 거리두기 4 5 좌 1';
+      return true;
+    }
     if ((ud !== '위' && ud !== '아래') || !isFinite(dmm)) return false;
     // 마지막으로 그린 line 찾기
     let last=null;
@@ -11789,19 +11805,19 @@ window.addEventListener('keydown', e => {
   }
 });
 
-// Rev.16.42: 명령 입력 중 상태바에 실시간 표시 (한글 명령 지원 - 한글 차단 제거)
-//   한글 명령(시작/점/씰/연결/삭제/이동 등)을 입력해야 하므로 더 이상 비영문을 제거하지 않음.
-//   IME(한글) 조합 중에는 value를 절대 건드리지 않아 조합이 깨지지 않게 함.
-cmdInput.addEventListener('input', e => {
-  // 한글 조합 중이면 표시만 갱신하고 value는 손대지 않음
+// Rev.11.28: 명령 입력 중 상태바에 실시간 표시 (명령줄이 숨겨져 있으므로)
+cmdInput.addEventListener('input', () => {
+  // Rev.11.38: 명령창은 영문만 - 한글 등 비영문 제거 + 대문자 변환
+  //   허용: 영문/숫자/좌표 입력 기호(. , - + @ < > 공백)
+  const cleaned = cmdInput.value.toUpperCase().replace(/[^A-Z0-9.,\-+@<> ]/g, '');
+  if (cleaned !== cmdInput.value) cmdInput.value = cleaned;
   const hint = document.getElementById('statusHint');
-  if (e.isComposing) {
-    if (hint && cmdInput.value) hint.textContent = `⌨ 명령: ${cmdInput.value} (Enter 실행 / Esc 취소)`;
-    return;
-  }
   if (hint && cmdInput.value) hint.textContent = `⌨ 명령: ${cmdInput.value} (Enter 실행 / Esc 취소)`;
 });
-// Rev.16.42: compositionend 에서 더 이상 한글을 지우지 않음 (한글 명령 입력 허용)
+// Rev.11.38: 한글 IME 조합 완료 시점에도 한 번 더 정리 (조합 중 한글이 잠깐 보이는 것 방지)
+cmdInput.addEventListener('compositionend', () => {
+  cmdInput.value = cmdInput.value.toUpperCase().replace(/[^A-Z0-9.,\-+@<> ]/g, '');
+});
 
 // 도구 전환 시 명령창에 포커스 복귀 (선택적)
 document.querySelectorAll('.tool-menu-item').forEach(btn => {

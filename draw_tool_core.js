@@ -10915,6 +10915,14 @@ function cmdLog(text, cls) {
 //   닫기 / CLOSE         → 현재 점에서 P0로 선 긋기
 //   점초기화 / PRESET     → 점번호 시스템 리셋
 function penWorldOrigin(){ return { x: baseW/2, y: baseH/2 }; }   // 0,0 = 작업영역 중앙
+// Rev.16.44: 씰 점 전용 가상 원점 - 화면 우측 하단 (씰 단면은 좌측·위로 전개되므로)
+//   작업영역/배율은 건드리지 않고 원점만 우측 하단으로. 가로 95%, 세로 90% 지점.
+//   ※ 씰 폭(지름)이 작업영역 가로보다 크면 일부는 경계를 벗어날 수 있음(작업영역 한계).
+function penSealOrigin(){ return { x: baseW * 0.95, y: baseH * 0.90 }; }
+function penSealMmToPx(xmm, ymm){
+  const o = penSealOrigin();
+  return { x: o.x + xmm/mmPerPixel, y: o.y - ymm/mmPerPixel };
+}
 // mm(위=+Y 도면좌표) → 픽셀(아래=+Y). 원점은 중앙
 function penMmToPx(xmm, ymm){
   const o = penWorldOrigin();
@@ -11110,14 +11118,16 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // Rev.16.32: 씰 좌표 점 - 씰 점 D,Y  (D=지름, 항상 좌측 X=-D/2, Y 그대로)
+  // Rev.16.44: 씰 좌표 점 - 씰 점 D,Y  (D=지름, 항상 좌측 X=-D/2, Y 그대로)
+  //   원점은 화면 우측 하단의 '가상 원점'(penSealOrigin) → 씰 단면이 좌측·위로 전개됨
+  //   작업영역/단위배율은 건드리지 않음 (가상 원점만 우측하단에 둠)
   if (toks[0] === '씰' && toks[1] === '점' && toks.length >= 4){
     const D = evalExpr(toks[2]), ymm = evalExpr(toks[3]);
     if (!isFinite(D) || !isFinite(ymm)) return false;
-    const xmm = -Math.abs(D)/2;   // 좌측 전용
-    const p = penMmToPx(xmm, ymm);
+    const xmm = -Math.abs(D)/2;   // 좌측 전용 (지름 → 반지름)
+    const p = penSealMmToPx(xmm, ymm);
     penAddPoint(p.x, p.y);
-    penFinish(`⌀ ${penCur}번 씰점 = Ø${D} → 좌측 X=${xmm.toFixed(2)}, Y=${ymm}mm`);
+    penFinish(`⌀ ${penCur}번 씰점 = Ø${D} → 좌측 X=${xmm.toFixed(2)}, Y=${ymm}mm (우측하단 가상원점 기준)`);
     return true;
   }
 
@@ -11806,10 +11816,9 @@ window.addEventListener('keydown', e => {
 });
 
 // Rev.16.42: 명령 입력 중 상태바에 실시간 표시 (한글 명령 지원 - 한글 차단 제거)
-//   한글 명령(시작/점/씰/연결/삭제/이동/거리두기 등)을 입력해야 하므로 더 이상 비영문을 제거하지 않음.
-//   IME(한글) 조합 중에는 value를 절대 건드리지 않아 조합이 깨지지 않게 함.
+//   한글 명령(시작/점/씰/연결/삭제/이동/거리두기 등)을 입력해야 하므로 비영문을 제거하지 않음.
+//   IME(한글) 조합 중에도 value를 건드리지 않아 조합이 깨지지 않게 함.
 cmdInput.addEventListener('input', e => {
-  // 한글 조합 중이든 아니든 value는 손대지 않고 표시만 갱신
   const hint = document.getElementById('statusHint');
   if (hint && cmdInput.value) hint.textContent = `⌨ 명령: ${cmdInput.value} (Enter 실행 / Esc 취소)`;
 });

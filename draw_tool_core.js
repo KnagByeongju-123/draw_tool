@@ -88,6 +88,8 @@ let swipeAngleThresh = 30;        // 삭제 각도 임계값(도)
 let penPoints = [];               // [{x,y}] P0,P1,P2... 픽셀 좌표
 let penLabelIds = [];             // 각 점 라벨(text 도형) id (지우기용)
 let penCur = -1;                  // 현재 점 인덱스 (이 점에서 다음 선 시작)
+let penPickMode = false;          // Rev.16.46: 점 마우스 선택 모드 (한붓그리기 동안 ON)
+let penPickFirst = -1;            // Rev.16.46: 자동 연결용 첫 번째 클릭 점 인덱스
 let penSealMode = false;          // Rev.16.30: 씰 모드(좌/우 숫자=목표 지름, 이동=|목표-현재|/2)
 // Rev.16.9~16.10: 대각선(교점) 모드 - 범위 안 교점을 드래그로 선택(최대2), 2쌍 동시 대각 연결
 let diagXMode = false;            // 대각선-교점 모드 ON/OFF
@@ -1929,6 +1931,11 @@ drawCanvas.addEventListener('click', e => {
   if (baseLineMode) {
     const pBl = getCanvasPoint(e);
     if (handleBaseLineClick(pBl)) return;
+  }
+  // Rev.16.46: 점 마우스 선택 모드 (한붓그리기 동안, 도구 무관하게 점 클릭 우선)
+  if (penPickMode) {
+    const pPk = getCanvasPoint(e);
+    if (handlePenPickClick(pPk)) return;
   }
   if (tool === 'select') return;
   const p = getCanvasPoint(e);
@@ -6729,6 +6736,8 @@ function drawShape(ctx, s, selected) {
   if (s.type === 'point') {
     ctx.save();
     const r = 5 / zoom;
+    // Rev.16.46: 한붓그리기 현재 선택점(penCur)이면 노란 강조 원 표시
+    const isPenCur = (penPickMode && s.penIdx != null && s.penIdx === penCur);
     ctx.strokeStyle = selected ? '#ffcc00' : (s.stroke || '#16e0b0');
     ctx.lineWidth = 1.5 / zoom;
     ctx.beginPath();
@@ -6739,6 +6748,14 @@ function drawShape(ctx, s, selected) {
     ctx.fillStyle = selected ? '#ffcc00' : (s.stroke || '#16e0b0');
     const hr = 2.5 / zoom;
     ctx.fillRect(s.p1.x - hr, s.p1.y - hr, hr*2, hr*2);
+    // 선택점 강조: 노란 원
+    if (isPenCur){
+      ctx.strokeStyle = '#ffcc00';
+      ctx.lineWidth = 2 / zoom;
+      ctx.beginPath();
+      ctx.arc(s.p1.x, s.p1.y, 10/zoom, 0, Math.PI*2);
+      ctx.stroke();
+    }
     ctx.restore();
     return;
   }
@@ -8773,6 +8790,8 @@ function updateMoveDeltaPanelLive(){
 function evalExpr(str){
   if (str === null || str === undefined) return NaN;
   let t = String(str).trim();
+  // Rev.16.45: 선두 '=' 는 수식 표시이므로 제거 (예: =(100-90)/2 → (100-90)/2)
+  if (t.startsWith('=')) t = t.slice(1).trim();
   if (t === '') return NaN;
   // 허용 문자만 남기고 검사
   if (!/^[\d+\-*/().\s]+$/.test(t)) return NaN;
@@ -8781,6 +8800,22 @@ function evalExpr(str){
     const v = Function('"use strict"; return (' + t + ');')();
     return (typeof v === 'number' && isFinite(v)) ? v : NaN;
   } catch(e){ return NaN; }
+}
+
+// Rev.16.45: '=' 로 시작하는 수식은 공백이 섞여도 하나로 묶는다.
+//   예) ['좌','=(100','-','90)','/','2'] → ['좌','=(100-90)/2']. 새 '=' 또는 단어를 만나면 멈춤.
+function mergeExprTokens(toks){
+  const isArithFrag = s => /^[\d+\-*/().]+$/.test(s);
+  const out = [];
+  for (let i=0; i<toks.length; i++){
+    let cur = toks[i];
+    if (cur.startsWith('=')){
+      let expr = cur;
+      while (i+1 < toks.length && isArithFrag(toks[i+1])){ expr += toks[i+1]; i++; }
+      out.push(expr);
+    } else { out.push(cur); }
+  }
+  return out;
 }
 
 // 입력된 ΔX/ΔY(mm)를 기준 스냅샷에 적용 → 선택 도형을 절대 오프셋으로 이동
@@ -10914,15 +10949,8 @@ function cmdLog(text, cls) {
 //   선 P1 P4 / LINK P1 P4→ 두 점 직접 연결
 //   닫기 / CLOSE         → 현재 점에서 P0로 선 긋기
 //   점초기화 / PRESET     → 점번호 시스템 리셋
-function penWorldOrigin(){ return { x: baseW/2, y: baseH/2 }; }   // 0,0 = 작업영역 중앙
-// Rev.16.44: 씰 점 전용 가상 원점 - 화면 우측 하단 (씰 단면은 좌측·위로 전개되므로)
-//   작업영역/배율은 건드리지 않고 원점만 우측 하단으로. 가로 95%, 세로 90% 지점.
-//   ※ 씰 폭(지름)이 작업영역 가로보다 크면 일부는 경계를 벗어날 수 있음(작업영역 한계).
-function penSealOrigin(){ return { x: baseW * 0.95, y: baseH * 0.90 }; }
-function penSealMmToPx(xmm, ymm){
-  const o = penSealOrigin();
-  return { x: o.x + xmm/mmPerPixel, y: o.y - ymm/mmPerPixel };
-}
+// Rev.16.43: 한붓그리기 원점(0,0)을 화면 우측 하단(빨간점 ≈ 가로85%, 세로78%)으로
+function penWorldOrigin(){ return { x: baseW * 0.85, y: baseH * 0.78 }; }
 // mm(위=+Y 도면좌표) → 픽셀(아래=+Y). 원점은 중앙
 function penMmToPx(xmm, ymm){
   const o = penWorldOrigin();
@@ -10932,6 +10960,57 @@ function penPxToMm(px, py){
   const o = penWorldOrigin();
   return { x: (px - o.x)*mmPerPixel, y: -(py - o.y)*mmPerPixel };
 }
+// Rev.16.46: 점 마우스 선택 - 클릭 위치에서 가장 가까운 한붓그리기 점(penPoints)을 찾는다.
+//   반환: 점 인덱스(없으면 -1). tol은 화면상 약 12px 반경.
+function penFindNearestPoint(p){
+  const tolPx = Math.max(12/(zoom||1), 1/mmPerPixel*0.3);
+  let best = -1, bestD = Infinity;
+  for (let i=0;i<penPoints.length;i++){
+    const pt = penPoints[i];
+    if (!pt) continue;
+    const d = Math.hypot(pt.x - p.x, pt.y - p.y);
+    if (d < tolPx && d < bestD){ bestD = d; best = i; }
+  }
+  return best;
+}
+// Rev.16.46: 점 선택 모드 클릭 처리. 처리했으면 true.
+//   - 점을 클릭하면 현재점(penCur) 선택. 직전에 선택한 점이 있으면 두 점을 선으로 자동 연결.
+//   - 빈 곳 클릭은 선택 해제(아무것도 안 함, false 반환하여 다른 처리로 넘김 X → 여기선 그냥 무시).
+function handlePenPickClick(p){
+  if (!penPickMode) return false;
+  const idx = penFindNearestPoint(p);
+  if (idx < 0){
+    // 빈 곳: 첫 선택 대기 상태 초기화만
+    penPickFirst = -1;
+    return false;   // 빈 곳 클릭은 다른 동작(없음) 위해 false (select 도구면 어차피 무동작)
+  }
+  if (penPickFirst < 0){
+    // 첫 점 선택 → 현재점
+    penPickFirst = idx;
+    penCur = idx;
+    const m = penPxToMm(penPoints[idx].x, penPoints[idx].y);
+    document.getElementById('statusHint').textContent =
+      `▸ ${idx}번 점 선택됨 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm · 다른 점 클릭=연결, 방향명령=이어그리기`;
+    redrawDraw();
+    return true;
+  }
+  // 두 번째 점 선택
+  if (idx === penPickFirst){
+    // 같은 점 재클릭 → 선택 유지(연결 안 함)
+    return true;
+  }
+  // 두 점 자동 연결
+  penAddLine(penPoints[penPickFirst].x, penPoints[penPickFirst].y, penPoints[idx].x, penPoints[idx].y);
+  cmdLog(`✎ 선 P${penPickFirst}-P${idx} 연결 (마우스)`, 'user');
+  penCur = idx;
+  penPickFirst = idx;   // 이어서 또 클릭하면 idx에서 다음 점으로 연결되게
+  redoStack = []; pushHistory();
+  if (typeof redrawFills === 'function') redrawFills();
+  redrawDraw(); updateCount();
+  document.getElementById('statusHint').textContent = `✎ ${penPickFirst}번에서 이어서 연결 가능 · 빈 곳 클릭=선택 해제`;
+  return true;
+}
+
 function penAddPoint(px, py){
   // Rev.16.34: 이미 같은 위치에 번호 점이 있으면 그 번호를 현재점으로 (중복 생성 방지)
   const tolPx = 1/mmPerPixel * 0.05;
@@ -10977,7 +11056,8 @@ function penFinish(msg){
   document.getElementById('statusHint').textContent = msg;
 }
 function tryPenCommand(cmdStr){
-  const toks = cmdStr.replace(/,/g,' ').split(/\s+/).filter(Boolean);
+  let toks = cmdStr.replace(/,/g,' ').split(/\s+/).filter(Boolean);
+  toks = mergeExprTokens(toks);   // Rev.16.45: '=' 수식 묶기 (예: 좌 =(100-90)/2)
   if (!toks.length) return false;
 
   // 점번호 초기화
@@ -11040,29 +11120,20 @@ function tryPenCommand(cmdStr){
   }
 
   // Rev.16.39: 이동 - 이동 1 우 10 (1번 점을 우 10mm, 연결된 선 끝점도 함께)
+  //   Rev.16.43: 씰 계산 제거 (텍스트 입력에서 씰 제외)
   if (toks[0] === '이동' || toks[0] === 'MOVE'){
     const idx = parsePenIdx(toks[1]);
     if (idx == null || !penPoints[idx]) return false;
-    let moff = 2;
-    let useSealM = false;
-    if (toks[moff] === '씰'){ useSealM = true; moff++; }
-    const mdir = toks[moff];
-    const mval = evalExpr(toks[moff+1]);
+    const mdir = toks[2];
+    const mval = evalExpr(toks[3]);
     if (!['우','좌','상','하','R','L','U','D'].includes(mdir) || !isFinite(mval)) return false;
     const old = penPoints[idx];
     let ndx=0, ndy=0;
-    if (useSealM && (mdir==='우'||mdir==='좌'||mdir==='R'||mdir==='L')){
-      // 씰: mval=목표지름, 이동=|목표-현재|/2
-      const curXmm = penPxToMm(old.x, old.y).x;
-      const moveMm = Math.abs(mval - curXmm)/2;
-      ndx = ((mdir==='좌'||mdir==='L') ? -1 : 1) * moveMm / mmPerPixel;
-    } else {
-      const dpx = mval/mmPerPixel;
-      if (mdir==='우'||mdir==='R') ndx = dpx;
-      else if (mdir==='좌'||mdir==='L') ndx = -dpx;
-      else if (mdir==='상'||mdir==='U') ndy = -dpx;
-      else if (mdir==='하'||mdir==='D') ndy = dpx;
-    }
+    const dpx = mval/mmPerPixel;
+    if (mdir==='우'||mdir==='R') ndx = dpx;
+    else if (mdir==='좌'||mdir==='L') ndx = -dpx;
+    else if (mdir==='상'||mdir==='U') ndy = -dpx;
+    else if (mdir==='하'||mdir==='D') ndy = dpx;
     const nx = old.x + ndx, ny = old.y + ndy;
     const tol = 1/mmPerPixel * 0.1;
     // 이 점에 연결된 선 끝점들도 함께 이동
@@ -11077,7 +11148,7 @@ function tryPenCommand(cmdStr){
     }
     penPoints[idx] = { x:nx, y:ny };
     penUpdateLabel(idx, nx, ny);
-    penFinish(`✥ ${idx}번 점 ${useSealM?'씰 ':''}${mdir} ${mval}${useSealM?'(지름)':'mm'} 이동`);
+    penFinish(`✥ ${idx}번 점 ${mdir} ${mval}mm 이동`);
     return true;
   }
 
@@ -11118,18 +11189,7 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // Rev.16.44: 씰 좌표 점 - 씰 점 D,Y  (D=지름, 항상 좌측 X=-D/2, Y 그대로)
-  //   원점은 화면 우측 하단의 '가상 원점'(penSealOrigin) → 씰 단면이 좌측·위로 전개됨
-  //   작업영역/단위배율은 건드리지 않음 (가상 원점만 우측하단에 둠)
-  if (toks[0] === '씰' && toks[1] === '점' && toks.length >= 4){
-    const D = evalExpr(toks[2]), ymm = evalExpr(toks[3]);
-    if (!isFinite(D) || !isFinite(ymm)) return false;
-    const xmm = -Math.abs(D)/2;   // 좌측 전용 (지름 → 반지름)
-    const p = penSealMmToPx(xmm, ymm);
-    penAddPoint(p.x, p.y);
-    penFinish(`⌀ ${penCur}번 씰점 = Ø${D} → 좌측 X=${xmm.toFixed(2)}, Y=${ymm}mm (우측하단 가상원점 기준)`);
-    return true;
-  }
+  // Rev.16.43: 씰 좌표 점(씰 점) 명령은 텍스트 입력에서 제외됨 (제거)
 
   // Rev.16.33: 연결 1 2  (1번과 2번 직선 연결, 공백 구분 / '선'도 동일)
   if (toks[0] === '연결' || toks[0] === '선' || toks[0] === 'LINK'){
@@ -11189,7 +11249,6 @@ function tryPenCommand(cmdStr){
   }
 
   // Rev.16.43: 거리두기 4 5 좌 1 - 4→5 진행방향 기준 좌/우로 dmm 평행복제 (새 선 끝점 번호 부여)
-  //   예) 거리두기 4 5 좌 1  →  4에서 5로 가는 방향의 왼쪽으로 1mm 떨어진 평행선
   if ((toks[0] === '거리두기' || toks[0] === 'OFFSET') && toks.length >= 5
       && parsePenIdx(toks[1]) != null && parsePenIdx(toks[2]) != null){
     const i1 = parsePenIdx(toks[1]), i2 = parsePenIdx(toks[2]);
@@ -11199,20 +11258,17 @@ function tryPenCommand(cmdStr){
     const isRight = (lr === '우' || lr === 'R');
     if (!penPoints[i1] || !penPoints[i2] || (!isLeft && !isRight) || !isFinite(dmm)) return false;
     const a = penPoints[i1], b = penPoints[i2];
-    const dx = b.x - a.x, dy = b.y - a.y;        // 진행방향 (i1 → i2)
+    const dx = b.x - a.x, dy = b.y - a.y;
     const len = Math.hypot(dx, dy);
     if (len < 1e-6){ document.getElementById('statusHint').textContent = `거리두기 실패: ${i1},${i2}가 같은 위치`; return true; }
     const ux = dx/len, uy = dy/len;
-    // 화면 좌표(Y 아래로 +) 기준: 진행방향의 좌측 법선 = (uy, -ux), 우측 = (-uy, ux)
     const nx = isLeft ? uy : -uy;
     const ny = isLeft ? -ux : ux;
     const offPx = dmm / mmPerPixel;
     const ox = nx * offPx, oy = ny * offPx;
-    const p1x = a.x + ox, p1y = a.y + oy;
-    const p2x = b.x + ox, p2y = b.y + oy;
-    penAddLine(p1x, p1y, p2x, p2y);
-    penAddPoint(p1x, p1y);
-    penAddPoint(p2x, p2y);
+    penAddLine(a.x+ox, a.y+oy, b.x+ox, b.y+oy);
+    penAddPoint(a.x+ox, a.y+oy);
+    penAddPoint(b.x+ox, b.y+oy);
     penFinish(`⫴ ${i1}→${i2} 진행방향 ${isLeft ? '좌' : '우'}측 ${dmm}mm 평행복제`);
     return true;
   }
@@ -11255,9 +11311,7 @@ function tryPenCommand(cmdStr){
     startIdx = maybeIdx;
     off = 1;
   }
-  // Rev.16.32: '씰' 접두 - 이 명령만 씰 계산 적용 (예: 씰 좌 130, 3 씰 좌 130)
-  let useSeal = false;
-  if (toks[off] === '씰'){ useSeal = true; off++; }
+  // Rev.16.43: '씰' 접두 제거 (텍스트 입력에서 씰 제외)
   const dir = toks[off];
   const dirSet = ['우','좌','상','하','R','L','U','D','각','도','ANG','거리두기'];
   if (!dirSet.includes(dir)) return false;
@@ -11271,13 +11325,11 @@ function tryPenCommand(cmdStr){
   const sp = penPoints[startIdx];
 
   // 거리두기 위/아래 D : 마지막 선 평행복제 (점번호 없이 한붓그리기 흐름)
-  //   ※ 점번호 2개 좌/우 형식(거리두기 4 5 좌 1)은 위쪽 Rev.16.43 분기에서 먼저 처리됨
   if (dir === '거리두기'){
     const ud = toks[off+1];
     const dmm = evalExpr(toks[off+2]);
     if (ud === '좌' || ud === '우' || ud === 'L' || ud === 'R'){
-      document.getElementById('statusHint').textContent =
-        '⚠ 좌/우 거리두기는 점번호 2개로: 예) 거리두기 4 5 좌 1';
+      document.getElementById('statusHint').textContent = '⚠ 좌/우 거리두기는 점번호 2개로: 예) 거리두기 4 5 좌 1';
       return true;
     }
     if ((ud !== '위' && ud !== '아래') || !isFinite(dmm)) return false;
@@ -11310,25 +11362,8 @@ function tryPenCommand(cmdStr){
   const dist = evalExpr(toks[off+1]);
   if (!isFinite(dist)) return false;
   let dx=0, dy=0;
-  const isLR = (dir==='우'||dir==='R'||dir==='좌'||dir==='L');
 
-  if (useSeal && isLR){
-    // Rev.16.30: 씰 모드 좌/우 - 숫자=목표 지름. 이동량 = |목표 - 현재지름값|/2
-    //   현재지름값 = 현재 X(mm, penPxToMm) ※ 부호 그대로 사용 (예: P0 X=100, 좌 130 → (130-100)/2=15 좌측)
-    const curXmm = penPxToMm(sp.x, sp.y).x;   // 현재 점의 X(mm) = 현재 지름값
-    const targetD = dist;                      // 목표 지름
-    const moveMm = Math.abs(targetD - curXmm) / 2;
-    const moveDir = (dir==='좌'||dir==='L') ? -1 : +1;  // 방향은 단어대로
-    dx = moveDir * moveMm / mmPerPixel;
-    const nx = sp.x + dx, ny = sp.y;
-    penAddLine(sp.x, sp.y, nx, ny);
-    penAddPoint(nx, ny);
-    const newXmm = penPxToMm(nx, ny).x;
-    penFinish(`⌀ 씰 ${startIdx} ${dir} 목표Ø${targetD} → ${moveMm.toFixed(2)}mm 이동 → X=${newXmm.toFixed(1)} (${penCur})`);
-    return true;
-  }
-
-  // 일반 이동 (씰 모드의 상/하 포함)
+  // Rev.16.43: 씰 좌/우 계산 제거 (텍스트 입력에서 씰 제외). 일반 이동만.
   const dpx = dist/mmPerPixel;
   if (dir==='우'||dir==='R') dx = dpx;
   else if (dir==='좌'||dir==='L') dx = -dpx;
@@ -11427,20 +11462,21 @@ function penChamferAtPoint(pt, cMm){
   return applyChamferToTwoLines(near[0].line, near[1].line, near[0].click, near[1].click, cMm);
 }
 
-// Rev.16.30: 텍스트입력(한붓그리기) 시작 - 씰/일반 모드 선택
+// Rev.16.46: 텍스트입력(한붓그리기) 시작 (씰 제외, 점 마우스 선택 ON)
 (function(){
   const btn = document.getElementById('headerBtnPenInput');
   if (!btn) return;
   btn.addEventListener('click', () => {
-    penSealMode = false;  // Rev.16.32: 전역 씰모드 폐지 (씰 계산은 '씰' 접두 명령으로만)
     // 점번호 초기화
     penPoints = []; penLabelIds = []; penCur = -1;
+    penPickMode = true;   // Rev.16.46: 한붓그리기 동안 점 마우스 선택 활성
+    penPickFirst = -1;
     // 명령창 포커스
     const ci = document.getElementById('cmdInput');
     if (ci){ ci.focus(); ci.value = ''; }
     document.getElementById('statusHint').textContent =
-      `⌨ 한붓그리기 시작: '시작 X Y' 또는 '점 X,Y'로 점 찍기 · 좌/우/상/하/각 이어그리기 · 씰은 '씰 점 D,Y' · 취소=백 또는 Ctrl+Z`;
-    cmdLog(`⌨ 한붓그리기 시작. 예: 점 -100,100 → 점 -100,110 → 연결 1 2 · 씰: 씰 점 110,100`, 'system');
+      `⌨ 한붓그리기 시작: '점 X,Y' 입력 또는 점을 마우스로 클릭(2개 클릭=자동 연결) · 좌/우/상/하/각 · 수식 =(100-90)/2 · 취소=백/Ctrl+Z`;
+    cmdLog(`⌨ 한붓그리기 시작. 점 클릭으로 현재점 선택, 두 점 클릭 시 자동 연결`, 'system');
   });
 })();
 
@@ -11448,7 +11484,8 @@ function tryDimCommand(cmdStr){
   // Rev.16.29: 한붓그리기(점번호) 명령 우선 처리
   if (tryPenCommand(cmdStr)) return true;
   // 토큰 분리 (콤마/공백 혼용 허용)
-  const toks = cmdStr.replace(/,/g,' ').split(/\s+/).filter(Boolean);
+  let toks = cmdStr.replace(/,/g,' ').split(/\s+/).filter(Boolean);
+  toks = mergeExprTokens(toks);   // Rev.16.45: '=' 수식 묶기
   if (toks.length < 2) return false;
   const key = toks[0];
   const nums = toks.slice(1).map(t => evalExpr(t));
@@ -11708,6 +11745,7 @@ function cancelActiveTool() {
   endpointPickState = null; arcHandleDrag = null;
   filletState = null; chamferState = null; tangentState = null;
   offsetState = null; dimState = null; breakState = null;
+  penPickMode = false; penPickFirst = -1;   // Rev.16.46: 점 마우스 선택 모드 종료
   preCtx.clearRect(0,0,baseW,baseH);
   redrawDraw();
   cmdLog('  ESC: 현재 작업 취소.', 'system');
@@ -11815,14 +11853,12 @@ window.addEventListener('keydown', e => {
   }
 });
 
-// Rev.16.42: 명령 입력 중 상태바에 실시간 표시 (한글 명령 지원 - 한글 차단 제거)
-//   한글 명령(시작/점/씰/연결/삭제/이동/거리두기 등)을 입력해야 하므로 비영문을 제거하지 않음.
-//   IME(한글) 조합 중에도 value를 건드리지 않아 조합이 깨지지 않게 함.
+// Rev.16.42: 명령 입력 중 상태바에 실시간 표시 (한글·수식'=' 지원 - 입력 차단 제거)
 cmdInput.addEventListener('input', e => {
   const hint = document.getElementById('statusHint');
   if (hint && cmdInput.value) hint.textContent = `⌨ 명령: ${cmdInput.value} (Enter 실행 / Esc 취소)`;
 });
-// Rev.16.42: compositionend 에서 더 이상 한글을 지우지 않음 (한글 명령 입력 허용)
+// Rev.16.42: compositionend 에서 더 이상 문자를 지우지 않음 (한글 명령 입력 허용)
 
 // 도구 전환 시 명령창에 포커스 복귀 (선택적)
 document.querySelectorAll('.tool-menu-item').forEach(btn => {

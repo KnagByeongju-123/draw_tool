@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.51  최신본 — 한붓그리기/명령어 처리 전담 (점/선/지름/거리두기/=수식 명령) #####
+// ##### draw_tool_core2.js  Rev.16.52  최신본 — 한붓그리기/명령어 (점·선·지름·거리두기·=수식·이동[번호생략=현재점]) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -154,12 +154,27 @@ function tryPenCommand(cmdStr){
     return false;
   }
 
-  // Rev.16.39/43: 이동 1 우 10 (씰 제거)
+  // Rev.16.39/43/52: 이동 - 점 새로 찍지 않고 기존 포인트 위치만 옮김
+  //   이동 1 우 10  → 1번 점을 우 10mm
+  //   이동 상 3     → 현재 선택점(penCur)을 상 3mm (번호 생략 시 현재점 대상)
   if (toks[0] === '이동' || toks[0] === 'MOVE'){
-    const idx = parsePenIdx(toks[1]);
-    if (idx == null || !penPoints[idx]) return false;
-    const mdir = toks[2]; const mval = evalExpr(toks[3]);
-    if (!['우','좌','상','하','R','L','U','D'].includes(mdir) || !isFinite(mval)) return false;
+    let idx, mdir, mval;
+    const dirSet = ['우','좌','상','하','R','L','U','D'];
+    if (dirSet.includes(toks[1])){
+      // 번호 생략: 현재 선택점 대상
+      idx = penCur;
+      mdir = toks[1]; mval = evalExpr(toks[2]);
+      if (idx < 0 || !penPoints[idx]){
+        document.getElementById('statusHint').textContent = '⚠ 먼저 점을 선택하세요 (점 5 또는 점 클릭) — 이동 상 3';
+        return true;
+      }
+    } else {
+      // 번호 지정
+      idx = parsePenIdx(toks[1]);
+      if (idx == null || !penPoints[idx]) return false;
+      mdir = toks[2]; mval = evalExpr(toks[3]);
+    }
+    if (!dirSet.includes(mdir) || !isFinite(mval)) return false;
     const old = penPoints[idx];
     let ndx=0, ndy=0; const dpx = mval/mmPerPixel;
     if (mdir==='우'||mdir==='R') ndx = dpx;

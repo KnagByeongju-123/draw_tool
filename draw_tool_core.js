@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.48  최신본 (한글·거리두기좌우·씰제거·우하단원점·=수식·점마우스선택·점N·점방향거리) #####
+// ##### draw_tool_core.js  Rev.16.49  최신본 (한글·거리두기좌우(방향생략=좌)·씰제거·우하단원점·=수식·점마우스선택(빈곳점안생김)·점N·점방향거리) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -89,7 +89,7 @@ let swipeAngleThresh = 30;        // 삭제 각도 임계값(도)
 let penPoints = [];               // [{x,y}] P0,P1,P2... 픽셀 좌표
 let penLabelIds = [];             // 각 점 라벨(text 도형) id (지우기용)
 let penCur = -1;                  // 현재 점 인덱스 (이 점에서 다음 선 시작)
-let penPickMode = false;          // Rev.16.46: 점 마우스 선택 모드
+let penPickMode = false;          // Rev.16.46: 점 마우스 선택 모드 (한붓그리기 동안 ON)
 let penPickFirst = -1;            // Rev.16.46: 자동 연결용 첫 클릭 점
 let penSealMode = false;          // Rev.16.30: 씰 모드(좌/우 숫자=목표 지름, 이동=|목표-현재|/2)
 // Rev.16.9~16.10: 대각선(교점) 모드 - 범위 안 교점을 드래그로 선택(최대2), 2쌍 동시 대각 연결
@@ -1589,7 +1589,8 @@ drawCanvas.addEventListener('mousedown', e => {
     return;
   }
   // Rev.11.18: 버텍스 점 찍기 모드 (좌클릭 = 점 생성)
-  if (pointMode && e.button === 0) {
+  //   Rev.16.49: 한붓그리기 점선택 모드 중에는 점 생성 금지
+  if (pointMode && !penPickMode && e.button === 0) {
     let p = getCanvasPoint(e);
     p = snapPointForVertex(p); // 스냅 적용
     const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
@@ -1933,7 +1934,7 @@ drawCanvas.addEventListener('click', e => {
     const pBl = getCanvasPoint(e);
     if (handleBaseLineClick(pBl)) return;
   }
-  // Rev.16.46: 점 마우스 선택 모드 (한붓그리기 동안)
+  // Rev.16.46/49: 점 마우스 선택 모드 - 한붓그리기 중에는 점 선택만, 빈 곳 클릭으로 점 생성 안 함
   if (penPickMode) {
     const pPk = getCanvasPoint(e);
     if (handlePenPickClick(pPk)) return;
@@ -8792,8 +8793,7 @@ function mergeExprTokens(toks){
   const out = [];
   for (let i=0;i<toks.length;i++){ let cur=toks[i];
     if (cur.startsWith('=')){ let expr=cur; while(i+1<toks.length && isArithFrag(toks[i+1])){expr+=toks[i+1];i++;} out.push(expr); }
-    else out.push(cur);
-  }
+    else out.push(cur); }
   return out;
 }
 
@@ -10939,7 +10939,7 @@ function penPxToMm(px, py){
   const o = penWorldOrigin();
   return { x: (px - o.x)*mmPerPixel, y: -(py - o.y)*mmPerPixel };
 }
-// Rev.16.46: 가장 가까운 한붓그리기 점 찾기
+// Rev.16.46: 가장 가까운 한붓그리기 점 찾기 (없으면 -1)
 function penFindNearestPoint(p){
   const tolPx = Math.max(12/(zoom||1), 1/mmPerPixel*0.3);
   let best=-1, bestD=Infinity;
@@ -10947,38 +10947,28 @@ function penFindNearestPoint(p){
     const d=Math.hypot(pt.x-p.x,pt.y-p.y); if(d<tolPx&&d<bestD){bestD=d;best=i;} }
   return best;
 }
-// Rev.16.47: 클릭 위치가 선 위인지. 선 위면 선상 최근접점 반환
-function penProjectOntoLine(p){
-  const tolPx = Math.max(8/(zoom||1), 1/mmPerPixel*0.3);
-  let best=null, bestD=tolPx;
-  for (const sh of shapes){ if(sh.type!=='line'||!sh.p1||!sh.p2)continue;
-    const x1=sh.p1.x,y1=sh.p1.y,x2=sh.p2.x,y2=sh.p2.y,vx=x2-x1,vy=y2-y1,L2=vx*vx+vy*vy;
-    if(L2<1e-9)continue; let t=((p.x-x1)*vx+(p.y-y1)*vy)/L2; if(t<0)t=0;else if(t>1)t=1;
-    const qx=x1+t*vx,qy=y1+t*vy,d=Math.hypot(p.x-qx,p.y-qy);
-    if(d<bestD){bestD=d;best={x:qx,y:qy,onLine:true};} }
-  return best;
-}
-// Rev.16.46/47: 점 선택 모드 클릭 처리
+// Rev.16.46/49: 점 선택 모드 클릭 처리. 점 위 클릭만 처리(선택/연결). 빈 곳은 점 생성하지 않음.
 function handlePenPickClick(p){
   if (!penPickMode) return false;
   const idx = penFindNearestPoint(p);
-  if (idx >= 0){
-    if (penPickFirst < 0){ penPickFirst=idx; penCur=idx;
-      const m=penPxToMm(penPoints[idx].x,penPoints[idx].y);
-      document.getElementById('statusHint').textContent=`▸ ${idx}번 점 선택 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm · 다른 점 클릭=연결`;
-      redrawDraw(); return true; }
-    if (idx === penPickFirst) return true;
-    penAddLine(penPoints[penPickFirst].x,penPoints[penPickFirst].y,penPoints[idx].x,penPoints[idx].y);
-    cmdLog(`✎ 선 P${penPickFirst}-P${idx} 연결 (마우스)`,'user');
-    penCur=idx; penPickFirst=idx;
-    redoStack=[]; pushHistory(); if(typeof redrawFills==='function')redrawFills(); redrawDraw(); updateCount();
+  if (idx < 0){
+    // 빈 곳 클릭: 점 생성하지 않음. 선택만 해제하고 클릭 소비(true)하여 다른 점찍기 방지
+    penPickFirst = -1;
+    document.getElementById('statusHint').textContent = '점이 아닌 곳 클릭 — 점은 명령(점 X,Y / 점 상 2.5)으로만 추가됩니다';
     return true;
   }
-  const proj = penProjectOntoLine(p);
-  if (proj){ const ni=penAddPoint(proj.x,proj.y); penPickFirst=ni;
-    cmdLog(`• ${ni}번 점 = 선 위에 추가`,'user');
-    redoStack=[]; pushHistory(); redrawDraw(); updateCount(); return true; }
-  penPickFirst=-1; return false;
+  if (penPickFirst < 0){
+    penPickFirst = idx; penCur = idx;
+    const m = penPxToMm(penPoints[idx].x, penPoints[idx].y);
+    document.getElementById('statusHint').textContent = `▸ ${idx}번 점 선택 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm · 다른 점 클릭=연결`;
+    redrawDraw(); return true;
+  }
+  if (idx === penPickFirst) return true;
+  penAddLine(penPoints[penPickFirst].x,penPoints[penPickFirst].y,penPoints[idx].x,penPoints[idx].y);
+  cmdLog(`✎ 선 P${penPickFirst}-P${idx} 연결 (마우스)`,'user');
+  penCur=idx; penPickFirst=idx;
+  redoStack=[]; pushHistory(); if(typeof redrawFills==='function')redrawFills(); redrawDraw(); updateCount();
+  return true;
 }
 
 function penAddPoint(px, py){
@@ -11146,31 +11136,26 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // Rev.16.48: 점 상 2.5 - 현재 선택점에서 방향(상/하/좌/우)으로 거리만큼 떨어진 곳에 점만 찍기.
-  //   선을 긋지 않고 점만 생성하며, 선에 포함시키지 않는다(독립 점).
+  // Rev.16.48: 점 상 2.5 - 현재 선택점에서 방향으로 거리만큼 떨어진 곳에 점만 찍기(선 포함 안 함)
   if (toks[0] === '점' && toks.length >= 3
       && ['상','하','좌','우','U','D','L','R'].includes(toks[1])){
     if (penCur < 0 || !penPoints[penCur]){
-      document.getElementById('statusHint').textContent = '⚠ 먼저 점을 선택하세요 (점 5 또는 점 클릭)';
-      return true;
+      document.getElementById('statusHint').textContent = '⚠ 먼저 점을 선택하세요 (점 5 또는 점 클릭)'; return true;
     }
-    const pdir = toks[1];
-    const pdist = evalExpr(toks[2]);
+    const pdir = toks[1]; const pdist = evalExpr(toks[2]);
     if (!isFinite(pdist)) return false;
-    const base = penPoints[penCur];
-    const dpx = pdist/mmPerPixel;
-    let nx = base.x, ny = base.y;
-    if (pdir==='우'||pdir==='R') nx += dpx;
-    else if (pdir==='좌'||pdir==='L') nx -= dpx;
-    else if (pdir==='상'||pdir==='U') ny -= dpx;   // 화면 위=Y감소
-    else if (pdir==='하'||pdir==='D') ny += dpx;
-    penAddPoint(nx, ny);   // 점만 추가(선 없음)
+    const base = penPoints[penCur]; const dpx = pdist/mmPerPixel;
+    let nx=base.x, ny=base.y;
+    if (pdir==='우'||pdir==='R') nx+=dpx;
+    else if (pdir==='좌'||pdir==='L') nx-=dpx;
+    else if (pdir==='상'||pdir==='U') ny-=dpx;
+    else if (pdir==='하'||pdir==='D') ny+=dpx;
+    penAddPoint(nx, ny);
     penFinish(`• ${penCur}번 점 = 이전점에서 ${pdir} ${pdist}mm (독립 점)`);
     return true;
   }
 
-  // Rev.16.47: 점 N (인자 1개) - N이 기존 점번호면 그 점을 현재점으로 선택.
-  //   없으면 X=N mm(Y=현재점 Y, 없으면 0)에 점 찍기 (선 포함 안 함).
+  // Rev.16.47: 점 N (인자 1개) - N이 기존 점번호면 그 점을 현재점으로 선택. 없으면 X=N mm에 점
   if (toks[0] === '점' && toks.length === 2){
     const n = parsePenIdx(toks[1]);
     if (n != null && penPoints[n]){
@@ -11179,8 +11164,7 @@ function tryPenCommand(cmdStr){
       penFinish(`▸ ${n}번 점 선택 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm`);
       return true;
     }
-    const xv = evalExpr(toks[1]);
-    if (!isFinite(xv)) return false;
+    const xv = evalExpr(toks[1]); if (!isFinite(xv)) return false;
     let yv = 0;
     if (penCur >= 0 && penPoints[penCur]) yv = penPxToMm(penPoints[penCur].x, penPoints[penCur].y).y;
     const p = penMmToPx(xv, yv);
@@ -11259,12 +11243,15 @@ function tryPenCommand(cmdStr){
   }
 
   // Rev.16.43: 거리두기 4 5 좌 1 - 4→5 진행방향 기준 좌/우로 dmm 평행복제
-  if ((toks[0] === '거리두기' || toks[0] === 'OFFSET') && toks.length >= 5
+  if ((toks[0] === '거리두기' || toks[0] === 'OFFSET')
       && parsePenIdx(toks[1]) != null && parsePenIdx(toks[2]) != null){
     const i1 = parsePenIdx(toks[1]), i2 = parsePenIdx(toks[2]);
-    const lr = toks[3]; const dmm = evalExpr(toks[4]);
-    const isLeft=(lr==='좌'||lr==='L'), isRight=(lr==='우'||lr==='R');
-    if (!penPoints[i1] || !penPoints[i2] || (!isLeft&&!isRight) || !isFinite(dmm)) return false;
+    // 방향 토큰이 좌/우면 그것을, 없으면(거리만) 기본 '좌'
+    let lr = toks[3], dmm;
+    if (lr==='좌'||lr==='우'||lr==='L'||lr==='R'){ dmm = evalExpr(toks[4]); }
+    else { lr='좌'; dmm = evalExpr(toks[3]); }   // 방향 생략 시 기본 좌
+    const isLeft=(lr==='좌'||lr==='L');
+    if (!penPoints[i1] || !penPoints[i2] || !isFinite(dmm)) return false;
     const a=penPoints[i1], b=penPoints[i2];
     const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy);
     if (len<1e-6){ document.getElementById('statusHint').textContent=`거리두기 실패: ${i1},${i2}가 같은 위치`; return true; }
@@ -11330,7 +11317,7 @@ function tryPenCommand(cmdStr){
   // 거리두기 위/아래 D : 마지막 선 평행복제 (점번호 없이)
   if (dir === '거리두기'){
     const ud = toks[off+1]; const dmm = evalExpr(toks[off+2]);
-    if (ud==='좌'||ud==='우'||ud==='L'||ud==='R'){ document.getElementById('statusHint').textContent='⚠ 좌/우 거리두기는 점번호 2개로: 예) 거리두기 4 5 좌 1'; return true; }
+    if (ud==='좌'||ud==='우'||ud==='L'||ud==='R'){ document.getElementById('statusHint').textContent='⚠ 좌/우 거리두기는 점번호 2개로: 예) 거리두기 2 3 좌 0.6'; return true; }
     if ((ud !== '위' && ud !== '아래') || !isFinite(dmm)) return false;
     // 마지막으로 그린 line 찾기
     let last=null;
@@ -11458,18 +11445,19 @@ function penChamferAtPoint(pt, cMm){
   return applyChamferToTwoLines(near[0].line, near[1].line, near[0].click, near[1].click, cMm);
 }
 
-// Rev.16.46/48: 텍스트입력(한붓그리기) 시작 (씰 제외, 점 마우스 선택 ON)
+// Rev.16.46/49: 텍스트입력(한붓그리기) 시작 (씰 제외, 점 마우스 선택 ON)
 (function(){
   const btn = document.getElementById('headerBtnPenInput');
   if (!btn) return;
   btn.addEventListener('click', () => {
     penPoints = []; penLabelIds = []; penCur = -1;
     penPickMode = true; penPickFirst = -1;
+    pointMode = false;   // Rev.16.49: 버텍스 점찍기 모드와 충돌 방지(클릭마다 점 생김 방지)
     const ci = document.getElementById('cmdInput');
     if (ci){ ci.focus(); ci.value = ''; }
     document.getElementById('statusHint').textContent =
-      `⌨ 한붓그리기: '점 X,Y' / '점 5'(P5선택) / '점 상 2.5'(현재점서 방향+거리에 점) · 점/선 클릭 · 수식 =(100-90)/2 · 취소=백/Ctrl+Z`;
-    cmdLog(`⌨ 한붓그리기 시작`, 'system');
+      `⌨ 한붓그리기: 점은 명령으로만(점 X,Y / 점 상 2.5) · 점 클릭=선택, 두 점 클릭=연결 · 빈 곳 클릭은 점 안 생김 · 수식 =(100-90)/2`;
+    cmdLog(`⌨ 한붓그리기 시작. 점 클릭=선택, 명령으로 점 추가`, 'system');
   });
 })();
 

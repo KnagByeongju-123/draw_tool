@@ -11789,19 +11789,19 @@ window.addEventListener('keydown', e => {
   }
 });
 
-// Rev.11.28: 명령 입력 중 상태바에 실시간 표시 (명령줄이 숨겨져 있으므로)
-cmdInput.addEventListener('input', () => {
-  // Rev.11.38: 명령창은 영문만 - 한글 등 비영문 제거 + 대문자 변환
-  //   허용: 영문/숫자/좌표 입력 기호(. , - + @ < > 공백)
-  const cleaned = cmdInput.value.toUpperCase().replace(/[^A-Z0-9.,\-+@<> ]/g, '');
-  if (cleaned !== cmdInput.value) cmdInput.value = cleaned;
+// Rev.16.42: 명령 입력 중 상태바에 실시간 표시 (한글 명령 지원 - 한글 차단 제거)
+//   한글 명령(시작/점/씰/연결/삭제/이동 등)을 입력해야 하므로 더 이상 비영문을 제거하지 않음.
+//   IME(한글) 조합 중에는 value를 절대 건드리지 않아 조합이 깨지지 않게 함.
+cmdInput.addEventListener('input', e => {
+  // 한글 조합 중이면 표시만 갱신하고 value는 손대지 않음
   const hint = document.getElementById('statusHint');
+  if (e.isComposing) {
+    if (hint && cmdInput.value) hint.textContent = `⌨ 명령: ${cmdInput.value} (Enter 실행 / Esc 취소)`;
+    return;
+  }
   if (hint && cmdInput.value) hint.textContent = `⌨ 명령: ${cmdInput.value} (Enter 실행 / Esc 취소)`;
 });
-// Rev.11.38: 한글 IME 조합 완료 시점에도 한 번 더 정리 (조합 중 한글이 잠깐 보이는 것 방지)
-cmdInput.addEventListener('compositionend', () => {
-  cmdInput.value = cmdInput.value.toUpperCase().replace(/[^A-Z0-9.,\-+@<> ]/g, '');
-});
+// Rev.16.42: compositionend 에서 더 이상 한글을 지우지 않음 (한글 명령 입력 허용)
 
 // 도구 전환 시 명령창에 포커스 복귀 (선택적)
 document.querySelectorAll('.tool-menu-item').forEach(btn => {
@@ -11902,4 +11902,3 @@ updateAxisStatus();
 updateLiveSnapButton();
 updateHeaderSelectButton();
 redrawAll();
-

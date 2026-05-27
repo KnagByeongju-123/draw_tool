@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.78 (마우스휠 확대축소 추가)  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.80  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -9337,11 +9337,10 @@ document.getElementById('btnClearAll').addEventListener('click', () => {
 });
 
 // Rev.16.76: 새 파일 - 전체(도형/채움/한붓점/원점) 완전 초기화
-function newFile(){
-  if ((shapes.length || fills.length) && !confirm('새 파일로 시작할까요? 현재 작업이 모두 사라집니다.')) return;
+// Rev.16.79: 새 파일 - 작업 내용 있으면 저장 여부(저장후/그냥/취소) 확인
+function doNewFileReset(){
   redoStack = []; shapes = []; fills = []; selectedIds.clear();
   rotAxis = null;
-  // 한붓그리기 상태 초기화
   if (typeof penPoints !== 'undefined') penPoints = [];
   if (typeof penLabelIds !== 'undefined') penLabelIds = [];
   if (typeof penCur !== 'undefined') penCur = -1;
@@ -9354,8 +9353,36 @@ function newFile(){
   if (typeof updateAxisStatus === 'function') updateAxisStatus();
   cmdLog('📄 새 파일 — 전체 초기화 완료', 'system');
 }
+function newFile(){
+  if (shapes.length || fills.length){
+    // 모달로 저장 여부 묻기
+    const m = document.getElementById('newFileModal');
+    if (m){ m.classList.add('show'); return; }
+    // 모달 없으면 confirm 2단계 폴백
+    if (confirm('현재 작업을 저장할까요? (확인=저장 후 새 파일 / 취소=저장 안 함)')){
+      saveProject(); doNewFileReset();
+    } else if (confirm('저장하지 않고 새 파일로 시작할까요?')){
+      doNewFileReset();
+    }
+    return;
+  }
+  doNewFileReset();
+}
 const btnNewFile = document.getElementById('btnNewFile');
 if (btnNewFile) btnNewFile.addEventListener('click', newFile);
+// 새 파일 모달 버튼들
+(function(){
+  const m = document.getElementById('newFileModal');
+  if (!m) return;
+  const close = () => m.classList.remove('show');
+  const bSave = document.getElementById('btnNewFileSave');
+  const bSkip = document.getElementById('btnNewFileSkip');
+  const bCancel = document.getElementById('btnNewFileCancel');
+  if (bSave) bSave.addEventListener('click', () => { close(); saveProject(); doNewFileReset(); });
+  if (bSkip) bSkip.addEventListener('click', () => { close(); doNewFileReset(); });
+  if (bCancel) bCancel.addEventListener('click', close);
+  m.addEventListener('click', e => { if (e.target === m) close(); });
+})();
 
 
 // 저장

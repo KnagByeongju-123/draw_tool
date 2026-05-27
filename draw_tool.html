@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.78</title>
+<title>도면 작도기 Rev.16.80</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.78</h1>
+  <h1>📐 도면 작도기 Rev.16.80</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -1179,6 +1179,7 @@
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 좌 지 110 130</b></td><td style="padding:4px 8px;">현재점에서 지름차 (130−110)/2 만큼 방향으로 독립 점</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>선 좌 지 110 130</b></td><td style="padding:4px 8px;">지름차 (130−110)/2 = 10mm 만큼 좌측으로 선 긋기 (우 지도 동일, =좌 지)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>절교 9 10 3 수직</b></td><td style="padding:4px 8px;">9→10 연장선이 3번 점을 지나는 <b>수직선</b>(세로)과 만나는 점까지. <b>3 수평</b>=수평선(가로)과 만나는 점까지. 끝점 번호부여</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>절교 1 하 수평 0</b></td><td style="padding:4px 8px;">1번에서 방향(상/하/좌/우)으로 직선을 긋고 0번 점의 <b>수평선</b>(또는 수직)과 만나는 점까지. 예: 1번 아래로 내려 0번 높이까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>절각 3 45 5 수직</b></td><td style="padding:4px 8px;">3번서 45° 연장선이 5번 점을 지나는 <b>수직선</b>과 만나는 점까지. <b>5 수평</b>=수평선과 만나는 점까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>호 N R 시계 각 45</b></td><td style="padding:4px 8px;">N번 중심, 반지름 R, 시계방향 45도 호. 기준점↔중심은 점선 표시</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>호 N R 시계 교점</b></td><td style="padding:4px 8px;">N번 중심, 반지름 R 호를 시계/반시계로 돌다 첫 교점까지</td></tr>
@@ -1206,6 +1207,21 @@
 
     <div class="actions" style="border-top:1px solid #444; padding-top:12px; margin-top:12px; flex:0 0 auto;">
       <button id="btnHelpClose">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rev.16.79: 새 파일 확인 모달 -->
+<div class="modal-overlay" id="newFileModal">
+  <div class="modal" style="max-width:420px;">
+    <h3>📄 새 파일</h3>
+    <div style="font-size:13px; color:#ccc; line-height:1.6; margin-bottom:8px;">
+      현재 작업한 내용이 있습니다.<br>새 파일로 시작하기 전에 저장할까요?
+    </div>
+    <div class="actions" style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+      <button id="btnNewFileCancel" style="background:#444;">취소</button>
+      <button id="btnNewFileSkip" style="background:#7a3030;">저장 안 함</button>
+      <button id="btnNewFileSave" style="background:#2a6e2a;">저장 후 새 파일</button>
     </div>
   </div>
 </div>
@@ -1374,11 +1390,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1678"></script>
+<script src="draw_tool_core.js?v=1680"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1678"></script>
+<script src="draw_tool_core2.js?v=1680"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1678"></script>
+<script src="draw_tool_tools.js?v=1680"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

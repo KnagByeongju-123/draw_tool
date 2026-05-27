@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.78  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.80  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -599,6 +599,45 @@ function tryPenCommand(cmdStr){
   // Rev.16.65: 절교(절대교점) - 절교 3 4 x0 / 절교 3 4 y3 (대소문자 무관)
   //   절교 3 4 x0  → 3→4 방향 직선을 X=0 좌표까지 연장 (선 없으면 새 선 생성)
   //   치수 불명확하고 어디까지 그을지 절대좌표로 지정할 때.
+  // Rev.16.80: 절교 1 하 수평 0 - 1번에서 방향(상/하/좌/우)으로 직선을 긋고,
+  //   0번 점을 지나는 수평선(또는 수직선)과 만나는 지점까지. (점+방향+수평/수직+기준점번호)
+  if (toks[0] === '절교' && parsePenIdx(toks[1]) != null
+      && ['상','하','좌','우','U','D','L','R'].includes(toks[2])){
+    const si = parsePenIdx(toks[1]);
+    if (!penPoints[si]){ document.getElementById('statusHint').textContent=`절교: ${toks[1]}번 점이 없습니다`; return true; }
+    const d = toks[2];
+    let ux=0, uy=0;
+    if (d==='우'||d==='R') ux=1; else if (d==='좌'||d==='L') ux=-1;
+    else if (d==='상'||d==='U') uy=-1; else if (d==='하'||d==='D') uy=1;   // 화면 위=Y감소
+    const refIdx = parsePenIdx((toks[4]||'').replace(/^점/,''));
+    if (refIdx == null || !penPoints[refIdx]){
+      document.getElementById('statusHint').textContent = '절교: 절교 1 하 수평 0 형식 (점+방향+수평/수직+기준점)';
+      return true;
+    }
+    const T = penPoints[refIdx], S = penPoints[si];
+    const isVert = (toks[3]==='수직' || (toks[3]||'').toUpperCase()==='V');
+    const isHoriz = (toks[3]==='수평' || (toks[3]||'').toUpperCase()==='H');
+    let nx, ny, lbl;
+    if (isHoriz){
+      // 기준점의 수평선(Y=T.y)과 방향선의 교점
+      if (Math.abs(uy) < 1e-6){ document.getElementById('statusHint').textContent='절교: 좌/우 방향은 수평선과 안 만남(평행)'; return true; }
+      const t = (T.y - S.y) / uy;
+      nx = S.x + ux*t; ny = S.y + uy*t; lbl = `${d}→점${refIdx} 수평선`;
+    } else if (isVert){
+      // 기준점의 수직선(X=T.x)과 방향선의 교점
+      if (Math.abs(ux) < 1e-6){ document.getElementById('statusHint').textContent='절교: 상/하 방향은 수직선과 안 만남(평행)'; return true; }
+      const t = (T.x - S.x) / ux;
+      nx = S.x + ux*t; ny = S.y + uy*t; lbl = `${d}→점${refIdx} 수직선`;
+    } else {
+      document.getElementById('statusHint').textContent = '절교: 수평 또는 수직을 지정하세요 (절교 1 하 수평 0)';
+      return true;
+    }
+    penAddLine(S.x, S.y, nx, ny);
+    const ne = penAddPoint(nx, ny);
+    penFinish(`↦ P${si} ${lbl}까지 연장 → P${ne}`);
+    return true;
+  }
+
   if (toks[0] === '절교' && parsePenIdx(toks[1]) != null && parsePenIdx(toks[2]) != null){
     const i1 = parsePenIdx(toks[1]), i2 = parsePenIdx(toks[2]);
     if (!penPoints[i1] || !penPoints[i2]) return false;

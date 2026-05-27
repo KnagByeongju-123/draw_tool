@@ -5069,6 +5069,31 @@ function runBreakAllIntersections() {
     }
   }
 
+  // Rev.16.98: 원-원 / 원-호 / 호-호 교차 → 각자 _angs에 교점 각도 수집 후 분할
+  for (let i=0;i<circs.length;i++){
+    for (let j=i+1;j<circs.length;j++){
+      const c1=circs[i], c2=circs[j];
+      const dxc=c2.cx-c1.cx, dyc=c2.cy-c1.cy;
+      const dC=Math.hypot(dxc,dyc);
+      if (dC<1e-6) continue;                 // 동심원
+      if (dC > c1.r+c2.r+1e-6) continue;     // 너무 멀리 떨어짐
+      if (dC < Math.abs(c1.r-c2.r)-1e-6) continue; // 한쪽이 다른쪽 내부
+      // 두 원 교점 계산
+      const a=(c1.r*c1.r - c2.r*c2.r + dC*dC)/(2*dC);
+      const h2=c1.r*c1.r - a*a;
+      const h=h2>0?Math.sqrt(h2):0;
+      const xm=c1.cx + a*dxc/dC, ym=c1.cy + a*dyc/dC;
+      const rx=-dyc*(h/dC), ry=dxc*(h/dC);
+      const pts = (h<1e-6) ? [{x:xm,y:ym}] : [{x:xm+rx,y:ym+ry},{x:xm-rx,y:ym-ry}];
+      for (const P of pts){
+        // 호일 경우 유효 범위 안에 있는 교점만 채택
+        if (onArc(c1,P.x,P.y)){ c1._angs.push(Math.atan2(P.y-c1.cy,P.x-c1.cx)); }
+        if (onArc(c2,P.x,P.y)){ c2._angs.push(Math.atan2(P.y-c2.cy,P.x-c2.cx)); }
+        intersectionCount++;
+      }
+    }
+  }
+
   if (intersectionCount === 0) {
     alert('교차점이 발견되지 않았습니다.');
     return;

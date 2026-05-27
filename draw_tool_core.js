@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.17.8  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.17.9  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -9484,17 +9484,22 @@ document.getElementById('btnClearAll').addEventListener('click', () => {
 function doNewFileReset(){
   redoStack = []; shapes = []; fills = []; selectedIds.clear();
   rotAxis = null;
+  // Rev.17.9: 새 파일 시 텍스트 모드면 원점 대기 상태로 다시 둠 (다시 원점 클릭 가능하게)
+  const inTextMode = (typeof penPickMode !== 'undefined' && penPickMode);
   if (typeof penPoints !== 'undefined') penPoints = [];
   if (typeof penLabelIds !== 'undefined') penLabelIds = [];
   if (typeof penCur !== 'undefined') penCur = -1;
   if (typeof penPickFirst !== 'undefined') penPickFirst = -1;
   if (typeof penOriginPx !== 'undefined') penOriginPx = null;
-  if (typeof penAwaitOrigin !== 'undefined') penAwaitOrigin = false;
+  if (typeof penAwaitOrigin !== 'undefined') penAwaitOrigin = inTextMode;
   shapeIdSeq = 0;
   pushHistory();
   redrawFills(); redrawDraw(); updateCount(); updateSelStat();
   if (typeof updateAxisStatus === 'function') updateAxisStatus();
-  cmdLog('📄 새 파일 — 전체 초기화 완료', 'system');
+  if (inTextMode){
+    document.getElementById('statusHint').textContent = '📄 새 파일 — 화면 클릭으로 원점을 다시 지정하세요';
+  }
+  cmdLog('📄 새 파일 — 전체 초기화 완료' + (inTextMode ? ' (텍스트 모드: 원점 클릭 대기)' : ''), 'system');
 }
 function newFile(){
   if (shapes.length || fills.length){

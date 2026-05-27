@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.93  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.94  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -4967,14 +4967,46 @@ function runBreakAllIntersections() {
   } else {
     targets = shapes.filter(s => s.type === 'line');
   }
-  if (targets.length < 2) {
-    alert('교차점 분할은 2개 이상의 선이 필요합니다.\n선들을 선택한 후 다시 실행하세요.\n(선택이 없으면 전체 선 대상)');
+  // Rev.16.94: 원/호도 교차 대상에 포함 (직선을 원 교점에서 분할)
+  let circTargets;
+  if (selectedIds.size > 0) {
+    circTargets = shapes.filter(s => (s.type==='circle'||s.type==='arc') && selectedIds.has(s.id));
+  } else {
+    circTargets = shapes.filter(s => s.type==='circle'||s.type==='arc');
+  }
+  // 선택이 있을 때 원만 선택했어도 전체 선과 교차 검사할 수 있게: 선이 부족하면 전체 선 사용
+  if (selectedIds.size > 0 && targets.length < 2 && circTargets.length > 0){
+    targets = shapes.filter(s => s.type === 'line');
+  }
+  if (targets.length + circTargets.length < 2) {
+    alert('교차점 분할은 선/원이 2개 이상 필요합니다.\n선들을 선택한 후 다시 실행하세요.\n(선택이 없으면 전체 대상)');
     return;
   }
+  // 원/호 중심·반지름 추출
+  const circs = circTargets.map(s => s.type==='circle'
+    ? { cx:s.p1.x, cy:s.p1.y, r:Math.hypot(s.p2.x-s.p1.x, s.p2.y-s.p1.y) }
+    : { cx:s.cx, cy:s.cy, r:s.r, arc:true, a0:s.startAngle, a1:s.endAngle });
+  const onArc = (c,x,y) => {
+    if (!c.arc) return true;
+    if (c.a0==null||c.a1==null) return true;
+    const norm=a=>{while(a<0)a+=2*Math.PI;while(a>=2*Math.PI)a-=2*Math.PI;return a;};
+    let ang=norm(Math.atan2(y-c.cy,x-c.cx)), a0=norm(c.a0), a1=norm(c.a1);
+    if(a0<=a1)return ang>=a0-1e-3&&ang<=a1+1e-3;
+    return ang>=a0-1e-3||ang<=a1+1e-3;
+  };
+  const lineCircleTs = (L,c) => {
+    const dx=L.p2.x-L.p1.x, dy=L.p2.y-L.p1.y;
+    const fx=L.p1.x-c.cx, fy=L.p1.y-c.cy;
+    const A=dx*dx+dy*dy, B=2*(fx*dx+fy*dy), C=fx*fx+fy*fy-c.r*c.r;
+    const disc=B*B-4*A*C; const ts=[];
+    if(disc<0||A<1e-9)return ts; const sq=Math.sqrt(disc);
+    [(-B-sq)/(2*A),(-B+sq)/(2*A)].forEach(t=>{
+      if(t>0.001&&t<0.999){ const x=L.p1.x+t*dx,y=L.p1.y+t*dy; if(onArc(c,x,y))ts.push(t); }
+    });
+    return ts;
+  };
 
-  // 각 line에 대해 다른 line과의 교차점 t 값을 수집
-  // t는 0~1 사이 (선분 내부)
-  const cutMap = new Map(); // line.id → [t1, t2, ...] (정렬 전)
+  const cutMap = new Map();
   for (const L of targets) cutMap.set(L.id, []);
 
   let intersectionCount = 0;
@@ -4983,13 +5015,17 @@ function runBreakAllIntersections() {
       const A = targets[i], B = targets[j];
       const ix = segmentSegmentIntersection(A.p1, A.p2, B.p1, B.p2);
       if (!ix) continue;
-      // t 계산
       const tA = paramOnSegment(ix, A.p1, A.p2);
       const tB = paramOnSegment(ix, B.p1, B.p2);
-      // 끝점 너무 가까우면 제외 (이미 끝나는 점)
       if (tA > 0.001 && tA < 0.999) cutMap.get(A.id).push(tA);
       if (tB > 0.001 && tB < 0.999) cutMap.get(B.id).push(tB);
       intersectionCount++;
+    }
+  }
+  // 직선-원 교차: 직선을 원 교점에서 분할
+  for (const L of targets) {
+    for (const c of circs) {
+      lineCircleTs(L, c).forEach(t => { cutMap.get(L.id).push(t); intersectionCount++; });
     }
   }
 

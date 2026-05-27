@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.17.7  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.17.8  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1731,7 +1731,7 @@ function tryDimCommand(cmdStr){
   // 패널은 늦게 생길 수도 있으니, DOM이 준비된 다음 한 번 시도하고
   // 표시될 때 다시 한 번 확인 (display 변경 시 init 보장)
   function applyAll(){
-    ['lineDimPop','baseLinePop','shapePropPanel'].forEach(makeDraggable);
+    ['lineDimPop','baseLinePop','shapePropPanel','moveDeltaPanel'].forEach(makeDraggable);
   }
   if (document.readyState === 'loading'){
     document.addEventListener('DOMContentLoaded', applyAll);

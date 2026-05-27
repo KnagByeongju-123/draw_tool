@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.60  최신본 — 명령어 (점·선·지름·거리두기·연장·기준점·방향교점·선택방향교점[선택 상 교점]·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.61  최신본 — 명령어 (점·선·지름·거리두기·연장·기준점[X Y/지/방향거리]·방향교점·선택방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -605,6 +605,27 @@ function tryPenCommand(cmdStr){
     const p = penMmToPx(xmm, ymm);
     penAddPoint(p.x, p.y);
     penFinish(`✎ 시작점 P0 = (${xmm}, ${ymm})mm`);
+    return true;
+  }
+
+  // Rev.16.61: 기준 상 50 - 현재 기준점에서 방향으로 거리만큼 떨어진 곳에 새 기준점(앵커)
+  if (toks[0] === '기준' && ['상','하','좌','우','U','D','L','R'].includes(toks[1]) && toks.length >= 3){
+    if (penCur < 0 || !penPoints[penCur]){
+      document.getElementById('statusHint').textContent = '⚠ 먼저 기준점을 잡으세요 (기준 X Y 또는 빈 곳 클릭)';
+      return true;
+    }
+    const bdir = toks[1];
+    const bdist = evalExpr(toks[2]);
+    if (!isFinite(bdist)) return false;
+    const base = penPoints[penCur];
+    const dpx = bdist/mmPerPixel;
+    let nx = base.x, ny = base.y;
+    if (bdir==='우'||bdir==='R') nx += dpx;
+    else if (bdir==='좌'||bdir==='L') nx -= dpx;
+    else if (bdir==='상'||bdir==='U') ny -= dpx;   // 화면 위=Y감소
+    else if (bdir==='하'||bdir==='D') ny += dpx;
+    penAddAnchor(nx, ny);
+    penFinish(`✛ 기준점 ${penCur} = 이전 기준점에서 ${bdir} ${bdist}mm`);
     return true;
   }
 

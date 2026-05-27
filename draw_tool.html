@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.87</title>
+<title>도면 작도기 Rev.16.88</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.87</h1>
+  <h1>📐 도면 작도기 Rev.16.88</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -570,6 +570,7 @@
     <span class="ts-sep"></span>
     <button id="headerBtnPoint" class="ts-btn" title="버텍스(점) 찍기 - 좌표를 클릭해 점 1개 생성"><span class="ico">•</span><span class="lbl">점</span></button>
     <button id="headerBtnPenInput" class="ts-btn" title="텍스트입력 한붓그리기: 점/좌/우/상/하/각/호 명령으로 이어그리기. 각 점에 0,1,2... 자동 번호. 점 마우스 클릭으로 선택·연결"><span class="ico">⌨</span><span class="lbl">텍스트입력</span></button>
+    <button id="headerBtnCmdPanel" class="ts-btn" title="명령 키보드: 명령 버튼+숫자판을 클릭으로 입력·실행"><span class="ico">🎹</span><span class="lbl">명령판</span></button>
     <button id="headerBtnConnect" class="ts-btn" title="연결(F) - 두 점을 클릭하면 선 1개 생성" style="display:none"><span class="ico">🔗</span><span class="lbl">연결</span><span class="sc">F</span></button>
     <button id="headerBtnExtrude" class="ts-btn" title="연장(Extrude/E) - 선택한 점/선을 드래그해서 선/면 만들기" style="display:none"><span class="ico">⬄</span><span class="lbl">연장</span></button>
     <button id="headerBtnOffsetTwin" class="ts-btn" title="거리두기 - 클릭 후 기준 선을 클릭하고, 마우스를 좌/우로 옮겨 그 쪽에 평행선 1개 생성 (Esc=취소)"><span class="ico">⫴</span><span class="lbl">거리두기</span></button>
@@ -1106,6 +1107,45 @@
 </div>
 
 <!-- 도움말 모달 (Rev.9.2) -->
+<!-- Rev.16.88: 명령 패널 (사용자 정의 키보드) - 우측 떠있는 패널 -->
+<div id="cmdPanel" style="display:none; position:fixed; top:120px; right:16px; width:300px; max-height:80vh; background:#1e1e1e; border:1px solid #555; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.6); z-index:9000; font-size:12px; color:#ddd; flex-direction:column;">
+  <div id="cmdPanelHead" style="cursor:move; background:#2a2a2a; padding:8px 10px; border-radius:8px 8px 0 0; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #444;">
+    <b style="color:#5bc8e8;">⌨ 명령 키보드</b>
+    <span id="cmdPanelClose" style="cursor:pointer; color:#aaa; font-size:16px; padding:0 4px;">✕</span>
+  </div>
+  <div style="padding:8px; overflow-y:auto; flex:1; min-height:0;">
+    <!-- 탭 -->
+    <div id="cmdPanelTabs" style="display:flex; flex-wrap:wrap; gap:3px; margin-bottom:6px;"></div>
+    <!-- 명령 버튼들 -->
+    <div id="cmdPanelBtns" style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; min-height:40px;"></div>
+    <!-- 예문 안내 -->
+    <div id="cmdPanelHint" style="background:#252b30; border-radius:4px; padding:6px 8px; color:#9fd; font-size:11px; min-height:30px; margin-bottom:8px; line-height:1.4;">명령 버튼을 누르면 사용법이 여기에 표시됩니다.</div>
+    <!-- 현재 입력 미리보기 -->
+    <input type="text" id="cmdPanelInput" readonly style="width:100%; box-sizing:border-box; background:#000; color:#fff; border:1px solid #555; border-radius:4px; padding:6px; font-family:monospace; font-size:13px; margin-bottom:8px;" placeholder="여기에 명령이 조립됩니다">
+    <!-- 숫자판 -->
+    <div id="cmdPanelKeys" style="display:grid; grid-template-columns:repeat(4,1fr); gap:4px;">
+      <button class="cpk" data-k="7">7</button><button class="cpk" data-k="8">8</button><button class="cpk" data-k="9">9</button><button class="cpk" data-k="좌">좌</button>
+      <button class="cpk" data-k="4">4</button><button class="cpk" data-k="5">5</button><button class="cpk" data-k="6">6</button><button class="cpk" data-k="우">우</button>
+      <button class="cpk" data-k="1">1</button><button class="cpk" data-k="2">2</button><button class="cpk" data-k="3">3</button><button class="cpk" data-k="상">상</button>
+      <button class="cpk" data-k="0">0</button><button class="cpk" data-k=".">.</button><button class="cpk" data-k=" ">␣</button><button class="cpk" data-k="하">하</button>
+      <button class="cpk" data-k="수직">수직</button><button class="cpk" data-k="수평">수평</button><button class="cpk" data-k="지">지</button><button class="cpk" data-k="교점">교점</button>
+    </div>
+    <div style="display:flex; gap:4px; margin-top:6px;">
+      <button id="cmdPanelBack" style="flex:1; background:#7a3030; color:#fff; border:none; border-radius:4px; padding:8px; cursor:pointer;">⌫ 지움</button>
+      <button id="cmdPanelClear" style="flex:1; background:#444; color:#fff; border:none; border-radius:4px; padding:8px; cursor:pointer;">전체삭제</button>
+      <button id="cmdPanelRun" style="flex:2; background:#2a6e2a; color:#fff; border:none; border-radius:4px; padding:8px; cursor:pointer; font-weight:bold;">▶ 실행</button>
+    </div>
+  </div>
+</div>
+<style>
+  #cmdPanelKeys .cpk { background:#333; color:#fff; border:1px solid #555; border-radius:4px; padding:9px 0; cursor:pointer; font-size:13px; }
+  #cmdPanelKeys .cpk:hover { background:#4a4a4a; }
+  #cmdPanelBtns .cmd-pbtn { background:#2d3a45; color:#cfe; border:1px solid #456; border-radius:4px; padding:5px 8px; cursor:pointer; font-size:11px; }
+  #cmdPanelBtns .cmd-pbtn:hover { background:#3d4a55; }
+  #cmdPanelTabs .cmd-ptab { background:#2a2a2a; color:#aaa; border:1px solid #444; border-radius:4px; padding:3px 7px; cursor:pointer; font-size:11px; }
+  #cmdPanelTabs .cmd-ptab.active { background:#3a3a3a; color:#fff; border-bottom:2px solid #f39c12; }
+</style>
+
 <div class="modal-overlay" id="helpModal">
   <div class="modal" style="max-width:900px; max-height:88vh; overflow:hidden; display:flex; flex-direction:column;">
     <h3 style="flex:0 0 auto;">❓ 도움말 - 버튼 · 단축키 · 명령어</h3>
@@ -1397,11 +1437,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1687"></script>
+<script src="draw_tool_core.js?v=1688"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1687"></script>
+<script src="draw_tool_core2.js?v=1688"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1687"></script>
+<script src="draw_tool_tools.js?v=1688"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

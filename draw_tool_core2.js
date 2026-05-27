@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.87  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.88  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1241,3 +1241,119 @@ function tryDimCommand(cmdStr){
   return false;
 }
 
+
+// ===== Rev.16.88: 명령 키보드 패널 =====
+(function(){
+  // 카테고리별 명령 정의: {라벨, 채울 틀, 예문}
+  const CMD_CATS = {
+    '점': [
+      { l:'점 X,Y', t:'점 ', ex:'점 -100,100 → 좌표(mm)에 점' },
+      { l:'점 N', t:'점 ', ex:'점 5 → 5번 점 선택' },
+      { l:'점 상', t:'점 상 ', ex:'점 상 2.5 → 현재점서 위 2.5mm 독립점 (상/하/좌/우)' },
+      { l:'점 좌 지', t:'점 좌 지 ', ex:'점 좌 지 110 130 → 지름차/2 만큼 좌측 독립점' },
+    ],
+    '선': [
+      { l:'우/좌/상/하', t:'우 ', ex:'우 50 → 오른쪽 50mm 선 (우/좌/상/하)' },
+      { l:'선 방향 교점', t:'선 좌 교점', ex:'선 좌 교점 → 좌로 첫 교점까지 선' },
+      { l:'선 좌 지', t:'선 좌 지 ', ex:'선 좌 지 110 130 → 지름차/2 좌측 선' },
+      { l:'선 상 거리', t:'선 상 ', ex:'선 상 3.7 → 위 3.7mm 선' },
+      { l:'연결', t:'연결 ', ex:'연결 1 4 → 1번·4번 직선 연결' },
+      { l:'각 A 거리', t:'각 ', ex:'각 45 100 / 각 45 교점' },
+      { l:'호', t:'호 ', ex:'호 2 3 시계 각 45 / 호 2 3 시계 교점' },
+    ],
+    '기준': [
+      { l:'기준 X Y', t:'기준 ', ex:'기준 -50 30 → 빈공간 기준점' },
+      { l:'기준 지', t:'기준 지 ', ex:'기준 지 130 110 → 지름 좌측반지름,Y' },
+      { l:'기준 방향', t:'기준 상 ', ex:'기준 상 50 / 기준 좌 지 79.44 85.7' },
+    ],
+    '연장/절교': [
+      { l:'연장', t:'연장 ', ex:'연장 1 2 30 / 교점 / X 50 / Y 30' },
+      { l:'절교 두점', t:'절교 ', ex:'절교 9 10 3 수직 / 수평' },
+      { l:'절교 방향', t:'절교 ', ex:'절교 1 하 수평 0 → 1서 아래로 0번 수평선까지' },
+      { l:'절각', t:'절각 ', ex:'절각 3 45 5 수직 → 3서 45도, 5번 수직선까지' },
+    ],
+    '편집': [
+      { l:'이동', t:'이동 ', ex:'이동 상 3 (현재점) / 이동 1 우 10' },
+      { l:'거리두기', t:'거리두기 ', ex:'거리두기 2 3 좌 0.6 → 평행복제' },
+      { l:'삭제', t:'삭제 ', ex:'삭제 1 2 (선) / 삭제 3 (점)' },
+      { l:'닫기', t:'닫기', ex:'닫기 → 현재점→0번 선' },
+      { l:'백(취소)', t:'백', ex:'백 → 직전 1회 취소' },
+      { l:'교점', t:'교점', ex:'교점 → 모든 교차점 번호부여' },
+    ],
+  };
+  const panel = document.getElementById('cmdPanel');
+  const ci = document.getElementById('cmdInput');
+  const pInput = document.getElementById('cmdPanelInput');
+  const tabsEl = document.getElementById('cmdPanelTabs');
+  const btnsEl = document.getElementById('cmdPanelBtns');
+  const hintEl = document.getElementById('cmdPanelHint');
+  if (!panel || !ci) return;
+
+  function setBuf(v){ pInput.value = v; ci.value = v; }
+  function appendBuf(s){ setBuf(pInput.value + s); }
+
+  function renderTab(cat){
+    btnsEl.innerHTML = '';
+    (CMD_CATS[cat]||[]).forEach(c => {
+      const b = document.createElement('button');
+      b.className = 'cmd-pbtn'; b.textContent = c.l;
+      b.addEventListener('click', () => {
+        setBuf(c.t);
+        hintEl.textContent = '📝 ' + c.ex;
+        ci.focus();
+      });
+      btnsEl.appendChild(b);
+    });
+    tabsEl.querySelectorAll('.cmd-ptab').forEach(t => t.classList.toggle('active', t.dataset.cat===cat));
+  }
+  // 탭 생성
+  Object.keys(CMD_CATS).forEach((cat,i) => {
+    const t = document.createElement('button');
+    t.className = 'cmd-ptab' + (i===0?' active':''); t.textContent = cat; t.dataset.cat = cat;
+    t.addEventListener('click', () => renderTab(cat));
+    tabsEl.appendChild(t);
+  });
+  renderTab(Object.keys(CMD_CATS)[0]);
+
+  // 숫자판
+  document.querySelectorAll('#cmdPanelKeys .cpk').forEach(k => {
+    k.addEventListener('click', () => {
+      let v = k.dataset.k;
+      // 방향/키워드는 앞뒤 공백 보장
+      if (['좌','우','상','하','수직','수평','지','교점'].includes(v)){
+        if (pInput.value && !pInput.value.endsWith(' ')) v = ' ' + v;
+        v = v + ' ';
+      }
+      appendBuf(v);
+      ci.focus();
+    });
+  });
+  document.getElementById('cmdPanelBack').addEventListener('click', () => setBuf(pInput.value.slice(0,-1)));
+  document.getElementById('cmdPanelClear').addEventListener('click', () => setBuf(''));
+  document.getElementById('cmdPanelRun').addEventListener('click', () => {
+    const v = pInput.value.trim();
+    if (!v) return;
+    if (typeof executeCommand === 'function') executeCommand(v);
+    setBuf(''); ci.value = '';
+  });
+
+  // 열기/닫기
+  const openBtn = document.getElementById('headerBtnCmdPanel');
+  if (openBtn) openBtn.addEventListener('click', () => {
+    panel.style.display = (panel.style.display==='none') ? 'flex' : 'none';
+  });
+  document.getElementById('cmdPanelClose').addEventListener('click', () => { panel.style.display='none'; });
+
+  // 드래그 이동
+  const head = document.getElementById('cmdPanelHead');
+  let dragging=false, ox=0, oy=0;
+  head.addEventListener('mousedown', e => {
+    dragging=true; const r=panel.getBoundingClientRect();
+    ox=e.clientX-r.left; oy=e.clientY-r.top; e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if(!dragging) return;
+    panel.style.left=(e.clientX-ox)+'px'; panel.style.top=(e.clientY-oy)+'px'; panel.style.right='auto';
+  });
+  window.addEventListener('mouseup', () => { dragging=false; });
+})();

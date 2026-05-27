@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.17.2  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.17.6  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1573,4 +1573,288 @@ function tryDimCommand(cmdStr){
     panel.style.left=(e.clientX-ox)+'px'; panel.style.top=(e.clientY-oy)+'px'; panel.style.right='auto';
   });
   window.addEventListener('mouseup', () => { dragging=false; });
+})();
+
+// ===== Rev.17.5: 명령창 통합 - .txt 한 줄씩 명령창에 자동 채움 (이전 스크립트 패널 대체) =====
+(function(){
+  const loadBtn = document.getElementById('cmdScriptLoad');
+  const nextBtn = document.getElementById('cmdScriptNext');
+  const progEl = document.getElementById('cmdScriptProg');
+  const ci = document.getElementById('cmdInput');
+  if (!loadBtn || !ci) return;
+
+  let lines = [];   // 줄 배열 (원본 그대로, 빈 줄/주석 포함)
+  let idx = 0;      // 다음에 채울 줄 인덱스
+  let execCount = 0;
+  let totalExec = 0;   // 주석/빈 줄 제외 총 실행 명령 수
+
+  function updateProg(){
+    if (lines.length === 0){
+      progEl.style.display = 'none'; nextBtn.style.display = 'none'; return;
+    }
+    progEl.style.display = ''; nextBtn.style.display = '';
+    progEl.textContent = `${execCount}/${totalExec}`;
+    progEl.title = `실행 ${execCount}/${totalExec} 줄 · 다음 줄 ${idx+1}/${lines.length}`;
+  }
+  function isExec(s){
+    const t = (s||'').trim();
+    return !(t === '' || t.startsWith('#') || t.startsWith('//'));
+  }
+  function fillNext(){
+    // 다음 실행 가능한 줄까지 진행하면서 명령창에 채움. 주석/빈 줄은 건너뜀.
+    while (idx < lines.length && !isExec(lines[idx])){
+      idx++;
+    }
+    if (idx >= lines.length){
+      ci.value = '';
+      ci.placeholder = `✓ 스크립트 완료 (${execCount}줄 실행) — 새로 불러오려면 📁 .txt`;
+      updateProg();
+      document.getElementById('statusHint').textContent = `📜 스크립트 ${execCount}줄 모두 실행 완료`;
+      return false;
+    }
+    ci.value = lines[idx].trim();
+    ci.focus();
+    // 커서를 줄 끝으로
+    setTimeout(() => { try{ ci.setSelectionRange(ci.value.length, ci.value.length);}catch(e){} }, 0);
+    updateProg();
+    document.getElementById('statusHint').textContent = `📜 ${idx+1}/${lines.length} 줄: ${ci.value.slice(0,40)}${ci.value.length>40?'…':''} (Enter로 실행 → 다음 자동 채움)`;
+    return true;
+  }
+  function loadText(text, srcName){
+    lines = text.replace(/\r\n/g, '\n').split('\n');
+    totalExec = lines.filter(isExec).length;
+    idx = 0; execCount = 0;
+    if (totalExec === 0){
+      alert('스크립트에 실행할 명령이 없습니다 (주석/빈 줄만 있음).');
+      lines = []; updateProg(); return;
+    }
+    fillNext();
+    document.getElementById('statusHint').textContent = `📜 ${srcName||'스크립트'} 불러옴 — 총 ${totalExec}개 명령. Enter로 한 줄씩 실행`;
+  }
+
+  // 파일 불러오기
+  loadBtn.addEventListener('click', () => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.txt,text/plain';
+    inp.onchange = (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = ev => loadText(ev.target.result, f.name);
+      r.readAsText(f, 'utf-8');
+    };
+    inp.click();
+  });
+
+  // 다음 줄 (현재 줄 건너뛰기)
+  nextBtn.addEventListener('click', () => {
+    if (lines.length === 0) return;
+    idx++;   // 현재 줄은 안 실행하고 건너뜀
+    fillNext();
+  });
+
+  // 명령창에서 Enter로 실행 후 자동으로 다음 줄 채우기
+  // (cmdInput keydown 'Enter' 처리는 core.js에서 executeCommand 호출 + value=''. 그 직후 자동 채움)
+  ci.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key !== 'Enter') return;
+    if (lines.length === 0) return;   // 스크립트 없으면 그대로
+    // core의 keydown 핸들러가 먼저 executeCommand 실행 후 value를 비움. 그 다음 우리가 채움.
+    setTimeout(() => {
+      // 방금 실행한 줄이 현재 idx 줄이라고 가정 (사용자가 그대로 Enter)
+      execCount++;
+      idx++;
+      fillNext();
+    }, 0);
+  });
+})();
+// ===== Rev.17.4: 도형 팝업/패널 드래그 이동 (lineDimPop, baseLinePop, shapePropPanel) =====
+(function(){
+  function makeDraggable(elId){
+    const el = document.getElementById(elId);
+    if (!el) return;
+    // 시각적 힌트(상단 살짝 강조)와 커서
+    if (!el.dataset.dragInit){
+      el.dataset.dragInit = '1';
+      const hint = document.createElement('div');
+      hint.style.cssText = 'position:absolute; left:0; right:0; top:0; height:6px; cursor:move; background:rgba(255,255,255,0.08); border-radius:6px 6px 0 0;';
+      hint.title = '드래그하여 이동';
+      // 패널이 relative position 아닐 수 있으니, 절대 핸들이 잘 보이게 패딩-상단을 살짝
+      if (getComputedStyle(el).position === 'static') el.style.position = 'fixed';
+      el.insertBefore(hint, el.firstChild);
+      // 패딩 상단 약간 늘려 핸들 안 가리게
+      const oldPadTop = parseInt(getComputedStyle(el).paddingTop) || 10;
+      el.style.paddingTop = (oldPadTop + 4) + 'px';
+    }
+    let dragging=false, ox=0, oy=0;
+    // 헤더 핸들(맨 위 6px)을 잡았을 때 + 패널 빈 공간(input/button/select/textarea 외)을 잡았을 때 드래그
+    el.addEventListener('mousedown', e => {
+      const t = e.target;
+      const isInteractive = t.closest('input, button, select, textarea, label[for], a');
+      const rect = el.getBoundingClientRect();
+      const onTopBar = (e.clientY - rect.top) <= 10;   // 상단 10px 영역
+      if (!onTopBar && isInteractive) return;
+      dragging = true;
+      ox = e.clientX - rect.left;
+      oy = e.clientY - rect.top;
+      el.style.right = 'auto';   // 좌표 left/top로 전환
+      el.style.bottom = 'auto';
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      let nx = e.clientX - ox, ny = e.clientY - oy;
+      // 화면 밖으로 너무 나가지 않게
+      const W = window.innerWidth, H = window.innerHeight;
+      const r = el.getBoundingClientRect();
+      nx = Math.max(-r.width+40, Math.min(W-40, nx));
+      ny = Math.max(0, Math.min(H-40, ny));
+      el.style.left = nx + 'px';
+      el.style.top = ny + 'px';
+    });
+    window.addEventListener('mouseup', () => { dragging=false; });
+  }
+  // 패널은 늦게 생길 수도 있으니, DOM이 준비된 다음 한 번 시도하고
+  // 표시될 때 다시 한 번 확인 (display 변경 시 init 보장)
+  function applyAll(){
+    ['lineDimPop','baseLinePop','shapePropPanel'].forEach(makeDraggable);
+  }
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', applyAll);
+  } else {
+    applyAll();
+  }
+})();
+
+// ===== Rev.17.6: AI 프롬프트 (도면→.txt 작도 스크립트 생성용) =====
+(function(){
+  const btn = document.getElementById('cmdAiPrompt');
+  const modal = document.getElementById('aiPromptModal');
+  const txt = document.getElementById('aiPromptText');
+  const copyBtn = document.getElementById('aiPromptCopy');
+  const closeBtn = document.getElementById('aiPromptClose');
+  const status = document.getElementById('aiPromptStatus');
+  if (!btn || !modal || !txt) return;
+
+  const PROMPT = `아래는 "도면 작도기" 웹 도구의 텍스트 명령 문법입니다.
+첨부한 도면 이미지를 분석해, 단면 윤곽을 따라가는 작도 명령 .txt를 만들어 주세요.
+
+[목적]
+씰·가스켓·O-링 등 단면 형상 도면을 텍스트 명령 시퀀스로 변환합니다.
+사람이 도면을 보고 한 줄씩 명령을 짜는 대신, AI가 도면을 보고 자동으로 명령 목록을 만들어 주는 것이 목표입니다.
+
+[좌표 시스템]
+- 단위: mm
+- 원점(0,0): 도면 우측 하단 (중심축 위 끝점). 사용자가 텍스트 모드 시작 후 마우스 클릭으로 지정합니다.
+- X축: 우측이 +, 좌측이 - (도면 좌측으로 갈수록 X 감소)
+- Y축: 위쪽이 +, 아래쪽이 - (도면 위로 갈수록 Y 증가)
+- 각도: 양의 X축이 0°, 반시계 방향이 +
+
+[출력 형식 규칙]
+- 한 줄에 한 명령
+- 주석은 # 으로 시작 (실행 안 됨)
+- 빈 줄 허용 (건너뜀)
+- 첫 부분에 도면 정보(제품명·치수 요약)를 # 주석으로 적기
+- 명령 순서는 단면 윤곽 흐름을 따라가는 순서 (보통 우측 하단 → 좌측 → 위 → 우측)
+- 끝에 "두께 1 N 양" (1번부터 마지막 점 N번까지 양쪽 평행) 추가
+
+[기본 명령]
+기준 X Y         원점 기준 (X,Y)mm 위치에 기준점 0번 (텍스트 모드 시작 직후 보통 "기준 0 0")
+우 N             현재점에서 우측 N mm 직선
+좌 N             현재점에서 좌측 N mm 직선
+상 N             현재점에서 위쪽 N mm 직선
+하 N             현재점에서 아래쪽 N mm 직선
+
+[방향 + 교점/기준]
+좌 교점          좌측으로 직진하다 첫 교점까지 (우/상/하도 동일)
+좌 지 D1 D2      좌측으로 (D1-D2)/2 mm 직선 (지름차 → 반지름차)  예: 좌 지 79.6 74.8 → 좌측 2.4mm
+선 좌 교점       위와 동일 (선 prefix는 선택)
+점 좌 N          현재점서 좌측 N mm에 독립 점 (선 안 그음)
+기준 좌 N        현재점서 좌측 N mm에 기준점
+
+[각도]
+각 A D           현재점에서 각도 A° 방향으로 D mm 선
+각 A 교점        그 방향으로 직진하다 첫 교점까지
+각 A 수평 V      그 방향으로 직진하다 원점 기준 Y=V 수평선까지
+각 A 수직 V      그 방향으로 직진하다 원점 기준 X=V 수직선까지
+
+[호(R)]
+호 i1 i2 시계 각 A      중심 i1번 점, 시작 i2번 점, 시계방향 A° 호
+호 i1 i2 반시계 각 A    반시계방향 A°
+호 i1 i2 시계 교점      시계 방향으로 직진하다 첫 교점까지 (반시계도 동일)
+
+[교점·절교]
+교점                    모든 선·원·호의 교차점에 번호 부여 (선-선, 선-원, 원-원)
+절교 9 10 3 수직        9→10 선을 3번 점의 수직선(X=3.x)까지 연장
+절교 9 10 3 수평        9→10 선을 3번 점의 수평선(Y=3.y)까지 연장
+절교 1 하 수평 0        1번 점에서 아래 방향이 0번 점의 수평선과 만나는 곳까지
+
+[편집·평행]
+연결 1 4                1번과 4번 점을 직선으로 연결
+이동 상 3               현재점을 위로 3mm 이동
+이동 1 우 10            1번 점을 우측 10mm 이동
+거리두기 2 3 좌 0.6     2→3 선을 진행 방향 좌측으로 0.6mm 평행 복제
+삭제 1 2                1-2번 선 삭제
+삭제 3                  3번 점 삭제
+닫기                    현재점을 0번 점으로 직선 연결 (단면 닫기)
+백                      직전 1회 취소
+
+[두께 (소재 두께 평행 복제) — 가장 중요]
+두께 1 5 좌             1~5번 경로(꺾인선·호 포함)를 거리두기 칸 두께만큼 좌측 평행
+두께 1 5 우             우측
+두께 1 5 양             좌우 양쪽 절반씩 (중심선 방식 — 가장 자연스러움)
+
+* "거리두기 칸"은 도구 상단의 두께 입력칸(기본 0.6 같은 값).
+* 두께 명령은 보통 .txt 마지막에 한 번 호출해 단면을 완성합니다.
+
+[작도 흐름 예시 — 단순 ㄷ자 단면]
+# 제품: 예시 단면
+# 외경=20mm, 내경=15mm, 깊이=3mm, 소재두께=0.6mm
+기준 0 0
+좌 2.5
+하 3
+좌 2.5
+상 3
+두께 1 4 양
+
+[중요한 작도 원칙]
+1. 도면의 단면 윤곽 중심선(소재 두께 한가운데)을 따라가는 게 가장 깔끔합니다. 마지막에 "두께 N 양"으로 양쪽 펼치면 단면 윤곽 두 줄이 자동 생성됩니다.
+2. 지름은 우측 기준(중심축에서의 거리)으로 표기되니, 원점이 우측 하단이면 "좌 지 D1 D2" 형식으로 반지름 차를 자연스럽게 쓸 수 있습니다.
+3. 호(R)는 중심점이 먼저 정의돼야 합니다. R0.4 모서리라면 그 호의 중심점을 점 번호로 잡은 뒤 "호 중심번호 시작번호 시계/반시계 각 90" 식으로 그립니다.
+4. 도면에서 정확한 치수를 못 읽으면 # 주석으로 "??" 표시해 사용자가 수정할 수 있게 하세요.
+5. 모든 치수는 mm 단위, 소수점 첫째 자리까지가 일반적입니다 (예: 79.6, 0.4).
+
+[당신의 작업]
+1. 첨부한 도면의 단면 형상과 치수를 분석해 주세요.
+2. 우측 하단 원점에서 시작해 단면 중심선(또는 한쪽 윤곽)을 따라가는 명령 시퀀스를 만들어 주세요.
+3. 첫 부분에 # 주석으로 도면 요약(주요 치수)을 적어 주세요.
+4. 끝에 "두께 1 N 양" 명령으로 마무리해 주세요(N = 마지막 점 번호).
+5. 결과는 .txt로 바로 쓸 수 있는 형식으로 출력해 주세요. 코드 블록(\`\`\`)으로 감싸 주시면 복사가 편합니다.
+6. 도면에서 명확히 안 읽히는 치수는 # 주석으로 표시해 주세요.
+
+준비되셨으면, 도면 이미지를 분석해 .txt를 만들어 주세요.
+`;
+
+  function open(){
+    txt.value = PROMPT;
+    status.textContent = '';
+    modal.style.display = 'flex';
+  }
+  function close(){ modal.style.display = 'none'; }
+
+  btn.addEventListener('click', open);
+  closeBtn.addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  copyBtn.addEventListener('click', async () => {
+    try{
+      await navigator.clipboard.writeText(txt.value);
+      status.style.color = '#5fcf8a';
+      status.textContent = '✓ 클립보드에 복사됨. 다른 AI 채팅창에 붙여넣고 도면 이미지를 첨부하세요.';
+    } catch(e){
+      // 폴백: 선택해서 사용자가 직접 복사
+      txt.select(); txt.setSelectionRange(0, txt.value.length);
+      try { document.execCommand('copy'); status.style.color='#5fcf8a'; status.textContent='✓ 복사됨 (폴백 방식). 텍스트가 선택됐으니 Ctrl+C로도 가능.'; }
+      catch(e2){ status.style.color='#ff8888'; status.textContent='✗ 자동 복사 실패. 텍스트를 직접 선택해 Ctrl+C로 복사하세요.'; }
+    }
+  });
 })();

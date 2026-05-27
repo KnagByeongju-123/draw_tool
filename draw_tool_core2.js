@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.57  최신본 — 명령어 (점·선·지름·거리두기·연장[거리/교점/X좌표/Y좌표]·=수식·이동·기준점·각교점·호) #####
+// ##### draw_tool_core2.js  Rev.16.58  최신본 — 명령어 (점·선·지름·거리두기·연장·기준점[기준 X Y / 기준 지, 좌표→기준 통일]·=수식·이동·각교점·호) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -585,35 +585,24 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // Rev.16.53: 기준 X Y - 빈 공간 좌표를 기준점(앵커)으로 잡기 (점 안 찍고 십자 표시)
-  //   이후 우/좌/상/하 등으로 여기서부터 이어그리기 가능
-  if ((toks[0] === '기준' || toks[0] === 'BASE') && toks.length >= 3){
-    const xmm = evalExpr(toks[1]), ymm = evalExpr(toks[2]);
-    if (!isFinite(xmm) || !isFinite(ymm)) return false;
-    const p = penMmToPx(xmm, ymm);
-    penAddAnchor(p.x, p.y);
-    penFinish(`✛ 기준점 ${penCur} = (${xmm}, ${ymm})mm`);
-    return true;
-  }
-
-  // Rev.16.53: 좌표 지 130 110 - 지름 기반 기준점. 130=지름→X=좌측 반지름(-65), 110=Y
-  if (toks[0] === '좌표' && toks[1] === '지' && toks.length >= 4){
+  // Rev.16.58: 기준 지 130 110 - 지름 기반 기준점. 130=지름→X=좌측 반지름(-65), Y=110
+  if (toks[0] === '기준' && toks[1] === '지' && toks.length >= 4){
     const D = evalExpr(toks[2]), ymm = evalExpr(toks[3]);
     if (!isFinite(D) || !isFinite(ymm)) return false;
     const xmm = -Math.abs(D)/2;   // 지름 → 좌측 반지름
     const p = penMmToPx(xmm, ymm);
     penAddAnchor(p.x, p.y);
-    penFinish(`✛ 좌표 ${penCur} = 지름 ${D} → 좌측 X=${xmm}, Y=${ymm}mm`);
+    penFinish(`✛ 기준점 ${penCur} = 지름 ${D} → 좌측 X=${xmm}, Y=${ymm}mm`);
     return true;
   }
 
-  // Rev.16.53: 좌표 X Y - 빈 공간 좌표 기준점 (기준 X Y 와 동일, 별칭)
-  if (toks[0] === '좌표' && toks.length >= 3 && toks[1] !== '지'){
+  // Rev.16.58: 기준 X Y - 빈 공간 좌표를 기준점(앵커)으로. ('좌표' 명령은 '기준'으로 통일)
+  if (toks[0] === '기준' && toks.length >= 3 && toks[1] !== '지'){
     const xmm = evalExpr(toks[1]), ymm = evalExpr(toks[2]);
     if (!isFinite(xmm) || !isFinite(ymm)) return false;
     const p = penMmToPx(xmm, ymm);
     penAddAnchor(p.x, p.y);
-    penFinish(`✛ 좌표 ${penCur} = (${xmm}, ${ymm})mm`);
+    penFinish(`✛ 기준점 ${penCur} = (${xmm}, ${ymm})mm`);
     return true;
   }
 

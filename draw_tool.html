@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.67</title>
+<title>도면 작도기 Rev.16.68</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.67</h1>
+  <h1>📐 도면 작도기 Rev.16.68</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -1097,10 +1097,10 @@
 
 <!-- 도움말 모달 (Rev.9.2) -->
 <div class="modal-overlay" id="helpModal">
-  <div class="modal" style="max-width:900px; max-height:85vh; overflow-y:auto;">
-    <h3>❓ 도움말 - 버튼 · 단축키 · 명령어</h3>
+  <div class="modal" style="max-width:900px; max-height:88vh; overflow:hidden; display:flex; flex-direction:column;">
+    <h3 style="flex:0 0 auto;">❓ 도움말 - 버튼 · 단축키 · 명령어</h3>
     
-    <div style="font-size:12px; color:#bbb; line-height:1.5;">
+    <div style="font-size:12px; color:#bbb; line-height:1.5; flex:1 1 auto; overflow-y:auto; min-height:0; padding-right:6px;">
       <h4 style="color:#f39c12; margin:12px 0 6px;">🔘 상단 버튼</h4>
       <table style="width:100%; border-collapse:collapse; font-size:12px;">
         <tr style="background:#2a2030;"><td style="padding:4px 8px;"><b>🔲 선택</b></td><td style="padding:4px 8px;">선택 도구 (도형 클릭/드래그로 선택·이동)</td></tr>
@@ -1201,7 +1201,7 @@
       <p style="margin:14px 0 0; color:#888;">※ 단위: 1mm = 300px, 좌표·치수는 1/100mm 표시. 마우스 휠로 확대/축소. 숫자 입력란에는 <b>=(130-110)/2</b> 같은 수식 가능. 배경이미지는 불러오면 화면에 맞게 자동 확대.</p>
     </div>
 
-    <div class="actions" style="border-top:1px solid #444; padding-top:12px; margin-top:12px;">
+    <div class="actions" style="border-top:1px solid #444; padding-top:12px; margin-top:12px; flex:0 0 auto;">
       <button id="btnHelpClose">닫기</button>
     </div>
   </div>
@@ -1371,11 +1371,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1667"></script>
+<script src="draw_tool_core.js?v=1668"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1667"></script>
+<script src="draw_tool_core2.js?v=1668"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1667"></script>
+<script src="draw_tool_tools.js?v=1668"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

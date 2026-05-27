@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.62  최신본 — 명령어 (점·선·지름·거리두기·연장·기준점[X Y/지/방향거리]·방향교점·선택방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.63  최신본 — 명령어 (점·선·지름·거리두기·연장·기준점[X Y/지/방향거리/방향지름]·방향교점·선택방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -608,15 +608,25 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // Rev.16.61: 기준 상 50 - 현재 기준점에서 방향으로 거리만큼 떨어진 곳에 새 기준점(앵커)
+  // Rev.16.61/63: 기준 상 50 - 현재 기준점에서 방향+거리에 새 기준점.
+  //   기준 좌 지 79.44 85.7 - 지름차 (85.7-79.44)/2 만큼 그 방향으로 새 기준점
   if (toks[0] === '기준' && ['상','하','좌','우','U','D','L','R'].includes(toks[1]) && toks.length >= 3){
     if (penCur < 0 || !penPoints[penCur]){
       document.getElementById('statusHint').textContent = '⚠ 먼저 기준점을 잡으세요 (기준 X Y 또는 빈 곳 클릭)';
       return true;
     }
     const bdir = toks[1];
-    const bdist = evalExpr(toks[2]);
-    if (!isFinite(bdist)) return false;
+    let bdist, label;
+    if (toks[2] === '지'){
+      const d1 = evalExpr(toks[3]), d2 = evalExpr(toks[4]);
+      if (!isFinite(d1) || !isFinite(d2)) return false;
+      bdist = Math.abs(d2 - d1) / 2;
+      label = `지름 ${d1}→${d2} = ${bdist}mm`;
+    } else {
+      bdist = evalExpr(toks[2]);
+      if (!isFinite(bdist)) return false;
+      label = `${bdist}mm`;
+    }
     const base = penPoints[penCur];
     const dpx = bdist/mmPerPixel;
     let nx = base.x, ny = base.y;
@@ -625,7 +635,7 @@ function tryPenCommand(cmdStr){
     else if (bdir==='상'||bdir==='U') ny -= dpx;   // 화면 위=Y감소
     else if (bdir==='하'||bdir==='D') ny += dpx;
     penAddAnchor(nx, ny);
-    penFinish(`✛ 기준점 ${penCur} = 이전 기준점에서 ${bdir} ${bdist}mm`);
+    penFinish(`✛ 기준점 ${penCur} = 이전 기준점에서 ${bdir} ${label}`);
     return true;
   }
 

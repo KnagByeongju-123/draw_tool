@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.65</title>
+<title>도면 작도기 Rev.16.66</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.65</h1>
+  <h1>📐 도면 작도기 Rev.16.66</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -606,7 +606,7 @@
     <span style="font-size:10px; color:#e89a5c;">mm</span>
     <button id="headerBtnMerge" class="ts-btn" title="그룹화(Join): 선택한 여러 선을 하나의 폴리라인 도형으로 묶음 (블렌더 J처럼 - 이어지는 끝점은 연결, 안 이어져도 하나로 묶음)"><span class="ico">🔗</span><span class="lbl">그룹</span></button>
     <button id="headerBtnUngroup" class="ts-btn" title="분리(Ungroup): 선택한 폴리라인을 다시 개별 선들로 분해"><span class="ico">✂</span><span class="lbl">분리</span></button>
-    <button id="headerBtnOutline" class="ts-btn" title="외곽선 만들기: 닫힌 영역(또는 채움 영역) 안을 클릭하면 그 경계를 따라 닫힌 폴리라인(외곽선)을 생성. 채움 위를 클릭하면 채움은 그대로 두고 테두리 선만 추가됨"><span class="ico">🖊</span><span class="lbl">외곽선</span></button>
+    <button id="headerBtnOutline" class="ts-btn" title="외곽선 만들기: 닫힌 영역(또는 채움 영역) 안을 클릭하면 그 경계를 따라 외곽선을 만들고, 즉시 흰색 개별 선으로 분리해 또렷한 윤곽선 생성. 채움 위를 클릭하면 채움은 그대로 유지됨"><span class="ico">🖊</span><span class="lbl">외곽선</span></button>
   </div>
   <!-- 치수 그룹 -->
   <div class="ts-group dim">
@@ -1118,7 +1118,7 @@
         <tr style="background:#1f1f1f;"><td style="padding:4px 8px;"><b>🧹 정리</b></td><td style="padding:4px 8px;">점(point)과 지정 길이(mm) 이하의 짧은 선들을 한 번에 삭제. 작도 중 생긴 자투리 선·점 정리용. 옆 입력칸이 기준 길이(예: 1 = 1mm 이하 삭제). 선택된 도형이 있으면 그 안에서만, 없으면 전체가 대상</td></tr>
         <tr><td style="padding:4px 8px;"><b>🔗 그룹화</b></td><td style="padding:4px 8px;">블렌더 J(Join)처럼 선택한 여러 선(2개 이상)을 <b>하나의 폴리라인 도형</b>으로 묶음. 이어지는 끝점은 자동 연결, 안 이어진 갈래가 있어도 한 폴리라인에 모두 담음(실패 없음). 시작=끝이면 닫힌 도형. 묶은 폴리라인은 일반 도형처럼 선택·이동·회전·배율·대칭 모두 가능</td></tr>
         <tr style="background:#1f1f1f;"><td style="padding:4px 8px;"><b>✂ 분리</b></td><td style="padding:4px 8px;">선택한 폴리라인을 다시 <b>개별 선들로 분해</b>(그룹화 반대). 인접 점쌍마다 선 1개, 닫힌 폴리라인은 닫힘선까지 포함. 분해된 선들은 자동 선택됨</td></tr>
-        <tr style="background:#1f1f1f;"><td style="padding:4px 8px;"><b>🖊 외곽선</b></td><td style="padding:4px 8px;">영역 경계를 외곽선(닫힌 폴리라인)으로 추출. <b>픽셀 계단/미세 단차는 자동 정리</b> — 직선 구간은 직선 피팅, 코너는 인접 직선 교점으로 재계산(각도 임계 8°). 방법: ①선들로 둘러싼 닫힌 영역 클릭 → 외곽선(원본 선 유지). ②🎨채움으로 영역 확정 → 🖊외곽선으로 <b>채움 부분 클릭 → 채움은 그대로 두고 그 경계에 테두리 선만 추가</b>. 외곽선 색·두께는 선색상/두께 설정값을 따름. 채움은 select 도구로 클릭·드래그 이동 가능. 연속 클릭=다중, Esc=종료</td></tr>
+        <tr style="background:#1f1f1f;"><td style="padding:4px 8px;"><b>🖊 외곽선</b></td><td style="padding:4px 8px;">영역 경계를 외곽선으로 추출 후 <b>즉시 흰색 개별 선으로 분리</b>하여 또렷한 윤곽선 생성. <b>픽셀 계단/미세 단차는 자동 정리</b> — 직선 구간은 직선 피팅, 코너는 인접 직선 교점으로 재계산(각도 임계 8°). 방법: ①선들로 둘러싼 닫힌 영역 클릭 → 흰색 윤곽선(원본 선 유지). ②🎨채움으로 영역 확정 → 🖊외곽선으로 <b>채움 부분 클릭 → 채움은 그대로 두고 경계에 흰색 윤곽선 추가</b>. 연속 클릭=다중, Esc=종료</td></tr>
       </table>
 
       <h4 style="color:#f39c12; margin:14px 0 6px;">⌨ 단축키</h4>
@@ -1369,11 +1369,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1665"></script>
+<script src="draw_tool_core.js?v=1666"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1665"></script>
+<script src="draw_tool_core2.js?v=1666"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1665"></script>
+<script src="draw_tool_tools.js?v=1666"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

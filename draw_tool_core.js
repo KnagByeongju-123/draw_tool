@@ -6343,12 +6343,19 @@ function doFillAtPoint(p) {
       // Rev.16.65: 원본 채움은 그대로 유지하고 그 경계에 외곽선만 추가
       shapes.push(poly);
       selectedIds.clear(); selectedIds.add(poly.id);
-      redoStack = []; pushHistory();
-      if (typeof redrawFills === 'function') redrawFills();
-      redrawDraw(); updateCount();
-      if (typeof updateSelStat === 'function') updateSelStat();
-      document.getElementById('statusHint').textContent =
-        `🖊 채움 외곽선 생성 완료: 점 ${poly.points.length}개 폴리라인 (채움 유지). 계속 클릭=다중, Esc=종료`;
+      // Rev.16.66: 생성된 외곽선을 즉시 흰색 개별 선으로 분리 → 또렷한 윤곽선
+      if (typeof ungroupPolyline === 'function'){
+        ungroupPolyline();
+        document.getElementById('statusHint').textContent =
+          `🖊 채움 외곽선 생성+분리 완료: 흰색 선 ${cleaned.length}개 (채움 유지). 계속 클릭=다중, Esc=종료`;
+      } else {
+        redoStack = []; pushHistory();
+        if (typeof redrawFills === 'function') redrawFills();
+        redrawDraw(); updateCount();
+        if (typeof updateSelStat === 'function') updateSelStat();
+        document.getElementById('statusHint').textContent =
+          `🖊 채움 외곽선 생성 완료: 점 ${poly.points.length}개 폴리라인 (채움 유지). 계속 클릭=다중, Esc=종료`;
+      }
       return;
     }
     // 채움이 없으면 아래로 진행: 선을 경계로 floodFill해서 외곽선 생성 (기존 방식)
@@ -6547,13 +6554,20 @@ function doFillAtPoint(p) {
         };
         shapes.push(poly);
         selectedIds.clear(); selectedIds.add(poly.id);
-        redoStack = []; pushHistory();
-        if (typeof redrawFills === 'function') redrawFills();
-        redrawDraw(); updateCount();
-        if (typeof updateSelStat === 'function') updateSelStat();
         const areaMm2 = (pixelCount * mmPerPixel * mmPerPixel).toFixed(2);
-        document.getElementById('statusHint').textContent =
-          `🖊 외곽선 생성 완료: 점 ${poly.points.length}개 닫힌 폴리라인 (면적 ${areaMm2}㎟). 계속 클릭=다중, Esc=종료`;
+        // Rev.16.66: 생성된 외곽선을 즉시 흰색 개별 선으로 분리 → 또렷한 윤곽선
+        if (typeof ungroupPolyline === 'function'){
+          ungroupPolyline();
+          document.getElementById('statusHint').textContent =
+            `🖊 외곽선 생성+분리 완료: 흰색 선 ${cleaned.length}개 (면적 ${areaMm2}㎟). 계속 클릭=다중, Esc=종료`;
+        } else {
+          redoStack = []; pushHistory();
+          if (typeof redrawFills === 'function') redrawFills();
+          redrawDraw(); updateCount();
+          if (typeof updateSelStat === 'function') updateSelStat();
+          document.getElementById('statusHint').textContent =
+            `🖊 외곽선 생성 완료: 점 ${poly.points.length}개 닫힌 폴리라인 (면적 ${areaMm2}㎟). 계속 클릭=다중, Esc=종료`;
+        }
         hideLoading();
         return;
       }

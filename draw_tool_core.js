@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.75  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.78 (마우스휠 확대축소 추가)  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -273,6 +273,37 @@ document.getElementById('zoom').addEventListener('input', e => {
   setCanvasSize(baseW, baseH);
   if (typeof updateSelActionBar === 'function') updateSelActionBar(); // Rev.10.11
 });
+
+// Rev.16.78: 마우스 휠 확대/축소 (커서 위치 기준). 텍스트입력 모드와 무관하게 항상 동작.
+(function(){
+  const wrap = document.getElementById('canvasWrap');
+  const zEl = document.getElementById('zoom');
+  if (!wrap || !zEl) return;
+  wrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const zMin = parseInt(zEl.min) || 1;
+    const zMax = parseInt(zEl.max) || 1000;
+    const oldZoom = zoom;
+    // 커서의 콘텐츠 기준 위치 (스크롤 포함)
+    const rect = wrap.getBoundingClientRect();
+    const cx = e.clientX - rect.left + wrap.scrollLeft;
+    const cy = e.clientY - rect.top  + wrap.scrollTop;
+    const ratioX = cx / (baseW * oldZoom || 1);
+    const ratioY = cy / (baseH * oldZoom || 1);
+    // 휠 위로 = 확대
+    const factor = (e.deltaY < 0) ? 1.1 : (1/1.1);
+    let zp = Math.round(oldZoom * factor * 100);
+    zp = Math.max(zMin, Math.min(zMax, zp));
+    zoom = zp / 100;
+    zEl.value = zp;
+    const zv = document.getElementById('zoomVal'); if (zv) zv.textContent = zp + '%';
+    setCanvasSize(baseW, baseH);
+    // 커서 아래 지점이 그대로 유지되도록 스크롤 보정
+    wrap.scrollLeft = ratioX * (baseW * zoom) - (e.clientX - rect.left);
+    wrap.scrollTop  = ratioY * (baseH * zoom) - (e.clientY - rect.top);
+    if (typeof updateSelActionBar === 'function') updateSelActionBar();
+  }, { passive:false });
+})();
 
 // 배경 이미지 불투명도
 document.getElementById('bgOpacity').addEventListener('input', e => {
@@ -9305,6 +9336,27 @@ document.getElementById('btnClearAll').addEventListener('click', () => {
   if (typeof updateAxisStatus === 'function') updateAxisStatus();
 });
 
+// Rev.16.76: 새 파일 - 전체(도형/채움/한붓점/원점) 완전 초기화
+function newFile(){
+  if ((shapes.length || fills.length) && !confirm('새 파일로 시작할까요? 현재 작업이 모두 사라집니다.')) return;
+  redoStack = []; shapes = []; fills = []; selectedIds.clear();
+  rotAxis = null;
+  // 한붓그리기 상태 초기화
+  if (typeof penPoints !== 'undefined') penPoints = [];
+  if (typeof penLabelIds !== 'undefined') penLabelIds = [];
+  if (typeof penCur !== 'undefined') penCur = -1;
+  if (typeof penPickFirst !== 'undefined') penPickFirst = -1;
+  if (typeof penOriginPx !== 'undefined') penOriginPx = null;
+  if (typeof penAwaitOrigin !== 'undefined') penAwaitOrigin = false;
+  shapeIdSeq = 0;
+  pushHistory();
+  redrawFills(); redrawDraw(); updateCount(); updateSelStat();
+  if (typeof updateAxisStatus === 'function') updateAxisStatus();
+  cmdLog('📄 새 파일 — 전체 초기화 완료', 'system');
+}
+const btnNewFile = document.getElementById('btnNewFile');
+if (btnNewFile) btnNewFile.addEventListener('click', newFile);
+
 
 // 저장
 const saveModal = document.getElementById('saveModal');
@@ -11094,7 +11146,7 @@ function showHelpInCmd() {
   cmdLog('▼ 한붓그리기(텍스트입력) 명령 - 한글 명령', 'system');
   cmdLog('  점 찍기:  점 X,Y (좌표)  ·  점 N (P번호 선택)  ·  점 상 2.5 (선택점서 방향+거리, 독립점)', 'prompt');
   cmdLog('            점 좌 지 110 130 (지름차/2 만큼 방향, 독립점)', 'prompt');
-  cmdLog('  기준점:   기준 X Y · 기준 지 130 110 (지름→좌측반지름,Y) · 기준 상 50 (이전 기준점서 방향+거리) · 빈 곳 클릭', 'prompt');
+  cmdLog('  기준점:   기준 X Y · 기준 지 130 110 (지름→좌측반지름,Y) · 기준 상 50 (이전 기준점서 방향+거리)', 'prompt');
   cmdLog('  선 잇기:  우/좌/상/하 D (방향 D mm) · 선 좌 교점 (방향 첫 교점까지 선) · 점 좌 교점 (교점에 점만) · 각 A D · 각 A 교점', 'prompt');
   cmdLog('            좌 지 110 130 (지름차/2 만큼 좌측 선)  ·  연결(선) i1 i2  ·  닫기', 'prompt');
   cmdLog('  호:       호 N R 시계 각 45 (N중심 반지름R 시계 45도)  ·  호 N R 시계 교점 (첫 교점까지)', 'prompt');
@@ -11103,7 +11155,7 @@ function showHelpInCmd() {
   cmdLog('  거리두기: 거리두기 i1 i2 좌 D (i1→i2 진행방향 좌/우 D mm 평행, 방향생략=좌)', 'prompt');
   cmdLog('  점 이동:  이동 N 우 10 (N번 이동)  ·  이동 상 3 (선택점 이동, 점 안찍음)', 'prompt');
   cmdLog('  수식:     숫자 자리에 =(100-90)/2 처럼 = 붙여 계산  (예: 좌 =(130-110)/2)', 'prompt');
-  cmdLog('  점 선택:  점을 마우스로 클릭=선택, 두 점 클릭=자동 연결', 'prompt');
+  cmdLog('  마우스:   시작 후 첫 클릭=원점(0,0) · 점 클릭=선택 · 두 점 클릭=자동 연결 (빈 곳 클릭은 점 안 만듦)', 'prompt');
   cmdLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'system');
 }
 
@@ -11168,6 +11220,11 @@ window.addEventListener('keydown', e => {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   
   // Ctrl+S: 도면 저장(.json), Ctrl+O: 도면 열기 (Rev.12.3)
+  if (e.ctrlKey && e.key.toLowerCase() === 'n') {
+    e.preventDefault();
+    if (typeof newFile === 'function') newFile();
+    return;
+  }
   if (e.ctrlKey && e.key.toLowerCase() === 's') {
     e.preventDefault();
     document.getElementById('btnSaveProject').click();

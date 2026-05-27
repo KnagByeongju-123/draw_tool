@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.75  최신본 — 명령어 (절교/절각[절교 9 10 3 y: 기준점 축까지]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.78  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -10,8 +10,11 @@
 //   닫기 / CLOSE         → 현재 점에서 P0로 선 긋기
 //   점초기화 / PRESET     → 점번호 시스템 리셋
 // Rev.16.43: 한붓그리기 원점(0,0)을 화면 우측 하단(빨간점 ≈ 가로85%, 세로78%)
-function penWorldOrigin(){ return { x: baseW * 0.85, y: baseH * 0.78 }; }
-// mm(위=+Y 도면좌표) → 픽셀(아래=+Y). 원점은 중앙
+// Rev.16.76: 한붓그리기 원점 - 사용자가 마우스로 지정 가능. 미지정 시 기본(우하단)
+let penOriginPx = null;          // {x,y} 픽셀좌표. null이면 기본값
+let penAwaitOrigin = false;      // 시작 직후 원점 클릭 대기 상태
+function penWorldOrigin(){ return penOriginPx || { x: baseW * 0.85, y: baseH * 0.78 }; }
+// mm(위=+Y 도면좌표) → 픽셀(아래=+Y).
 function penMmToPx(xmm, ymm){
   const o = penWorldOrigin();
   return { x: o.x + xmm/mmPerPixel, y: o.y - ymm/mmPerPixel };
@@ -31,17 +34,23 @@ function penFindNearestPoint(p){
 // Rev.16.46/49: 점 선택 모드 클릭 처리 (점 위 클릭만, 빈 곳은 점 생성 안 함)
 function handlePenPickClick(p){
   if (!penPickMode) return false;
+  // Rev.16.76: 시작 직후 첫 클릭 = 원점(0,0) 설정
+  if (penAwaitOrigin){
+    penOriginPx = { x:p.x, y:p.y };
+    penAwaitOrigin = false;
+    const a = penAddPoint(p.x, p.y);   // 원점에 0번 점 생성
+    penPickFirst = a; penCur = a;
+    cmdLog(`◎ 원점(0,0) 설정 → P${a} (마우스)`,'user');
+    redoStack=[]; pushHistory(); redrawDraw(); updateCount();
+    document.getElementById('statusHint').textContent=`◎ 원점 P${a}=(0,0) 설정됨 · 여기서 우/좌/상/하로 이어그리기`;
+    return true;
+  }
   const idx = penFindNearestPoint(p);
   if (idx < 0){
-    // 빈 곳 클릭: 연결 대기중이면 선택 해제만, 아니면 그 좌표를 기준점(앵커)으로
+    // Rev.16.77: 빈 곳 클릭은 점을 만들지 않음. 연결 대기중이면 선택만 해제.
     if (penPickFirst >= 0){ penPickFirst = -1;
       document.getElementById('statusHint').textContent='선택 해제'; redrawDraw(); return true; }
-    const a = penAddAnchor(p.x, p.y);   // Rev.16.53: 빈 곳 클릭 = 기준점
-    const m = penPxToMm(p.x, p.y);
-    cmdLog(`✛ 기준점 ${a} = (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm (마우스)`,'user');
-    penPickFirst = a;
-    redoStack=[]; pushHistory(); redrawDraw(); updateCount();
-    document.getElementById('statusHint').textContent=`✛ 기준점 ${a} 생성 · 여기서 우/좌/상/하로 이어그리기`;
+    document.getElementById('statusHint').textContent='빈 곳: 점 없음 (기준점은 「기준 X Y」 명령 사용)';
     return true;
   }
   if (penPickFirst < 0){ penPickFirst=idx; penCur=idx;
@@ -172,6 +181,9 @@ function tryPenCommand(cmdStr){
   let toks = cmdStr.replace(/,/g,' ').split(/\s+/).filter(Boolean);
   toks = mergeExprTokens(toks);
   if (!toks.length) return false;
+
+  // Rev.16.76: 원점 클릭 대기 중 명령을 입력하면 기본 원점(우하단) 사용
+  if (penAwaitOrigin){ penAwaitOrigin = false; }
 
   // 점번호 초기화
   if (toks[0] === '점초기화' || toks[0] === 'PRESET' || toks[0] === '리셋'){
@@ -1068,11 +1080,12 @@ function penChamferAtPoint(pt, cMm){
   btn.addEventListener('click', () => {
     penPoints = []; penLabelIds = []; penCur = -1;
     penPickMode = true; penPickFirst = -1; pointMode = false;
+    penOriginPx = null; penAwaitOrigin = true;   // Rev.16.76: 첫 클릭으로 원점 지정 대기
     const ci = document.getElementById('cmdInput');
     if (ci){ ci.focus(); ci.value = ''; }
     document.getElementById('statusHint').textContent =
-      `⌨ 한붓그리기: 점=명령(점 X,Y / 점 상 2.5 / 점 좌 지 110 130) · 선=좌/우/상/하/각, 선 좌 지 110 130 · 점 클릭=선택 · 수식 =(100-90)/2`;
-    cmdLog(`⌨ 한붓그리기 시작`, 'system');
+      `◎ 한붓그리기: 먼저 화면을 클릭해 원점(0,0)을 정하세요 (또는 명령 입력 시 우하단 기본원점)`;
+    cmdLog(`⌨ 한붓그리기 시작 — 화면 클릭으로 원점 지정`, 'system');
   });
 })();
 

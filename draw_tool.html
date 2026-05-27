@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.75</title>
+<title>도면 작도기 Rev.16.78</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.75</h1>
+  <h1>📐 도면 작도기 Rev.16.78</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -345,6 +345,9 @@
   <div class="menu" data-menu="file">
     <div class="menu-title">📁 파일 <span class="arrow">▼</span></div>
     <div class="menu-dropdown">
+      <div class="menu-section">새로 시작</div>
+      <div class="menu-item" id="btnNewFile"><span class="ico">📄</span> 새 파일 (전체 초기화)<span class="shortcut">Ctrl+N</span></div>
+      <div class="menu-sep"></div>
       <div class="menu-section">배경</div>
       <label class="menu-item" style="cursor:pointer;">
         <span class="ico">📷</span> 배경 이미지 열기...
@@ -1161,13 +1164,13 @@
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>각 A D / 각 A 교점</b></td><td style="padding:4px 8px;">각도 A°(수평0°, 반시계+) D mm. <b>각 45 교점</b>=그 방향 직진하다 첫 교점까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 위/아래 D</b></td><td style="padding:4px 8px;">마지막 선을 화면상 위/아래로 D mm 평행복제 (점번호 없이)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>교점</b></td><td style="padding:4px 8px;">기존 모든 선의 교차점에 일괄 번호 부여</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 X Y</b></td><td style="padding:4px 8px;">빈 공간 좌표를 기준점(노란 십자)으로. 빈 곳 마우스 클릭도 동일</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 X Y</b></td><td style="padding:4px 8px;">빈 공간 좌표를 기준점(노란 십자)으로. 예: 기준 -50 30</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 상 50 / 기준 좌 지 79.44 85.7</b></td><td style="padding:4px 8px;">현재 기준점에서 방향으로 50mm(또는 지름차 (85.7−79.44)/2 만큼) 떨어진 곳에 새 기준점</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 지 130 110</b></td><td style="padding:4px 8px;">지름 130 → 좌측 반지름(−65), Y=110 위치를 기준점으로</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>닫기 / 백 / 점초기화</b></td><td style="padding:4px 8px;">닫기=현재 점→0번 선 · <b>백</b>=직전 1회 취소 · 점초기화=번호 리셋</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>선택 10 · 점 좌 교점</b></td><td style="padding:4px 8px;">선택 10=현재 점을 10번으로 이동. <b>점 좌 교점</b>=그 방향 첫 교점에 점만(선 없음, =선택 좌 교점)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>수식 =(식)</b></td><td style="padding:4px 8px;">숫자 자리에 = 붙여 계산. 예: <b>좌 =(130-110)/2</b> · <b>점 상 =5+3</b></td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>시작 X Y</b></td><td style="padding:4px 8px;">시작점 0번을 (X,Y)mm로 설정. 0,0=화면 우측하단 기준, 위=+Y. 예: <b>시작 0 0</b></td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>시작 X Y</b></td><td style="padding:4px 8px;">시작점 0번을 (X,Y)mm로 설정. <b>텍스트입력 시작 후 화면을 클릭하면 그 자리가 원점(0,0)</b>. 위=+Y</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>연결 1 4 (선 1 4)</b></td><td style="padding:4px 8px;">두 점(1번, 4번)을 직접 연결. 마우스로 두 점 클릭해도 연결</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>우 50 · 선 상 3.7 · 선 좌 교점</b></td><td style="padding:4px 8px;">방향 D mm 선 긋기. <b>우 50</b>=접두없이도 OK, <b>선 상 3.7</b>=선 접두. <b>선 좌 교점</b>=그 방향 첫 교점까지(=좌 교점)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 N</b></td><td style="padding:4px 8px;">N번 점을 현재점으로 선택. 예: <b>점 5</b> (마우스로 점 클릭해도 선택)</td></tr>
@@ -1371,11 +1374,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1675"></script>
+<script src="draw_tool_core.js?v=1678"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1675"></script>
+<script src="draw_tool_core2.js?v=1678"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1675"></script>
+<script src="draw_tool_tools.js?v=1678"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.70  최신본 — 명령어 (점·선[선 상 3.7/선 좌 교점/선 좌 지]·지름·거리두기·연장·절교/절각·점방향교점·기준점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.72  최신본 — 명령어 (점·선[선 상 3.7/선 좌 교점/선 좌 지]·지름·거리두기·연장·절교/절각·점방향교점·기준점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -594,14 +594,14 @@ function tryPenCommand(cmdStr){
     const len = Math.hypot(b.x-a.x, b.y-a.y);
     if (len < 1e-6) return true;
     const ux = (b.x-a.x)/len, uy = (b.y-a.y)/len;
-    let nx, ny;
+    let nx, ny, jgLabel;
     // Rev.16.66: 절교 3 4 점 5 - 5번 점을 연장선에 수직투영한 위치까지
     if (toks[3] === '점'){
       const ti = parsePenIdx(toks[4]);
       if (ti == null || !penPoints[ti]){ document.getElementById('statusHint').textContent=`절교: ${toks[4]}번 점이 없습니다`; return true; }
       const T = penPoints[ti];
       const proj = (T.x-b.x)*ux + (T.y-b.y)*uy;   // b에서 방향으로 투영거리
-      nx = b.x + ux*proj; ny = b.y + uy*proj;
+      nx = b.x + ux*proj; ny = b.y + uy*proj; jgLabel = `점 ${ti}`;
     } else {
       // 축+값: 'X0' / 'X 0' 모두 허용
       let axisTok = toks[3] || '';
@@ -621,6 +621,7 @@ function tryPenCommand(cmdStr){
         const t = (targetPy - b.y) / uy;
         nx = b.x + ux*t; ny = b.y + uy*t;
       }
+      jgLabel = `${axis}=${val}`;
     }
     const ln = penFindLineByEndpoints(i1, i2);
     if (ln){
@@ -628,11 +629,11 @@ function tryPenCommand(cmdStr){
       ln[which] = { x:nx, y:ny };
       penPoints[i2] = { x:nx, y:ny };
       penUpdateLabel(i2, nx, ny);
-      penFinish(`↦ ${i1}-${i2} 선 ${axis}=${val}까지 절대연장`);
+      penFinish(`↦ ${i1}-${i2} 선 ${jgLabel}까지 절대연장`);
     } else {
       penAddLine(a.x, a.y, nx, ny);
       const ne = penAddPoint(nx, ny);
-      penFinish(`↦ ${i1}-${i2} 방향 ${axis}=${val}까지 절대연장 선생성 → P${ne}`);
+      penFinish(`↦ ${i1}-${i2} 방향 ${jgLabel}까지 절대연장 선생성 → P${ne}`);
     }
     return true;
   }

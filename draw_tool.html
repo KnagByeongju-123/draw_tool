@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.99</title>
+<title>도면 작도기 Rev.17.2</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.99</h1>
+  <h1>📐 도면 작도기 Rev.17.2</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -1207,9 +1207,9 @@
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>삭제 1 2 / 삭제 3</b></td><td style="padding:4px 8px;">1-2 선 삭제 / 3번 점 삭제</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>이동 1 우 10</b></td><td style="padding:4px 8px;">1번 점을 우 10mm 이동 (연결된 선도 함께). 번호 생략 시 현재점: <b>이동 상 3</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 2 3 좌 0.6</b></td><td style="padding:4px 8px;">2→3 진행방향 기준 좌/우로 0.6mm 평행복제 (방향 생략 시 좌). 새 선 끝점 번호 부여</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>두께 1 5 좌</b></td><td style="padding:4px 8px;">1~5번으로 <b>연결된 경로</b>(꺾인선·호R 포함) 전체를 <b>소재두께</b>(거리두기 칸 값)만큼 좌/우 평행. 코너는 교점으로 이어짐</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>두께 1 5 좌/우/양</b></td><td style="padding:4px 8px;">1~5 연결경로(꺾임·호R 포함)를 <b>소재두께</b>(거리두기 칸)만큼 평행. <b>좌/우</b>=한쪽, <b>양</b>=중심선 기준 좌우 절반씩(양쪽 윤곽)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px; width:120px;" colspan="2"><b style="color:#5bc8e8;">━ 한붓그리기 (점번호 0,1,2... 자동) ━</b></td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>각 A D / 각 A 교점</b></td><td style="padding:4px 8px;">각도 A°(수평0°, 반시계+) D mm. <b>각 45 교점</b>=그 방향 직진하다 첫 교점까지</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>각 A D / 각 A 교점 / 각 A 수평/수직 V</b></td><td style="padding:4px 8px;">각도 A°(수평0°, 반시계+) D mm. <b>각 45 교점</b>=그 방향 직진하다 첫 교점까지. <b>각 45 수평 -5</b>=원점 기준 Y=-5 수평선까지. <b>각 45 수직 10</b>=X=10 수직선까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 위/아래 D</b></td><td style="padding:4px 8px;">마지막 선을 화면상 위/아래로 D mm 평행복제 (점번호 없이)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>교점</b></td><td style="padding:4px 8px;">기존 모든 선·원·호의 교차점에 일괄 번호 부여 (선-선, 선-원, 원-원)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 X Y</b></td><td style="padding:4px 8px;">빈 공간 좌표를 기준점(노란 십자)으로. 예: 기준 -50 30</td></tr>
@@ -1438,11 +1438,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1699"></script>
+<script src="draw_tool_core.js?v=1702"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1699"></script>
+<script src="draw_tool_core2.js?v=1702"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1699"></script>
+<script src="draw_tool_tools.js?v=1702"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

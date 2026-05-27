@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.92  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.93  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -421,19 +421,75 @@ function tryPenCommand(cmdStr){
   // Rev.16.31: 교점 번호 - 현재 모든 선의 교차점을 찾아 번호 부여
   if (toks[0] === '교점' || toks[0] === 'INTERSECT' || toks[0] === 'IX'){
     const lines = shapes.filter(s => s.type === 'line' && s.p1 && s.p2);
-    if (lines.length < 2){
-      document.getElementById('statusHint').textContent = '교점: 선이 2개 이상 필요합니다';
+    // Rev.16.93: 원/호도 교점 대상에 포함. 중심/반지름 추출
+    const circs = [];
+    for (const s of shapes){
+      if (s.type === 'circle' && s.p1 && s.p2){
+        circs.push({ cx:s.p1.x, cy:s.p1.y, r:Math.hypot(s.p2.x-s.p1.x, s.p2.y-s.p1.y), shape:s });
+      } else if (s.type === 'arc' && typeof s.cx === 'number'){
+        circs.push({ cx:s.cx, cy:s.cy, r:s.r, arc:true, a0:s.startAngle, a1:s.endAngle, shape:s });
+      }
+    }
+    if (lines.length + circs.length < 2){
+      document.getElementById('statusHint').textContent = '교점: 선/원이 2개 이상 필요합니다';
       return true;
     }
-    // 모든 선쌍의 교차점(선분 내부) 수집, 중복 제거
     const found = [];
-    const isDup = (x,y) => found.some(p => Math.hypot(p.x-x, p.y-y) < 1/mmPerPixel*0.05) // 0.05mm 이내 중복
+    const isDup = (x,y) => found.some(p => Math.hypot(p.x-x, p.y-y) < 1/mmPerPixel*0.05)
                         || penPoints.some(p => Math.hypot(p.x-x, p.y-y) < 1/mmPerPixel*0.05);
-    for (let i=0;i<lines.length;i++){
-      for (let j=i+1;j<lines.length;j++){
-        const ix = lineSegmentIntersection(lines[i].p1, lines[i].p2, lines[j].p1, lines[j].p2);
-        if (ix && !isDup(ix.x, ix.y)){ found.push({x:ix.x, y:ix.y}); }
-      }
+    // 선분이 원 호 범위 안인지 (arc면 각도 체크, circle이면 항상 true)
+    const onArc = (c, x, y) => {
+      if (!c.arc) return true;
+      let ang = Math.atan2(y-c.cy, x-c.cx);
+      let a0=c.a0, a1=c.a1;
+      if (a0==null||a1==null) return true;
+      const norm = a => { while(a<0)a+=2*Math.PI; while(a>=2*Math.PI)a-=2*Math.PI; return a; };
+      ang=norm(ang); a0=norm(a0); a1=norm(a1);
+      if (a0<=a1) return ang>=a0-1e-3 && ang<=a1+1e-3;
+      return ang>=a0-1e-3 || ang<=a1+1e-3;
+    };
+    // 선분-원 교점
+    const lineCircleIx = (p1,p2,c) => {
+      const dx=p2.x-p1.x, dy=p2.y-p1.y;
+      const fx=p1.x-c.cx, fy=p1.y-c.cy;
+      const A=dx*dx+dy*dy, B=2*(fx*dx+fy*dy), C=fx*fx+fy*fy-c.r*c.r;
+      const disc=B*B-4*A*C;
+      const res=[];
+      if (disc<0 || A<1e-9) return res;
+      const sq=Math.sqrt(disc);
+      [(-B-sq)/(2*A), (-B+sq)/(2*A)].forEach(t => {
+        if (t>=-1e-6 && t<=1+1e-6){   // 선분 범위 내
+          const x=p1.x+t*dx, y=p1.y+t*dy;
+          if (onArc(c,x,y)) res.push({x,y});
+        }
+      });
+      return res;
+    };
+    // 원-원 교점
+    const circleCircleIx = (c1,c2) => {
+      const d=Math.hypot(c2.cx-c1.cx, c2.cy-c1.cy);
+      const res=[];
+      if (d<1e-6 || d>c1.r+c2.r || d<Math.abs(c1.r-c2.r)) return res;
+      const a=(c1.r*c1.r-c2.r*c2.r+d*d)/(2*d);
+      const h2=c1.r*c1.r-a*a; if (h2<0) return res;
+      const h=Math.sqrt(h2);
+      const xm=c1.cx+a*(c2.cx-c1.cx)/d, ym=c1.cy+a*(c2.cy-c1.cy)/d;
+      const rx=-(c2.cy-c1.cy)/d*h, ry=(c2.cx-c1.cx)/d*h;
+      [[xm+rx,ym+ry],[xm-rx,ym-ry]].forEach(([x,y])=>{ if(onArc(c1,x,y)&&onArc(c2,x,y)) res.push({x,y}); });
+      return res;
+    };
+    // 선-선
+    for (let i=0;i<lines.length;i++) for (let j=i+1;j<lines.length;j++){
+      const ix = lineSegmentIntersection(lines[i].p1, lines[i].p2, lines[j].p1, lines[j].p2);
+      if (ix && !isDup(ix.x, ix.y)) found.push({x:ix.x, y:ix.y});
+    }
+    // 선-원
+    for (const ln of lines) for (const c of circs){
+      lineCircleIx(ln.p1, ln.p2, c).forEach(p => { if(!isDup(p.x,p.y)) found.push(p); });
+    }
+    // 원-원
+    for (let i=0;i<circs.length;i++) for (let j=i+1;j<circs.length;j++){
+      circleCircleIx(circs[i], circs[j]).forEach(p => { if(!isDup(p.x,p.y)) found.push(p); });
     }
     if (found.length === 0){
       document.getElementById('statusHint').textContent = '교점: 새로운 교차점이 없습니다';
@@ -441,7 +497,7 @@ function tryPenCommand(cmdStr){
     }
     const first = penPoints.length;
     found.forEach(p => penAddPoint(p.x, p.y));
-    penFinish(`✕ 교점 ${found.length}개에 번호 부여 (${first}~${penPoints.length-1})`);
+    penFinish(`✕ 교점 ${found.length}개에 번호 부여 (선·원 포함, ${first}~${penPoints.length-1})`);
     return true;
   }
 

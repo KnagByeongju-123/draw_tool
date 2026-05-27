@@ -3679,6 +3679,9 @@ function pointToLineT(p, a, b) {
 
 // 클릭 지점 근처 도형 찾기
 function findShapeAtPoint(p, tolerance) {
+  // Rev.16.99: 줌 축소 시 월드 tolerance가 작아 클릭이 안 잡히던 문제 → 화면상 최소 8px 보장
+  const screenTol = 8 / (typeof zoom === 'number' && zoom > 0 ? zoom : 1);
+  tolerance = Math.max(tolerance || 0, screenTol);
   let best = null, bestD = tolerance;
   for (const s of shapes) {
     let d = Infinity;
@@ -7150,6 +7153,25 @@ function drawSelectionMarker(ctx, s) {
   ctx.restore();
 }
 
+// Rev.16.99: 호(arc)의 실제 각도 범위를 반영한 정밀 BBox
+function arcBoundingBox(s){
+  const cx=s.cx, cy=s.cy, r=s.r;
+  if (s.startAngle==null || s.endAngle==null){
+    return { minX:cx-r, maxX:cx+r, minY:cy-r, maxY:cy+r };
+  }
+  // 양 끝점
+  const xs=[cx + r*Math.cos(s.startAngle), cx + r*Math.cos(s.endAngle)];
+  const ys=[cy + r*Math.sin(s.startAngle), cy + r*Math.sin(s.endAngle)];
+  // 4분점(0,90,180,270°)이 호 범위에 들어가면 후보 추가
+  const quad=[0, Math.PI/2, Math.PI, 3*Math.PI/2];
+  for (const q of quad){
+    if (isAngleInArcRange(q, s.startAngle, s.endAngle, !!s.ccw)){
+      xs.push(cx + r*Math.cos(q)); ys.push(cy + r*Math.sin(q));
+    }
+  }
+  return { minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys) };
+}
+
 function shapeBoundingBox(s) {
   if (s.type === 'point') {
     return { minX: s.p1.x, maxX: s.p1.x, minY: s.p1.y, maxY: s.p1.y };
@@ -7160,7 +7182,7 @@ function shapeBoundingBox(s) {
     const r = Math.hypot(s.p2.x-s.p1.x, s.p2.y-s.p1.y);
     return { minX: s.p1.x-r, maxX: s.p1.x+r, minY: s.p1.y-r, maxY: s.p1.y+r };
   } else if (s.type === 'arc') {
-    return { minX: s.cx-s.r, maxX: s.cx+s.r, minY: s.cy-s.r, maxY: s.cy+s.r };
+    return arcBoundingBox(s);
   } else if (s.type === 'ellipse') {
     if (s.rx !== undefined) {
       // 회전 타원의 BBox는 근사 (장축 사용)
@@ -7188,11 +7210,44 @@ function shapeBoundingBox(s) {
 }
 
 function hitTest(p) {
+  // Rev.16.99: 후보 중 클릭점에서 가장 가까운 도형을 선택 (겹친 호 조각 구분)
+  let best=null, bestD=Infinity;
   for (let i = shapes.length - 1; i >= 0; i--) {
     const s = shapes[i];
-    if (isPointOnShape(p, s)) return s;
+    if (!isPointOnShape(p, s)) continue;
+    const d = distPointToShape(p, s);
+    // 동일 거리(허용오차)면 위에 그려진 것(인덱스 큰 것=먼저 검사) 우선 유지
+    if (d < bestD - 0.5){ bestD = d; best = s; }
   }
-  return null;
+  return best;
+}
+
+// Rev.16.99: 점-도형 최단거리 (히트 우선순위 판정용)
+function distPointToShape(p, s){
+  if (s.type === 'point') return Math.hypot(p.x-s.p1.x, p.y-s.p1.y);
+  if (s.type === 'line')  return pointToSegmentDist(p, s.p1, s.p2);
+  if (s.type === 'circle'){
+    const r=Math.hypot(s.p2.x-s.p1.x, s.p2.y-s.p1.y);
+    return Math.abs(Math.hypot(p.x-s.p1.x, p.y-s.p1.y) - r);
+  }
+  if (s.type === 'arc'){
+    return Math.abs(Math.hypot(p.x-s.cx, p.y-s.cy) - s.r);
+  }
+  if (s.type === 'polyline' && Array.isArray(s.points)){
+    let d=Infinity;
+    for (let i=0;i<s.points.length-1;i++) d=Math.min(d, pointToSegmentDist(p, s.points[i], s.points[i+1]));
+    if (s.closed && s.points.length>=3) d=Math.min(d, pointToSegmentDist(p, s.points[s.points.length-1], s.points[0]));
+    return d;
+  }
+  if (s.type === 'rect'){
+    const x1=Math.min(s.p1.x,s.p2.x), x2=Math.max(s.p1.x,s.p2.x);
+    const y1=Math.min(s.p1.y,s.p2.y), y2=Math.max(s.p1.y,s.p2.y);
+    const e=[[{x:x1,y:y1},{x:x2,y:y1}],[{x:x2,y:y1},{x:x2,y:y2}],[{x:x2,y:y2},{x:x1,y:y2}],[{x:x1,y:y2},{x:x1,y:y1}]];
+    return Math.min(...e.map(([a,b])=>pointToSegmentDist(p,a,b)));
+  }
+  // 그 외: BBox 중심까지 거리(대략)
+  const bb=shapeBoundingBox(s);
+  return Math.hypot(p.x-(bb.minX+bb.maxX)/2, p.y-(bb.minY+bb.maxY)/2);
 }
 
 // 채움 영역 안 점 hit 검사 (Rev.10.1)
@@ -7218,7 +7273,10 @@ function pointInPolygon(p, vertices) {
 }
 
 function isPointOnShape(p, s) {
-  const tol = Math.max(5, s.strokeWidth + 3);
+  // Rev.16.99: 줌이 작을 때(축소) 월드 기준 tol이 너무 작아져 원/호 클릭이 안 잡히던 문제 해결
+  // 화면상 약 8px를 항상 클릭 허용 → 월드 tol = 8/zoom
+  const screenTol = 8 / (typeof zoom === 'number' && zoom > 0 ? zoom : 1);
+  const tol = Math.max(5, s.strokeWidth + 3, screenTol);
   if (s.type === 'point') return Math.hypot(p.x - s.p1.x, p.y - s.p1.y) <= Math.max(tol, 7);
   if (s.type === 'line') return pointToSegmentDist(p, s.p1, s.p2) <= tol;
   if (s.type === 'rect') {
@@ -7422,8 +7480,29 @@ function shapeIntersectsBox(s, box){
     ];
     return edges.some(([a,b]) => segIntersectsBox(a, b, box));
   }
-  if (s.type === 'circle' || s.type === 'arc' || s.type === 'ellipse'){
-    // BBox가 박스와 겹치는 시점에서 원/호/타원은 걸친 것으로 간주(실용적)
+  if (s.type === 'circle' || s.type === 'arc'){
+    // Rev.16.99: 곡선 위 점을 샘플링하여 박스에 걸치는지 정밀 판정
+    const cx = (s.type==='circle') ? s.p1.x : s.cx;
+    const cy = (s.type==='circle') ? s.p1.y : s.cy;
+    const r  = (s.type==='circle') ? Math.hypot(s.p2.x-s.p1.x, s.p2.y-s.p1.y) : s.r;
+    let a0, a1;
+    if (s.type==='circle'){ a0=0; a1=Math.PI*2; }
+    else {
+      const norm=a=>{while(a<0)a+=Math.PI*2;while(a>=Math.PI*2)a-=Math.PI*2;return a;};
+      a0=norm(s.startAngle); a1=norm(s.endAngle);
+      if (a1<=a0) a1+=Math.PI*2;
+    }
+    const span=a1-a0;
+    const steps=Math.max(16, Math.ceil(span/(Math.PI/18))); // 약 10° 간격
+    for (let k=0;k<=steps;k++){
+      const a=a0 + span*k/steps;
+      const px=cx+r*Math.cos(a), py=cy+r*Math.sin(a);
+      if (px>=box.minX && px<=box.maxX && py>=box.minY && py<=box.maxY) return true;
+    }
+    return false;
+  }
+  if (s.type === 'ellipse'){
+    // 타원은 BBox 겹침으로 간주(실용적)
     return true;
   }
   if (s.type === 'polyline' && Array.isArray(s.points)){

@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.80</title>
+<title>도면 작도기 Rev.16.82</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.80</h1>
+  <h1>📐 도면 작도기 Rev.16.82</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -550,6 +550,13 @@
     <button class="ts-btn ts-act" data-act="redo"><span class="ico">↷</span><span class="lbl">재실행</span><span class="sc">^Y</span></button>
     <button class="ts-btn ts-act" data-act="clearall"><span class="ico">🧹</span><span class="lbl">전체삭제</span></button>
   </div>
+  <!-- Rev.16.82: 모드 토글 그룹 (일반 ↔ 텍스트) -->
+  <div class="ts-group">
+    <span class="ts-label draw" title="작도 모드 선택">🧭 모드</span>
+    <button id="headerBtnNormalMode" class="ts-btn active" title="일반 모드: 마우스로 선택·작도 (텍스트입력 해제)"><span class="ico">🖱</span><span class="lbl">일반</span></button>
+    <button id="headerBtnTextMode" class="ts-btn" title="텍스트 모드: 명령어로 한붓그리기 (점/선/좌/우/상/하 등)"><span class="ico">⌨</span><span class="lbl">텍스트</span></button>
+  </div>
+
   <!-- 작성(그리기) 그룹: 버튼 클릭 후 작도 -->
   <div class="ts-group draw">
     <span class="ts-label draw" title="버튼 클릭 후 캔버스에서 작도합니다">✏ 작성</span>
@@ -1390,11 +1397,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1680"></script>
+<script src="draw_tool_core.js?v=1682"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1680"></script>
+<script src="draw_tool_core2.js?v=1682"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1680"></script>
+<script src="draw_tool_tools.js?v=1682"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

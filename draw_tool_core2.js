@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.80  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.82  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1112,20 +1112,38 @@ function penChamferAtPoint(pt, cMm){
   return applyChamferToTwoLines(near[0].line, near[1].line, near[0].click, near[1].click, cMm);
 }
 
-// Rev.16.46/51: 텍스트입력(한붓그리기) 시작
+// Rev.16.46/51/82: 텍스트입력(한붓그리기) 시작 — 함수화하여 여러 버튼에서 호출
+function startTextMode(){
+  penPoints = []; penLabelIds = []; penCur = -1;
+  penPickMode = true; penPickFirst = -1; pointMode = false;
+  penOriginPx = null; penAwaitOrigin = true;   // 첫 클릭으로 원점 지정 대기
+  // 모드 표시: 다른 도구 active 끄고 텍스트 모드 버튼들 active
+  document.querySelectorAll('.tool-strip-btn, .tool-menu-item').forEach(b => b.classList.remove('active'));
+  const pbtn = document.getElementById('headerBtnPenInput'); if (pbtn) pbtn.classList.add('active');
+  const tbtn = document.getElementById('headerBtnTextMode'); if (tbtn) tbtn.classList.add('active');
+  const nbtn = document.getElementById('headerBtnNormalMode'); if (nbtn) nbtn.classList.remove('active');
+  const ci = document.getElementById('cmdInput');
+  if (ci){ ci.focus(); ci.value = ''; }
+  document.getElementById('statusHint').textContent =
+    `◎ 텍스트 모드: 먼저 화면을 클릭해 원점(0,0)을 정하세요 · [일반] 버튼/ESC로 일반모드 복귀`;
+  cmdLog(`⌨ 텍스트 모드 시작 — 화면 클릭으로 원점 지정 (ESC=일반모드)`, 'system');
+}
+// Rev.16.82: 일반 모드로 전환 (텍스트모드 해제 + 선택 도구)
+function startNormalMode(){
+  penPickMode = false; penPickFirst = -1; penAwaitOrigin = false;
+  const pbtn = document.getElementById('headerBtnPenInput'); if (pbtn) pbtn.classList.remove('active');
+  const tbtn = document.getElementById('headerBtnTextMode'); if (tbtn) tbtn.classList.remove('active');
+  const nbtn = document.getElementById('headerBtnNormalMode'); if (nbtn) nbtn.classList.add('active');
+  if (typeof selectTool === 'function') selectTool('select');
+  document.getElementById('statusHint').textContent = `🖱 일반 모드: 마우스로 선택·작도`;
+}
 (function(){
   const btn = document.getElementById('headerBtnPenInput');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    penPoints = []; penLabelIds = []; penCur = -1;
-    penPickMode = true; penPickFirst = -1; pointMode = false;
-    penOriginPx = null; penAwaitOrigin = true;   // Rev.16.76: 첫 클릭으로 원점 지정 대기
-    const ci = document.getElementById('cmdInput');
-    if (ci){ ci.focus(); ci.value = ''; }
-    document.getElementById('statusHint').textContent =
-      `◎ 한붓그리기: 먼저 화면을 클릭해 원점(0,0)을 정하세요 (또는 명령 입력 시 우하단 기본원점)`;
-    cmdLog(`⌨ 한붓그리기 시작 — 화면 클릭으로 원점 지정`, 'system');
-  });
+  if (btn) btn.addEventListener('click', startTextMode);
+  const tbtn = document.getElementById('headerBtnTextMode');
+  if (tbtn) tbtn.addEventListener('click', startTextMode);
+  const nbtn = document.getElementById('headerBtnNormalMode');
+  if (nbtn) nbtn.addEventListener('click', startNormalMode);
 })();
 
 function tryDimCommand(cmdStr){

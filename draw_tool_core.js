@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.80  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.82  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -500,6 +500,18 @@ function selectTool(toolName){
   tool = toolName;
   firstClick = null;
   arcPath = [];
+  // Rev.16.81/82: 다른 도구 선택 시 텍스트입력(한붓그리기) 모드 자동 해제
+  if (typeof penPickMode !== 'undefined' && penPickMode){
+    penPickMode = false;
+    if (typeof penPickFirst !== 'undefined') penPickFirst = -1;
+    if (typeof penAwaitOrigin !== 'undefined') penAwaitOrigin = false;
+    const pbtn = document.getElementById('headerBtnPenInput');
+    if (pbtn) pbtn.classList.remove('active');
+    const tbtn = document.getElementById('headerBtnTextMode');
+    if (tbtn) tbtn.classList.remove('active');
+    const nbtn = document.getElementById('headerBtnNormalMode');
+    if (nbtn) nbtn.classList.add('active');
+  }
   // Rev.15.5: 도구 전환 시 외곽선 모드 해제 (외곽선 버튼이 직접 다시 켬)
   fillAsOutline = false;
   const obtn = document.getElementById('headerBtnOutline');
@@ -11234,6 +11246,13 @@ function cancelActiveTool() {
   filletState = null; chamferState = null; tangentState = null;
   offsetState = null; dimState = null; breakState = null;
   penPickMode = false; penPickFirst = -1;
+  if (typeof penAwaitOrigin !== 'undefined') penAwaitOrigin = false;
+  const _pbtn = document.getElementById('headerBtnPenInput');
+  if (_pbtn) _pbtn.classList.remove('active');
+  const _tbtn = document.getElementById('headerBtnTextMode');
+  if (_tbtn) _tbtn.classList.remove('active');
+  const _nbtn = document.getElementById('headerBtnNormalMode');
+  if (_nbtn) _nbtn.classList.add('active');
   preCtx.clearRect(0,0,baseW,baseH);
   redrawDraw();
   cmdLog('  ESC: 현재 작업 취소.', 'system');

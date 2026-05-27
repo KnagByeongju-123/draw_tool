@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.17.6  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.17.7  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1493,6 +1493,11 @@ function tryDimCommand(cmdStr){
       { l:'거리두기', t:'거리두기 ', ex:'거리두기 2 3 좌 0.6 → 평행복제' },
       { l:'두께(소재)', t:'두께 ', ex:'두께 1 5 좌/우/양 → 경로 평행. 양=중심선 기준 좌우 절반씩' },
       { l:'삭제', t:'삭제 ', ex:'삭제 1 2 (선) / 삭제 3 (점)' },
+      // Rev.17.7: 도구 상단 기능을 명령판에서 직접 호출 (action 콜백)
+      { l:'⊞ 교차(분할)', action: () => { if (typeof runBreakAllIntersections === 'function') runBreakAllIntersections(); },
+        ex:'⊞ 교차 분할: 도형들의 모든 교차점에서 선·원·호·사각형 분할 (도구 상단 교차 버튼과 동일)' },
+      { l:'🗑 삭제(선택)', action: () => { if (typeof deleteSelected === 'function') deleteSelected(); },
+        ex:'🗑 선택된 도형 삭제: 마우스 클릭/드래그로 도형을 선택한 후 이 버튼 (Delete 키와 동일)' },
       { l:'닫기', t:'닫기', ex:'닫기 → 현재점→0번 선' },
       { l:'백(취소)', t:'백', ex:'백 → 직전 1회 취소' },
       { l:'교점', t:'교점', ex:'교점 → 모든 교차점 번호부여' },
@@ -1514,11 +1519,21 @@ function tryDimCommand(cmdStr){
     (CMD_CATS[cat]||[]).forEach(c => {
       const b = document.createElement('button');
       b.className = 'cmd-pbtn'; b.textContent = c.l;
-      b.addEventListener('click', () => {
-        setBuf(c.t);
-        hintEl.textContent = '📝 ' + c.ex;
-        ci.focus();
-      });
+      // Rev.17.7: action 콜백이 있으면 직접 호출(도구 기능 링크), 없으면 기존처럼 명령 텍스트 채움
+      if (typeof c.action === 'function'){
+        b.style.background = '#3a4a55';   // 함수형 버튼은 살짝 강조
+        b.addEventListener('click', () => {
+          hintEl.textContent = '▶ ' + c.ex;
+          try { c.action(); }
+          catch(e){ hintEl.textContent = '✗ 실행 오류: ' + (e.message||e); }
+        });
+      } else {
+        b.addEventListener('click', () => {
+          setBuf(c.t);
+          hintEl.textContent = '📝 ' + c.ex;
+          ci.focus();
+        });
+      }
       btnsEl.appendChild(b);
     });
     tabsEl.querySelectorAll('.cmd-ptab').forEach(t => t.classList.toggle('active', t.dataset.cat===cat));

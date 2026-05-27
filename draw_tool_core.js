@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.94  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.95  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -4960,10 +4960,39 @@ function applyBreak(target, brk1, brk2) {
 // 선택된 선들의 모든 교차점을 찾아 한꺼번에 분할
 // 선택이 없으면 → 전체 line 대상
 function runBreakAllIntersections() {
-  // 대상: 선택된 line만, 없으면 전체 line
+  // Rev.16.95: 사각형/폴리라인을 먼저 개별 선으로 분해(explode)한 뒤 분할 대상에 포함
+  const inSel = (s) => selectedIds.size === 0 || selectedIds.has(s.id);
+  const explodeIds = [];   // 분해되어 제거할 원본 도형 id
+  const explodedLines = []; // 분해로 생긴 임시 선
+  for (const s of shapes){
+    if (!inSel(s)) continue;
+    let pts = null, closed = false, stroke = s.stroke||'#fff', sw = s.strokeWidth||1;
+    if (s.type === 'rect'){
+      // rect: p1, p2가 대각 모서리
+      const x1=s.p1.x, y1=s.p1.y, x2=s.p2.x, y2=s.p2.y;
+      pts = [{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}]; closed = true;
+    } else if (s.type === 'polyline' && Array.isArray(s.points) && s.points.length>=2){
+      pts = s.points.map(p=>({x:p.x,y:p.y})); closed = !!s.closed;
+    }
+    if (!pts) continue;
+    explodeIds.push(s.id);
+    for (let k=0;k<pts.length-1;k++){
+      explodedLines.push({ id:++shapeIdSeq, type:'line', p1:pts[k], p2:pts[k+1], stroke, strokeWidth:sw, layer:s.layer, _exploded:true });
+    }
+    if (closed && pts.length>=3){
+      explodedLines.push({ id:++shapeIdSeq, type:'line', p1:pts[pts.length-1], p2:pts[0], stroke, strokeWidth:sw, layer:s.layer, _exploded:true });
+    }
+  }
+  // 원본 rect/polyline 제거 + 분해선 추가
+  if (explodeIds.length){
+    for (let i=shapes.length-1;i>=0;i--){ if(explodeIds.includes(shapes[i].id)) shapes.splice(i,1); }
+    explodedLines.forEach(l => shapes.push(l));
+  }
+
+  // 대상: 선택된 line만, 없으면 전체 line (분해선 포함)
   let targets;
   if (selectedIds.size > 0) {
-    targets = shapes.filter(s => s.type === 'line' && selectedIds.has(s.id));
+    targets = shapes.filter(s => s.type === 'line' && (selectedIds.has(s.id) || s._exploded));
   } else {
     targets = shapes.filter(s => s.type === 'line');
   }
@@ -5066,13 +5095,57 @@ function runBreakAllIntersections() {
     }
   }
 
+  // Rev.16.95: 원/호를 교점(선과의)에서 호 조각으로 분할
+  let circSegs = 0;
+  const allLinesForCirc = shapes.filter(s => s.type === 'line');
+  for (const ct of circTargets){
+    const c = ct.type==='circle'
+      ? { cx:ct.p1.x, cy:ct.p1.y, r:Math.hypot(ct.p2.x-ct.p1.x, ct.p2.y-ct.p1.y) }
+      : { cx:ct.cx, cy:ct.cy, r:ct.r, arc:true, a0:ct.startAngle, a1:ct.endAngle };
+    const angs = [];
+    for (const L of allLinesForCirc){
+      const dx=L.p2.x-L.p1.x, dy=L.p2.y-L.p1.y;
+      const fx=L.p1.x-c.cx, fy=L.p1.y-c.cy;
+      const A=dx*dx+dy*dy, B=2*(fx*dx+fy*dy), C=fx*fx+fy*fy-c.r*c.r;
+      const disc=B*B-4*A*C; if(disc<0||A<1e-9) continue;
+      const sq=Math.sqrt(disc);
+      [(-B-sq)/(2*A),(-B+sq)/(2*A)].forEach(t=>{
+        if(t>=-1e-6&&t<=1+1e-6){ const x=L.p1.x+t*dx,y=L.p1.y+t*dy; angs.push(Math.atan2(y-c.cy, x-c.cx)); }
+      });
+    }
+    if (angs.length < 1) continue;
+    const norm=a=>{while(a<0)a+=2*Math.PI;while(a>=2*Math.PI)a-=2*Math.PI;return a;};
+    let cuts = Array.from(new Set(angs.map(a=>Math.round(norm(a)*10000)/10000))).sort((x,y)=>x-y);
+    if (cuts.length < 1) continue;
+    let bounds;
+    if (c.arc){
+      const a0=norm(c.a0), a1=norm(c.a1);
+      const within = cuts.filter(a => (a0<=a1) ? (a>a0+1e-4&&a<a1-1e-4) : (a>a0+1e-4||a<a1-1e-4));
+      bounds = [a0, ...within, a1];
+    } else {
+      bounds = [...cuts, cuts[0]+2*Math.PI];
+    }
+    if (bounds.length < 2) continue;
+    const oi = shapes.findIndex(s=>s.id===ct.id); if(oi>=0) shapes.splice(oi,1);
+    for (let k=0;k<bounds.length-1;k++){
+      let s0=bounds[k], s1=bounds[k+1];
+      if (Math.abs(s1-s0) < 1e-3) continue;
+      shapes.push({
+        id:++shapeIdSeq, type:'arc',
+        cx:c.cx, cy:c.cy, r:c.r, startAngle:s0, endAngle:s1,
+        stroke: ct.stroke||'#fff', strokeWidth: ct.strokeWidth||1, layer: ct.layer
+      });
+      circSegs++;
+    }
+  }
+
   selectedIds.clear();
   redoStack = []; pushHistory();
   redrawDraw();
   updateCount();
   updateSelStat();
-  document.getElementById('statusHint').textContent = `⊞ 교차점 ${intersectionCount}개에서 ${totalSegments}개 조각으로 분할됨`;
-  try { cmdLog(`  ✓ ${targets.length}개 선 → 교차점 ${intersectionCount}개에서 ${totalSegments}개 조각으로 분할`, 'system'); } catch(e) {}
+  document.getElementById('statusHint').textContent = `⊞ 교차점 ${intersectionCount}개에서 선 ${totalSegments}개·호 ${circSegs}개 조각으로 분할됨`;
+  try { cmdLog(`  ✓ 교차점 ${intersectionCount}개 → 선 ${totalSegments}개 + 호 ${circSegs}개 조각으로 분할`, 'system'); } catch(e) {}
 }
 
 // 선분-선분 교차점 (양쪽 모두 0~1 범위 내일 때만)

@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.72  최신본 — 명령어 (점·선[선 상 3.7/선 좌 교점/선 좌 지]·지름·거리두기·연장·절교/절각·점방향교점·기준점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.75  최신본 — 명령어 (절교/절각[절교 9 10 3 y: 기준점 축까지]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -595,33 +595,31 @@ function tryPenCommand(cmdStr){
     if (len < 1e-6) return true;
     const ux = (b.x-a.x)/len, uy = (b.y-a.y)/len;
     let nx, ny, jgLabel;
-    // Rev.16.66: 절교 3 4 점 5 - 5번 점을 연장선에 수직투영한 위치까지
-    if (toks[3] === '점'){
-      const ti = parsePenIdx(toks[4]);
-      if (ti == null || !penPoints[ti]){ document.getElementById('statusHint').textContent=`절교: ${toks[4]}번 점이 없습니다`; return true; }
-      const T = penPoints[ti];
-      const proj = (T.x-b.x)*ux + (T.y-b.y)*uy;   // b에서 방향으로 투영거리
-      nx = b.x + ux*proj; ny = b.y + uy*proj; jgLabel = `점 ${ti}`;
+    // Rev.16.74: 절교 9 10 3 y - 9→10 선을 3번 점의 Y(또는 X)좌표까지 연장
+    //   toks[3]=기준 점번호, toks[4]=축(x/y). 축 생략 시 점을 연장선에 수직투영(기존 동작).
+    const refIdx = parsePenIdx((toks[3]||'').replace(/^점/,''));   // '점3','3','P3' 모두 번호 추출
+    if (refIdx == null || !penPoints[refIdx]){
+      document.getElementById('statusHint').textContent = '절교: 절교 9 10 3 수직 형식 (기준 점번호 + 수평/수직)';
+      return true;
+    }
+    const T = penPoints[refIdx];
+    const axisTok = (toks[4]||'').toUpperCase();
+    const isVert = (toks[4]==='수직' || axisTok==='V');
+    const isHoriz = (toks[4]==='수평' || axisTok==='H');
+    if (isVert){
+      // 3번 점을 지나는 수직선(세로선, X=T.x)과 9-10 연장선의 교점
+      if (Math.abs(ux) < 1e-6){ document.getElementById('statusHint').textContent='절교: 세로 연장선은 수직선과 안 만남(평행)'; return true; }
+      const t = (T.x - b.x) / ux;
+      nx = b.x + ux*t; ny = b.y + uy*t; jgLabel = `점${refIdx} 수직선`;
+    } else if (isHoriz){
+      // 3번 점을 지나는 수평선(가로선, Y=T.y)과 9-10 연장선의 교점
+      if (Math.abs(uy) < 1e-6){ document.getElementById('statusHint').textContent='절교: 가로 연장선은 수평선과 안 만남(평행)'; return true; }
+      const t = (T.y - b.y) / uy;
+      nx = b.x + ux*t; ny = b.y + uy*t; jgLabel = `점${refIdx} 수평선`;
     } else {
-      // 축+값: 'X0' / 'X 0' 모두 허용
-      let axisTok = toks[3] || '';
-      let axis, val;
-      const m = axisTok.match(/^([XY])\s*(.*)$/i);
-      if (m){ axis = m[1].toUpperCase(); val = (m[2] !== '') ? evalExpr(m[2]) : evalExpr(toks[4]); }
-      else { document.getElementById('statusHint').textContent = '절교: 절교 3 4 x0 / y3 / 점 5 형식'; return true; }
-      if (!isFinite(val)) return false;
-      if (axis === 'X'){
-        if (Math.abs(ux) < 1e-6){ document.getElementById('statusHint').textContent='절교: 세로선은 X좌표로 도달 불가'; return true; }
-        const targetPx = penMmToPx(val, 0).x;
-        const t = (targetPx - b.x) / ux;
-        nx = b.x + ux*t; ny = b.y + uy*t;
-      } else {
-        if (Math.abs(uy) < 1e-6){ document.getElementById('statusHint').textContent='절교: 가로선은 Y좌표로 도달 불가'; return true; }
-        const targetPy = penMmToPx(0, val).y;
-        const t = (targetPy - b.y) / uy;
-        nx = b.x + ux*t; ny = b.y + uy*t;
-      }
-      jgLabel = `${axis}=${val}`;
+      // 축 생략: 점을 연장선에 수직투영 (보조 동작)
+      const proj = (T.x-b.x)*ux + (T.y-b.y)*uy;
+      nx = b.x + ux*proj; ny = b.y + uy*proj; jgLabel = `점${refIdx}`;
     }
     const ln = penFindLineByEndpoints(i1, i2);
     if (ln){
@@ -629,11 +627,11 @@ function tryPenCommand(cmdStr){
       ln[which] = { x:nx, y:ny };
       penPoints[i2] = { x:nx, y:ny };
       penUpdateLabel(i2, nx, ny);
-      penFinish(`↦ ${i1}-${i2} 선 ${jgLabel}까지 절대연장`);
+      penFinish(`↦ ${i1}-${i2} 선 ${jgLabel}까지 연장`);
     } else {
       penAddLine(a.x, a.y, nx, ny);
       const ne = penAddPoint(nx, ny);
-      penFinish(`↦ ${i1}-${i2} 방향 ${jgLabel}까지 절대연장 선생성 → P${ne}`);
+      penFinish(`↦ ${i1}-${i2} 방향 ${jgLabel}까지 연장 → P${ne}`);
     }
     return true;
   }
@@ -648,36 +646,34 @@ function tryPenCommand(cmdStr){
     const ux = Math.cos(rad), uy = -Math.sin(rad);   // 반시계+ , 위=Y감소
     const sp2 = penPoints[si];
     let nx, ny, label;
-    // Rev.16.66: 절각 3 45 점 5 - 5번 점을 연장선에 수직투영한 위치까지
-    if (toks[3] === '점'){
-      const ti = parsePenIdx(toks[4]);
-      if (ti == null || !penPoints[ti]){ document.getElementById('statusHint').textContent=`절각: ${toks[4]}번 점이 없습니다`; return true; }
-      const T = penPoints[ti];
-      const proj = (T.x-sp2.x)*ux + (T.y-sp2.y)*uy;
-      nx = sp2.x + ux*proj; ny = sp2.y + uy*proj; label = `점 ${ti}`;
+    // Rev.16.74: 절각 3 45 5 y - 3번 점서 45도 방향으로 5번 점의 Y(또는 X)좌표까지.
+    //   toks[3]=기준 점번호, toks[4]=축(x/y). 축 생략 시 점을 연장선에 수직투영.
+    const refIdx = parsePenIdx((toks[3]||'').replace(/^점/,''));
+    if (refIdx == null || !penPoints[refIdx]){
+      document.getElementById('statusHint').textContent = '절각: 절각 3 45 5 수직 형식 (각도 + 기준 점번호 + 수평/수직)';
+      return true;
+    }
+    const T = penPoints[refIdx];
+    const axisTok = (toks[4]||'').toUpperCase();
+    const isVert = (toks[4]==='수직' || axisTok==='V');
+    const isHoriz = (toks[4]==='수평' || axisTok==='H');
+    if (isVert){
+      // 기준점을 지나는 수직선(세로선, X=T.x)과 각도 연장선의 교점
+      if (Math.abs(ux) < 1e-6){ document.getElementById('statusHint').textContent='절각: 수직(90/270°) 방향은 수직선과 안 만남(평행)'; return true; }
+      const t = (T.x - sp2.x) / ux;
+      nx = sp2.x + ux*t; ny = sp2.y + uy*t; label = `점${refIdx} 수직선`;
+    } else if (isHoriz){
+      // 기준점을 지나는 수평선(가로선, Y=T.y)과 각도 연장선의 교점
+      if (Math.abs(uy) < 1e-6){ document.getElementById('statusHint').textContent='절각: 수평(0/180°) 방향은 수평선과 안 만남(평행)'; return true; }
+      const t = (T.y - sp2.y) / uy;
+      nx = sp2.x + ux*t; ny = sp2.y + uy*t; label = `점${refIdx} 수평선`;
     } else {
-      let axisTok = toks[3] || '';
-      let axis, val;
-      const m = axisTok.match(/^([XY])\s*(.*)$/i);
-      if (m){ axis = m[1].toUpperCase(); val = (m[2] !== '') ? evalExpr(m[2]) : evalExpr(toks[4]); }
-      else { document.getElementById('statusHint').textContent = '절각: 절각 3 45 Y10 / x0 / 점 5 형식'; return true; }
-      if (!isFinite(val)) return false;
-      if (axis === 'X'){
-        if (Math.abs(ux) < 1e-6){ document.getElementById('statusHint').textContent='절각: 수직(90/270°)은 X좌표 도달 불가'; return true; }
-        const targetPx = penMmToPx(val, 0).x;
-        const t = (targetPx - sp2.x) / ux;
-        nx = sp2.x + ux*t; ny = sp2.y + uy*t;
-      } else {
-        if (Math.abs(uy) < 1e-6){ document.getElementById('statusHint').textContent='절각: 수평(0/180°)은 Y좌표 도달 불가'; return true; }
-        const targetPy = penMmToPx(0, val).y;
-        const t = (targetPy - sp2.y) / uy;
-        nx = sp2.x + ux*t; ny = sp2.y + uy*t;
-      }
-      label = `${axis}=${val}`;
+      const proj = (T.x-sp2.x)*ux + (T.y-sp2.y)*uy;
+      nx = sp2.x + ux*proj; ny = sp2.y + uy*proj; label = `점${refIdx}`;
     }
     penAddLine(sp2.x, sp2.y, nx, ny);
     const ne = penAddPoint(nx, ny);
-    penFinish(`↦ P${si}에서 ${ang}° 방향 ${label}까지 절대연장 → P${ne}`);
+    penFinish(`↦ P${si}에서 ${ang}° 방향 ${label}까지 연장 → P${ne}`);
     return true;
   }
 

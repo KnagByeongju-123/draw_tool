@@ -268,8 +268,14 @@ document.getElementById('btnClearBg').addEventListener('click', () => {
 });
 
 document.getElementById('zoom').addEventListener('input', e => {
-  zoom = parseInt(e.target.value) / 100;
-  document.getElementById('zoomVal').textContent = e.target.value + '%';
+  // Rev.16.64: 확대비율 상한 50% 강제 (초과 시 화면이 흰색으로 변하는 현상 방지)
+  const maxZ = parseInt(e.target.max) || 50;
+  const minZ = parseInt(e.target.min) || 3;
+  let zp = parseInt(e.target.value);
+  if (zp > maxZ){ zp = maxZ; e.target.value = maxZ; }
+  if (zp < minZ){ zp = minZ; e.target.value = minZ; }
+  zoom = zp / 100;
+  document.getElementById('zoomVal').textContent = zp + '%';
   setCanvasSize(baseW, baseH);
   if (typeof updateSelActionBar === 'function') updateSelActionBar(); // Rev.10.11
 });
@@ -315,11 +321,14 @@ document.getElementById('menuBgReset').addEventListener('click', () => {
   redrawBg();
 });
 
-// Rev.11.10: 빠른 배율 프리셋 버튼
+// Rev.16.64: 빠른 배율 프리셋 버튼 (슬라이더 max 한계 내로 클램프 - 흰 화면 방지)
 document.querySelectorAll('.zoom-preset').forEach(el => {
   el.addEventListener('click', () => {
-    const z = el.getAttribute('data-zoom');
     const zoomInput = document.getElementById('zoom');
+    let z = parseInt(el.getAttribute('data-zoom'));
+    const maxZ = parseInt(zoomInput.max) || 50;
+    const minZ = parseInt(zoomInput.min) || 3;
+    z = Math.max(minZ, Math.min(maxZ, z));
     zoomInput.value = z;
     zoomInput.dispatchEvent(new Event('input'));
   });
@@ -6318,7 +6327,9 @@ function doFillAtPoint(p) {
   if (fillAsOutline){
     const f = hitTestFill(p);
     if (f && Array.isArray(f.points) && f.points.length >= 3){
-      const stroke = document.getElementById('lineColor') ? (document.getElementById('lineColor').value || '#000') : '#000';
+      // Rev.16.65: 선 색상 요소 ID는 strokeColor (lineColor 아님). 못 찾으면 흰색.
+      const sc = document.getElementById('strokeColor');
+      const stroke = sc ? (sc.value || '#ffffff') : '#ffffff';
       // Rev.15.9: 픽셀 계단/미세 단차 제거 - 직선 피팅 + 교점 코너
       const cleaned = fitOutlineToLines(f.points.map(pt => ({x: pt.x, y: pt.y})), 8);
       const poly = {
@@ -6329,9 +6340,7 @@ function doFillAtPoint(p) {
         strokeWidth: parseInt(document.getElementById('strokeWidth').value) || 1,
         layer: f.layer || currentLayer || 'default'
       };
-      // 원본 채움 삭제
-      const fi = fills.findIndex(x => x.id === f.id);
-      if (fi >= 0) fills.splice(fi, 1);
+      // Rev.16.65: 원본 채움은 그대로 유지하고 그 경계에 외곽선만 추가
       shapes.push(poly);
       selectedIds.clear(); selectedIds.add(poly.id);
       redoStack = []; pushHistory();
@@ -6339,7 +6348,7 @@ function doFillAtPoint(p) {
       redrawDraw(); updateCount();
       if (typeof updateSelStat === 'function') updateSelStat();
       document.getElementById('statusHint').textContent =
-        `🖊 채움 → 외곽선 변환 완료: 점 ${poly.points.length}개 폴리라인 (채움 삭제). 계속 클릭=다중, Esc=종료`;
+        `🖊 채움 외곽선 생성 완료: 점 ${poly.points.length}개 폴리라인 (채움 유지). 계속 클릭=다중, Esc=종료`;
       return;
     }
     // 채움이 없으면 아래로 진행: 선을 경계로 floodFill해서 외곽선 생성 (기존 방식)
@@ -6523,7 +6532,9 @@ function doFillAtPoint(p) {
           cmdLog('  외곽선: 경계점이 부족합니다.', 'error');
           hideLoading(); return;
         }
-        const stroke = document.getElementById('lineColor') ? (document.getElementById('lineColor').value || '#000') : '#000';
+        // Rev.16.65: 선 색상 요소 ID는 strokeColor (lineColor 아님). 못 찾으면 흰색.
+        const sc2 = document.getElementById('strokeColor');
+        const stroke = sc2 ? (sc2.value || '#ffffff') : '#ffffff';
         // Rev.15.9: 픽셀 계단/미세 단차 제거 - 직선 피팅 + 교점 코너
         const cleaned = fitOutlineToLines(simplified.map(pt => ({x: pt.x, y: pt.y})), 8);
         const poly = {

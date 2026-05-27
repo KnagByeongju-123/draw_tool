@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.61</title>
+<title>도면 작도기 Rev.16.62</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.61</h1>
+  <h1>📐 도면 작도기 Rev.16.62</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -1158,26 +1158,26 @@
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>이동 1 우 10</b></td><td style="padding:4px 8px;">1번 점을 우 10mm 이동 (연결된 선도 함께). 번호 생략 시 현재점: <b>이동 상 3</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 2 3 좌 0.6</b></td><td style="padding:4px 8px;">2→3 진행방향 기준 좌/우로 0.6mm 평행복제 (방향 생략 시 좌). 새 선 끝점 번호 부여</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px; width:120px;" colspan="2"><b style="color:#5bc8e8;">━ 한붓그리기 (점번호 0,1,2... 자동) ━</b></td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>각 A D / 각 A 교점</b></td><td style="padding:4px 8px;">각도 A°(수평0°, 반시계+) D mm. <b>각 45 교점</b>=그 방향 직진하다 첫 교점까지</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 위/아래 D</b></td><td style="padding:4px 8px;">마지막 선을 화면상 위/아래로 D mm 평행복제 (점번호 없이)</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>교점</b></td><td style="padding:4px 8px;">기존 모든 선의 교차점에 일괄 번호 부여</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 X Y</b></td><td style="padding:4px 8px;">빈 공간 좌표를 기준점(노란 십자)으로. 빈 곳 마우스 클릭도 동일</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 상 50</b></td><td style="padding:4px 8px;">현재 기준점에서 방향(상/하/좌/우)으로 50mm 떨어진 곳에 새 기준점</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 지 130 110</b></td><td style="padding:4px 8px;">지름 130 → 좌측 반지름(−65), Y=110 위치를 기준점으로</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>닫기 / 백 / 점초기화</b></td><td style="padding:4px 8px;">닫기=현재 점→0번 선 · <b>백</b>=직전 1회 취소 · 점초기화=번호 리셋</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>선택 10 / 선택 상 교점</b></td><td style="padding:4px 8px;">선택 10=현재 점을 10번으로 이동. <b>선택 상 교점</b>=그 방향 첫 교점에 점만 찍고 선택(선 없음)</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>수식 =(식)</b></td><td style="padding:4px 8px;">숫자 자리에 = 붙여 계산. 예: <b>좌 =(130-110)/2</b> · <b>점 상 =5+3</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>시작 X Y</b></td><td style="padding:4px 8px;">시작점 0번을 (X,Y)mm로 설정. 0,0=화면 우측하단 기준, 위=+Y. 예: <b>시작 0 0</b></td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 X,Y</b></td><td style="padding:4px 8px;">좌표 (X,Y)mm에 점 찍기. 예: <b>점 -100,100</b></td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>연결 1 4 (선 1 4)</b></td><td style="padding:4px 8px;">두 점(1번, 4번)을 직접 연결. 마우스로 두 점 클릭해도 연결</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>우/좌/상/하 D</b></td><td style="padding:4px 8px;">현재 점에서 그 방향 D mm 선 긋고 새 번호. 예: <b>우 50</b>. <b>우 교점</b>=그 방향 첫 교점까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 N</b></td><td style="padding:4px 8px;">N번 점을 현재점으로 선택. 예: <b>점 5</b> (마우스로 점 클릭해도 선택)</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 X,Y</b></td><td style="padding:4px 8px;">좌표 (X,Y)mm에 점 찍기. 예: <b>점 -100,100</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 상 2.5</b></td><td style="padding:4px 8px;">현재 선택점에서 방향(상/하/좌/우)+거리에 독립 점만 찍기 (선 없음)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 좌 지 110 130</b></td><td style="padding:4px 8px;">현재점에서 지름차 (130−110)/2 만큼 방향으로 독립 점</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 X Y</b></td><td style="padding:4px 8px;">빈 공간 좌표를 기준점(노란 십자)으로. 빈 곳 마우스 클릭도 동일</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 지 130 110</b></td><td style="padding:4px 8px;">지름 130 → 좌측 반지름(−65), Y=110 위치를 기준점으로</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 상 50</b></td><td style="padding:4px 8px;">현재 기준점에서 방향(상/하/좌/우)으로 50mm 떨어진 곳에 새 기준점</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>우/좌/상/하 D</b></td><td style="padding:4px 8px;">현재 점에서 그 방향 D mm 선 긋고 새 번호. 예: <b>우 50</b>. <b>우 교점</b>=그 방향 첫 교점까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>좌 지 110 130</b></td><td style="padding:4px 8px;">지름차 (130−110)/2 = 10mm 만큼 좌측으로 선 긋기 (우 지도 동일)</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>각 A D / 각 A 교점</b></td><td style="padding:4px 8px;">각도 A°(수평0°, 반시계+) D mm. <b>각 45 교점</b>=그 방향 직진하다 첫 교점까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>호 N R 시계 각 45</b></td><td style="padding:4px 8px;">N번 중심, 반지름 R, 시계방향 45도 호. 기준점↔중심은 점선 표시</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>호 N R 시계 교점</b></td><td style="padding:4px 8px;">N번 중심, 반지름 R 호를 시계/반시계로 돌다 첫 교점까지</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>교점</b></td><td style="padding:4px 8px;">기존 모든 선의 교차점에 일괄 번호 부여</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>3 우 50</b></td><td style="padding:4px 8px;">번호 3에서 분기 시작 (앞에 번호 붙이면 그 점부터)</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>선택 10 / 선택 상 교점</b></td><td style="padding:4px 8px;">선택 10=현재 점을 10번으로 이동. <b>선택 상 교점</b>=그 방향 첫 교점에 점만 찍고 선택(선 없음)</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>연결 1 4 (선 1 4)</b></td><td style="padding:4px 8px;">두 점(1번, 4번)을 직접 연결. 마우스로 두 점 클릭해도 연결</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 위/아래 D</b></td><td style="padding:4px 8px;">마지막 선을 화면상 위/아래로 D mm 평행복제 (점번호 없이)</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>수식 =(식)</b></td><td style="padding:4px 8px;">숫자 자리에 = 붙여 계산. 예: <b>좌 =(130-110)/2</b> · <b>점 상 =5+3</b></td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>닫기 / 백 / 점초기화</b></td><td style="padding:4px 8px;">닫기=현재 점→0번 선 · <b>백</b>=직전 1회 취소 · 점초기화=번호 리셋</td></tr>
         <tr style="background:#23301f;"><td style="padding:4px 8px;"><b>사각형 W H</b></td><td style="padding:4px 8px;">가로 W · 세로 H mm 사각형(4선). 예: <b>사각형 40 25</b> · BASE/REC도 동일 · 수식가능(40+5)</td></tr>
         <tr style="background:#23301f;"><td style="padding:4px 8px;"><b>원 D / 원 X Y D</b></td><td style="padding:4px 8px;">지름 D mm 원 (중앙). 좌표 지정: <b>원 -50 50 5</b> = (−50,50)에 Ø5</td></td></tr>
         <tr style="background:#23301f;"><td style="padding:4px 8px;"><b>가로선 L / 세로선 L</b></td><td style="padding:4px 8px;">길이 L mm 가로/세로선 (작업영역 중앙). 예: <b>가로선 100</b></td></tr>
@@ -1369,11 +1369,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1661"></script>
+<script src="draw_tool_core.js?v=1662"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1661"></script>
+<script src="draw_tool_core2.js?v=1662"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1661"></script>
+<script src="draw_tool_tools.js?v=1662"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.86  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.87  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -6379,12 +6379,18 @@ function doFillAtPoint(p) {
       if (fi >= 0) fills.splice(fi, 1);
       shapes.push(poly);
       selectedIds.clear(); selectedIds.add(poly.id);
-      redoStack = []; pushHistory();
-      if (typeof redrawFills === 'function') redrawFills();
-      redrawDraw(); updateCount();
-      if (typeof updateSelStat === 'function') updateSelStat();
+      // Rev.16.87: 외곽선 = 분리까지 — 닫힌 폴리라인을 개별 선들로 바로 분해
+      let madeLines = poly.points.length;
+      if (typeof ungroupPolyline === 'function'){
+        ungroupPolyline();   // 선택된 poly를 개별 선으로 분리 + 리드로/히스토리 처리
+      } else {
+        redoStack = []; pushHistory();
+        if (typeof redrawFills === 'function') redrawFills();
+        redrawDraw(); updateCount();
+        if (typeof updateSelStat === 'function') updateSelStat();
+      }
       document.getElementById('statusHint').textContent =
-        `🖊 채움 → 외곽선 변환 완료: 점 ${poly.points.length}개 폴리라인 (채움 삭제). 계속 클릭=다중, Esc=종료`;
+        `🖊 채움 → 외곽선 + 분리 완료: 개별 선 ${madeLines}개 생성 (채움 삭제). 계속 클릭=다중, Esc=종료`;
       return;
     }
     // 채움이 없으면 아래로 진행: 선을 경계로 floodFill해서 외곽선 생성 (기존 방식)

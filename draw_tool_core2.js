@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.91  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.92  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -47,21 +47,15 @@ function handlePenPickClick(p){
   }
   const idx = penFindNearestPoint(p);
   if (idx < 0){
-    // Rev.16.77: 빈 곳 클릭은 점을 만들지 않음. 연결 대기중이면 선택만 해제.
-    if (penPickFirst >= 0){ penPickFirst = -1;
-      document.getElementById('statusHint').textContent='선택 해제'; redrawDraw(); return true; }
+    // 빈 곳 클릭은 점을 만들지 않음
     document.getElementById('statusHint').textContent='빈 곳: 점 없음 (기준점은 「기준 X Y」 명령 사용)';
     return true;
   }
-  if (penPickFirst < 0){ penPickFirst=idx; penCur=idx;
-    const m=penPxToMm(penPoints[idx].x,penPoints[idx].y);
-    document.getElementById('statusHint').textContent=`▸ ${idx}번 점 선택 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm · 다른 점 클릭=연결`;
-    redrawDraw(); return true; }
-  if (idx === penPickFirst) return true;
-  penAddLine(penPoints[penPickFirst].x,penPoints[penPickFirst].y,penPoints[idx].x,penPoints[idx].y);
-  cmdLog(`✎ 선 P${penPickFirst}-P${idx} 연결 (마우스)`,'user');
-  penCur=idx; penPickFirst=idx;
-  redoStack=[]; pushHistory(); if(typeof redrawFills==='function')redrawFills(); redrawDraw(); updateCount();
+  // Rev.16.92: 마우스 클릭은 항상 그 점을 현재 기준점으로 선택만 (자동 선긋기 안 함, 연결은 「연결 1 4」 명령)
+  penCur = idx; penPickFirst = idx;
+  const m = penPxToMm(penPoints[idx].x, penPoints[idx].y);
+  document.getElementById('statusHint').textContent = `▸ ${idx}번 점 선택됨 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm · 여기서 우/좌/상/하·각 명령으로 작도`;
+  redrawDraw();
   return true;
 }
 
@@ -100,7 +94,7 @@ function penAddAnchor(px, py){
   penLabelIds[idx] = lbId;
   return idx;
 }
-function penAddLine(x1,y1,x2,y2){
+function penAddLine(x1,y1,x2,y2,noMerge){
   const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
   const stroke = document.getElementById('strokeColor').value || '#ffffff';
   const tolPx = 1/mmPerPixel * 0.05;   // 0.05mm 이내 = 같은 위치로 간주
@@ -117,7 +111,7 @@ function penAddLine(x1,y1,x2,y2){
   const proj = (P) => (P.x-A.x)*ux + (P.y-A.y)*uy;
 
   let merged = false;
-  for (let i = shapes.length-1; i >= 0; i--){
+  for (let i = shapes.length-1; !noMerge && i >= 0; i--){
     const s = shapes[i];
     if (s.type !== 'line') continue;
     // 공선 판정: 기존 선의 두 끝점이 새 선 직선 위(수직거리≈0) + 방향 평행
@@ -873,7 +867,7 @@ function tryPenCommand(cmdStr){
     if (adjA){ const ix=lineLineIntersection(na,nb,adjA.p1,adjA.p2); if(ix) na={x:ix.x,y:ix.y}; }
     if (adjB){ const ix=lineLineIntersection(na,nb,adjB.p1,adjB.p2); if(ix) nb={x:ix.x,y:ix.y}; }
 
-    penAddLine(na.x,na.y,nb.x,nb.y);
+    penAddLine(na.x,na.y,nb.x,nb.y,true);   // noMerge: 평행선은 합치지 않음
     const ea = penAddPoint(na.x,na.y);
     const eb = penAddPoint(nb.x,nb.y);
     penFinish(`⫴ ${i1}→${i2} ${isLeft?'좌':'우'}측 ${dmm}mm 평행복제 → P${ea}, P${eb}`);

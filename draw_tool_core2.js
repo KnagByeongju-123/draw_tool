@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.88  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.91  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -103,10 +103,48 @@ function penAddAnchor(px, py){
 function penAddLine(x1,y1,x2,y2){
   const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
   const stroke = document.getElementById('strokeColor').value || '#ffffff';
-  const newLine = { id:++shapeIdSeq, type:'line', p1:{x:x1,y:y1}, p2:{x:x2,y:y2}, stroke, strokeWidth:sw, layer:(currentLayer||'default') };
+  const tolPx = 1/mmPerPixel * 0.05;   // 0.05mm 이내 = 같은 위치로 간주
+  const A = {x:x1,y:y1}, B = {x:x2,y:y2};
+  const len = Math.hypot(B.x-A.x, B.y-A.y);
+  if (len < 1e-6){ return null; }   // 길이 0 선 무시
+
+  // Rev.16.91: 같은 직선 위에서 겹치거나 맞닿는 기존 선이 있으면 합쳐서 가장 긴 선 하나로.
+  //   (짧은 선이 긴 선에 완전히 포함되는 경우 포함)
+  const ux = (B.x-A.x)/len, uy = (B.y-A.y)/len;
+  // 점 P가 새 선 직선(A기준 방향 u) 위에 있는지: 수직거리
+  const perpDist = (P) => Math.abs((P.x-A.x)*uy - (P.y-A.y)*ux);
+  // 점 P의 방향축 투영값 (A=0, B=len 기준)
+  const proj = (P) => (P.x-A.x)*ux + (P.y-A.y)*uy;
+
+  let merged = false;
+  for (let i = shapes.length-1; i >= 0; i--){
+    const s = shapes[i];
+    if (s.type !== 'line') continue;
+    // 공선 판정: 기존 선의 두 끝점이 새 선 직선 위(수직거리≈0) + 방향 평행
+    if (perpDist(s.p1) > tolPx || perpDist(s.p2) > tolPx) continue;
+    // 구간(투영값) 계산
+    const tNewMin = 0, tNewMax = len;
+    let tA = proj(s.p1), tB = proj(s.p2);
+    const tOldMin = Math.min(tA,tB), tOldMax = Math.max(tA,tB);
+    // 겹치거나 맞닿음? (끝이 닿는 것도 합침: tol 허용)
+    const overlap = (tOldMin <= tNewMax + tolPx) && (tNewMin <= tOldMax + tolPx);
+    if (!overlap) continue;
+    // 합치기: 두 구간을 포함하는 최소~최대 지점
+    const lo = Math.min(tNewMin, tOldMin), hi = Math.max(tNewMax, tOldMax);
+    const np1 = { x:A.x + ux*lo, y:A.y + uy*lo };
+    const np2 = { x:A.x + ux*hi, y:A.y + uy*hi };
+    s.p1 = np1; s.p2 = np2;   // 기존 선을 합친 결과로 확장
+    document.getElementById('statusHint').textContent = '↪ 같은 직선의 선과 합침 (긴 선 하나로 유지)';
+    merged = true;
+    penAutoIntersect(s);
+    return s;
+  }
+
+  const newLine = { id:++shapeIdSeq, type:'line', p1:A, p2:B, stroke, strokeWidth:sw, layer:(currentLayer||'default') };
   shapes.push(newLine);
   // Rev.16.34: 새 선이 기존 선들과 만나는 교차점 자동 번호 부여
   penAutoIntersect(newLine);
+  return newLine;
 }
 // Rev.16.34: 주어진 선과 기존 다른 선들의 교차점을 찾아 자동으로 번호 점 추가
 function penAutoIntersect(newLine){

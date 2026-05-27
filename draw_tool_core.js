@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.88  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.91  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -6817,7 +6817,16 @@ function drawShape(ctx, s, selected) {
       const hr = 2.5 / zoom;
       ctx.fillRect(s.p1.x - hr, s.p1.y - hr, hr*2, hr*2);
     }
-    if (isPenCur){ ctx.strokeStyle='#ffcc00'; ctx.lineWidth=2/zoom; ctx.beginPath(); ctx.arc(s.p1.x,s.p1.y,10/zoom,0,Math.PI*2); ctx.stroke(); }
+    if (isPenCur){
+      // Rev.16.89: 현재 기준점 표시 강화 - 큰 노란 이중 원 + 강조
+      ctx.strokeStyle='#ffcc00'; ctx.lineWidth=2.5/zoom;
+      ctx.beginPath(); ctx.arc(s.p1.x,s.p1.y,14/zoom,0,Math.PI*2); ctx.stroke();
+      ctx.strokeStyle='#ff8800'; ctx.lineWidth=1.5/zoom;
+      ctx.beginPath(); ctx.arc(s.p1.x,s.p1.y,18/zoom,0,Math.PI*2); ctx.stroke();
+      // 중심 노란 점
+      ctx.fillStyle='#ffcc00';
+      const cr=3.5/zoom; ctx.beginPath(); ctx.arc(s.p1.x,s.p1.y,cr,0,Math.PI*2); ctx.fill();
+    }
     ctx.restore();
     return;
   }

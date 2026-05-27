@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.97  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.99  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -886,6 +886,115 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
+  // Rev.16.99: 두께 1 5 좌 - 1~5번으로 연결된 경로(선·호 포함) 전체를 소재두께만큼 평행복제
+  if (toks[0] === '두께'
+      && parsePenIdx(toks[1]) != null && parsePenIdx(toks[2]) != null){
+    const startI = parsePenIdx(toks[1]), endI = parsePenIdx(toks[2]);
+    let lr = toks[3] || '좌';
+    const isLeft = (lr==='좌'||lr==='L');
+    const tEl = document.getElementById('offsetTwinDistInput');
+    const dmm = tEl ? parseFloat(tEl.value) : NaN;
+    if (!penPoints[startI] || !penPoints[endI]) return false;
+    if (!isFinite(dmm) || dmm<=0){ document.getElementById('statusHint').textContent='두께: 거리두기 칸에 소재두께(mm)를 입력하세요'; return true; }
+    const offPx = dmm/mmPerPixel;
+    const tol = 1/mmPerPixel*0.15;
+    const onPt = (P,Q)=>Math.hypot(P.x-Q.x,P.y-Q.y)<tol;
+    // 호 끝점 좌표
+    const arcEnd = (s,which) => {
+      const ang = which==='start'? s.startAngle : s.endAngle;
+      return { x:s.cx+Math.cos(ang)*s.r, y:s.cy+Math.sin(ang)*s.r };
+    };
+    // 점 P에 끝점이 닿는 도형(선/호) 찾기 (used 제외)
+    const usedIds = new Set();
+    const segAt = (P) => {
+      for (const s of shapes){
+        if (usedIds.has(s.id)) continue;
+        if (s.type==='line' && s.p1 && s.p2){
+          if (onPt(s.p1,P) || onPt(s.p2,P)) return s;
+        } else if (s.type==='arc'){
+          if (onPt(arcEnd(s,'start'),P) || onPt(arcEnd(s,'end'),P)) return s;
+        }
+      }
+      return null;
+    };
+    // 경로 추적: startI에서 endI까지 끝점으로 이어진 도형 순서대로
+    const path = [];
+    let curP = penPoints[startI];
+    const endP = penPoints[endI];
+    let guard = 0;
+    while (guard++ < 200){
+      const s = segAt(curP);
+      if (!s) break;
+      usedIds.add(s.id);
+      // 다음 점 = 이 도형의 반대쪽 끝
+      let nextP;
+      if (s.type==='line'){
+        nextP = onPt(s.p1,curP) ? s.p2 : s.p1;
+      } else {
+        const es=arcEnd(s,'start'), ee=arcEnd(s,'end');
+        nextP = onPt(es,curP) ? ee : es;
+      }
+      path.push({ seg:s, from:{x:curP.x,y:curP.y}, to:{x:nextP.x,y:nextP.y} });
+      curP = nextP;
+      if (onPt(curP, endP)) break;
+    }
+    if (path.length===0){ document.getElementById('statusHint').textContent=`두께: ${startI}~${endI} 연결 경로를 찾지 못함`; return true; }
+    // 각 구간 평행 복제 결과(선:두 끝점 / 호:중심·반지름·각도) 계산
+    const offSegs = [];
+    for (const node of path){
+      const s = node.seg, A = node.from, B = node.to;
+      if (s.type==='line'){
+        const dx=B.x-A.x, dy=B.y-A.y, len=Math.hypot(dx,dy);
+        if (len<1e-6) continue;
+        const ux=dx/len, uy=dy/len, nx=isLeft?uy:-uy, ny=isLeft?-ux:ux;
+        offSegs.push({ type:'line', p1:{x:A.x+nx*offPx,y:A.y+ny*offPx}, p2:{x:B.x+nx*offPx,y:B.y+ny*offPx} });
+      } else {
+        // 호: 진행방향(from→to)에 따라 좌/우가 반지름 증감. 중심 기준 바깥/안쪽.
+        // from이 start인지 end인지로 진행방향(시계/반시계) 판단
+        const es=arcEnd(s,'start');
+        const fromIsStart = onPt(es, A);
+        // 좌측(진행 기준 왼쪽)이면 곡률 중심 반대 → 반지름 +offPx 또는 -offPx
+        // 진행방향 접선의 왼쪽이 중심에서 멀어지는지 가까워지는지: ccw에 따라 다름
+        let dr;
+        const ccw = !!s.ccw;
+        // 반시계(ccw=true) 진행 시 왼쪽이 안쪽(중심방향), 시계(ccw=false)면 왼쪽이 바깥
+        if (isLeft) dr = ccw ? -offPx : +offPx;
+        else        dr = ccw ? +offPx : -offPx;
+        // from이 end였다면 진행방향이 반대 → dr 부호 반전
+        if (!fromIsStart) dr = -dr;
+        const nr = s.r + dr;
+        if (nr > 1e-3){
+          offSegs.push({ type:'arc', cx:s.cx, cy:s.cy, r:nr, startAngle:s.startAngle, endAngle:s.endAngle, ccw:s.ccw });
+        }
+      }
+    }
+    if (offSegs.length===0){ document.getElementById('statusHint').textContent='두께: 평행 구간 생성 실패'; return true; }
+    // 인접 구간의 코너를 교점으로 보정 (선-선만 우선; 호 포함 코너는 끝점 그대로)
+    for (let k=0;k<offSegs.length-1;k++){
+      const s1=offSegs[k], s2=offSegs[k+1];
+      if (s1.type==='line' && s2.type==='line'){
+        const ix = lineLineIntersection(s1.p1,s1.p2,s2.p1,s2.p2);
+        if (ix){ s1.p2={x:ix.x,y:ix.y}; s2.p1={x:ix.x,y:ix.y}; }
+      }
+    }
+    // 실제 도형 생성 + 끝점 번호
+    const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
+    const stroke = document.getElementById('strokeColor').value || '#ffffff';
+    let firstNum=-1, lastNum=-1;
+    for (let k=0;k<offSegs.length;k++){
+      const o=offSegs[k];
+      if (o.type==='line'){
+        penAddLine(o.p1.x,o.p1.y,o.p2.x,o.p2.y,true);
+        const n1=penAddPoint(o.p1.x,o.p1.y), n2=penAddPoint(o.p2.x,o.p2.y);
+        if (firstNum<0) firstNum=n1; lastNum=n2;
+      } else {
+        shapes.push({ id:++shapeIdSeq, type:'arc', cx:o.cx, cy:o.cy, r:o.r, startAngle:o.startAngle, endAngle:o.endAngle, ccw:o.ccw, stroke, strokeWidth:sw, layer:(currentLayer||'default') });
+      }
+    }
+    penFinish(`▦ ${startI}~${endI} 경로 두께 ${dmm}mm ${isLeft?'좌':'우'}측 평행 (구간 ${offSegs.length}개)`);
+    return true;
+  }
+
   // Rev.16.56: 거리두기 4 5 좌 1 - 진행방향 좌/우 평행복제.
   //   원본 끝점에 붙은 인접선과 만나도록 평행선을 연장/단축(폐곽 유지), 끝점에 번호 부여.
   if ((toks[0] === '거리두기' || toks[0] === 'OFFSET')
@@ -1363,6 +1472,7 @@ function tryDimCommand(cmdStr){
     '편집': [
       { l:'이동', t:'이동 ', ex:'이동 상 3 (현재점) / 이동 1 우 10' },
       { l:'거리두기', t:'거리두기 ', ex:'거리두기 2 3 좌 0.6 → 평행복제' },
+      { l:'두께(소재)', t:'두께 ', ex:'두께 1 5 좌 → 1~5 연결경로(꺾임·호) 두께만큼 평행' },
       { l:'삭제', t:'삭제 ', ex:'삭제 1 2 (선) / 삭제 3 (점)' },
       { l:'닫기', t:'닫기', ex:'닫기 → 현재점→0번 선' },
       { l:'백(취소)', t:'백', ex:'백 → 직전 1회 취소' },

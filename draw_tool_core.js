@@ -6502,33 +6502,47 @@ function doFillAtPoint(p) {
     const f = hitTestFill(p);
     if (f && Array.isArray(f.points) && f.points.length >= 3){
       const stroke = document.getElementById('lineColor') ? (document.getElementById('lineColor').value || '#000') : '#000';
-      // Rev.15.9: 픽셀 계단/미세 단차 제거 - 직선 피팅 + 교점 코너
-      const cleaned = fitOutlineToLines(f.points.map(pt => ({x: pt.x, y: pt.y})), 8);
-      const poly = {
-        id: ++shapeIdSeq, type: 'polyline',
-        points: cleaned,
-        closed: true,
-        stroke,
-        strokeWidth: parseInt(document.getElementById('strokeWidth').value) || 1,
-        layer: f.layer || currentLayer || 'default'
-      };
+      const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
+      const layer = f.layer || currentLayer || 'default';
+      const src = f.points.map(pt => ({x: pt.x, y: pt.y}));
+
+      // Rev.16.101: R 구간은 호(arc)로, 직선 구간은 line으로 분해
+      const res = fillToLinesAndArcs(src, 8);
+      const newIds = [];
+      let madeLines = 0, madeArcs = 0;
+
+      if (res && (res.lines.length + res.arcs.length) >= 3){
+        for (const ln of res.lines){
+          const o = { id:++shapeIdSeq, type:'line', p1:{x:ln.p1.x,y:ln.p1.y}, p2:{x:ln.p2.x,y:ln.p2.y}, stroke, strokeWidth:sw, layer };
+          shapes.push(o); newIds.push(o.id); madeLines++;
+        }
+        for (const ar of res.arcs){
+          const o = { id:++shapeIdSeq, type:'arc', cx:ar.cx, cy:ar.cy, r:ar.r, startAngle:ar.startAngle, endAngle:ar.endAngle, ccw:ar.ccw, stroke, strokeWidth:sw, layer };
+          shapes.push(o); newIds.push(o.id); madeArcs++;
+        }
+      } else {
+        // 폴백: 코너가 부족하거나 분해 실패 → 기존 직선 피팅 후 개별 선 분해
+        const cleaned = fitOutlineToLines(src, 8);
+        for (let i=0;i<cleaned.length;i++){
+          const a=cleaned[i], b=cleaned[(i+1)%cleaned.length];
+          const o = { id:++shapeIdSeq, type:'line', p1:{x:a.x,y:a.y}, p2:{x:b.x,y:b.y}, stroke, strokeWidth:sw, layer };
+          shapes.push(o); newIds.push(o.id); madeLines++;
+        }
+      }
+
       // 원본 채움 삭제
       const fi = fills.findIndex(x => x.id === f.id);
       if (fi >= 0) fills.splice(fi, 1);
-      shapes.push(poly);
-      selectedIds.clear(); selectedIds.add(poly.id);
-      // Rev.16.87: 외곽선 = 분리까지 — 닫힌 폴리라인을 개별 선들로 바로 분해
-      let madeLines = poly.points.length;
-      if (typeof ungroupPolyline === 'function'){
-        ungroupPolyline();   // 선택된 poly를 개별 선으로 분리 + 리드로/히스토리 처리
-      } else {
-        redoStack = []; pushHistory();
-        if (typeof redrawFills === 'function') redrawFills();
-        redrawDraw(); updateCount();
-        if (typeof updateSelStat === 'function') updateSelStat();
-      }
+
+      selectedIds.clear();
+      newIds.forEach(id => selectedIds.add(id));
+      redoStack = []; pushHistory();
+      if (typeof redrawFills === 'function') redrawFills();
+      redrawDraw(); updateCount();
+      if (typeof updateSelStat === 'function') updateSelStat();
+      if (typeof updateShapePropPanel === 'function') updateShapePropPanel();
       document.getElementById('statusHint').textContent =
-        `🖊 채움 → 외곽선 + 분리 완료: 개별 선 ${madeLines}개 생성 (채움 삭제). 계속 클릭=다중, Esc=종료`;
+        `🖊 채움 → 외곽선 분해 완료: 선 ${madeLines}개 · 호(R) ${madeArcs}개 (채움 삭제). 계속 클릭=다중, Esc=종료`;
       return;
     }
     // 채움이 없으면 아래로 진행: 선을 경계로 floodFill해서 외곽선 생성 (기존 방식)
@@ -6914,6 +6928,245 @@ function fitOutlineToLines(pts, angTolDeg){
   }
   return verts.length >= 3 ? verts : pts;
 }
+
+// Rev.16.101: 채움 경계점을 직선 구간(line)과 곡선 구간(arc)으로 분해
+//   - 코너 감지 → 구간 분할 → 각 구간이 직선/곡선인지 판정
+//   - 직선 구간: 최소제곱 직선 + 인접 직선 교점으로 코너 보정 → line
+//   - 곡선(R) 구간: 최소제곱 원 피팅 → arc (부드러운 R 보존)
+//   반환: { lines:[{p1,p2}], arcs:[{cx,cy,r,startAngle,endAngle,ccw}] }
+function fillToLinesAndArcs(pts, angTolDeg){
+  // Rev.16.102: 곡률 기반 세그먼트화 — 직선 구간(line)과 곡선(R) 구간(arc) 분리
+  const n = pts.length;
+  const empty = { lines: [], arcs: [] };
+  if (n < 6) return empty;
+  angTolDeg = angTolDeg || 8;
+
+  const norm = a => { while(a<0)a+=2*Math.PI; while(a>=2*Math.PI)a-=2*Math.PI; return a; };
+  const angDiff = (a,b) => { let d=Math.abs(a-b)%(2*Math.PI); if(d>Math.PI)d=2*Math.PI-d; return d; };
+
+  // 점 간격(중앙값)으로 곡률 스케일 기준 잡기
+  const segLens = [];
+  for (let i=0;i<n;i++){ const j=(i+1)%n; segLens.push(Math.hypot(pts[j].x-pts[i].x, pts[j].y-pts[i].y)); }
+  const sorted=[...segLens].sort((a,b)=>a-b);
+  const medLen = sorted[Math.floor(sorted.length/2)] || 1;
+
+  // 각 점의 앞/뒤로 일정 호장(winLen)만큼 떨어진 점을 찾아 방향을 측정 → 점 간격 무관 곡률
+  //   직선: 방향차 0, R 구간: 일정 양수, 직각: 큰 값
+  const winLen = Math.max(medLen * 3, medLen + 1); // 측정 윈도우 호장
+  const walk = (i, sign) => {
+    // i에서 sign 방향으로 누적 호장 winLen 이상 떨어진 점 인덱스 반환
+    let acc = 0, cur = i;
+    for (let step=0; step<n; step++){
+      const nx = (cur + sign + n) % n;
+      acc += Math.hypot(pts[nx].x-pts[cur].x, pts[nx].y-pts[cur].y);
+      cur = nx;
+      if (acc >= winLen) break;
+    }
+    return cur;
+  };
+  // turn[i] = i에서 뒤쪽윈도우 방향 vs 앞쪽윈도우 방향의 차이
+  const turn = new Array(n).fill(0);
+  for (let i=0;i<n;i++){
+    const ib = walk(i, -1), ifw = walk(i, +1);
+    const dBack = Math.atan2(pts[i].y-pts[ib].y, pts[i].x-pts[ib].x);
+    const dFwd  = Math.atan2(pts[ifw].y-pts[i].y, pts[ifw].x-pts[i].x);
+    turn[i] = angDiff(dBack, dFwd);
+  }
+
+  // 라벨링: sharp(첨점) / curve(R) / straight
+  const sharpTol = 45 * Math.PI/180;   // 윈도우 방향차 45도↑ = 첨점(직각 코너)
+  const curveTol = (angTolDeg) * Math.PI/180;
+  const label = new Array(n).fill('straight');
+  for (let i=0;i<n;i++){
+    if (turn[i] >= sharpTol) label[i]='sharp';
+    else if (turn[i] > curveTol) label[i]='curve';
+  }
+  // sharp는 국소 최대 1점만 남김(윈도우 내 중복 첨점 → 주변은 곡률 큰 점이면 sharp 해제)
+  for (let i=0;i<n;i++){
+    if (label[i]!=='sharp') continue;
+    let best=true;
+    for (let k=-3;k<=3;k++){ if(k===0)continue; const j=(i+k+n)%n; if (turn[j]>turn[i]){ best=false; break; } }
+    if (!best) label[i]='straight';
+  }
+  // 노이즈 정리: 길이 minRun 미만의 고립 라벨 구간은 좌우 다수 라벨로 흡수
+  //   (직선 한가운데 튀는 curve 1점, sharp 잔여 등 제거 → 직선 과분할 방지)
+  const minRun = Math.max(3, Math.round(winLen / Math.max(medLen,1)));
+  const cleanNoise = (arr) => {
+    // 연속 런(run) 추출
+    const runs=[]; let st=0;
+    for (let i=1;i<=n;i++){ if (i===n || arr[i]!==arr[st]){ runs.push({lab:arr[st], a:st, b:i-1, len:i-st}); st=i; } }
+    // 원형 인접: 첫/끝 같은 라벨이면 병합
+    if (runs.length>1 && runs[0].lab===runs[runs.length-1].lab){
+      const last=runs.pop(); runs[0].a = last.a - n; runs[0].len += last.len;
+    }
+    // 짧은 런을 좌우 중 더 긴 쪽 라벨로 흡수 (단, sharp는 보존 우선)
+    for (let ri=0; ri<runs.length; ri++){
+      const r=runs[ri];
+      if (r.lab==='sharp') continue;          // 첨점은 짧아도 유지
+      if (r.len >= minRun) continue;
+      const prevR = runs[(ri-1+runs.length)%runs.length];
+      const nextR = runs[(ri+1)%runs.length];
+      const take = (prevR.len >= nextR.len) ? prevR.lab : nextR.lab;
+      for (let k=r.a;k<=r.b;k++){ arr[(k+n)%n] = take; }
+      r.lab = take;
+    }
+    return arr;
+  };
+  cleanNoise(label);
+
+  // 연속 sharp 런 → turn 최대 1점만 sharp, 나머지는 straight (코너 과분할 방지)
+  {
+    let i=0;
+    while (i<n){
+      if (label[i]!=='sharp'){ i++; continue; }
+      // 런 수집(원형 고려는 단순화: 선형 스캔 2회로 충분)
+      let j=i; const run=[];
+      while (label[j%n]==='sharp' && run.length<n){ run.push(j%n); j++; }
+      // run 내 turn 최대 점만 sharp 유지
+      let mx=run[0]; for (const r of run){ if (turn[r]>turn[mx]) mx=r; }
+      for (const r of run){ if (r!==mx) label[r]='straight'; }
+      i=j;
+    }
+    // 원형 경계(끝-처음 연속 sharp) 처리: 0과 n-1이 모두 sharp면 한쪽만
+    if (label[0]==='sharp' && label[n-1]==='sharp'){
+      if (turn[n-1]>=turn[0]) label[0]='straight'; else label[n-1]='straight';
+    }
+  }
+
+  // 곡선 라벨을 인접으로 한 점 확장(곡선 가장자리 직선화 흡수) — 단 sharp는 보존
+  const lab2 = label.slice();
+  for (let i=0;i<n;i++){
+    if (label[i]==='curve'){
+      const a=(i-1+n)%n, b=(i+1)%n;
+      if (label[a]==='straight') lab2[a]='curve';
+      if (label[b]==='straight') lab2[b]='curve';
+    }
+  }
+
+  // 1) 시작 인덱스: straight인 점에서 시작하도록 회전
+  let s0=0; while(s0<n && lab2[s0]!=='straight') s0++;
+  if (s0>=n) return empty; // 전부 곡선 → 폴백(원형)
+  const idx = i => (s0+i)%n;
+
+
+
+  // 2) 순회하며 구간 나누기 (각 구간이 어떤 경계로 끝났는지 endedBy 표시)
+  const segments = []; // {type:'line'|'arc', pts:[...], endedBy:'sharp'|'transition'|'close'}
+  let cur = { type: 'line', pts: [pts[idx(0)]], endedBy: null };
+  for (let k=1;k<=n;k++){
+    const i = idx(k % n);
+    const L = lab2[i];
+    if (k===n){ break; }
+    if (L==='sharp'){
+      cur.pts.push(pts[i]); cur.endedBy='sharp';
+      segments.push(cur);
+      cur = { type:'line', pts:[pts[i]], endedBy:null };
+    } else if (L==='curve'){
+      if (cur.type==='line'){
+        cur.pts.push(pts[i]); cur.endedBy='transition';
+        segments.push(cur);
+        cur = { type:'arc', pts:[pts[i]], endedBy:null };
+      } else { cur.pts.push(pts[i]); }
+    } else { // straight
+      if (cur.type==='arc'){
+        cur.pts.push(pts[i]); cur.endedBy='transition';
+        segments.push(cur);
+        cur = { type:'line', pts:[pts[i]], endedBy:null };
+      } else { cur.pts.push(pts[i]); }
+    }
+  }
+  cur.pts.push(pts[idx(0)]); cur.endedBy='close';
+  segments.push(cur);
+
+  // 너무 짧은 호 구간(점 4개 미만)은 직선으로 강등
+  for (const sg of segments){ if (sg.type==='arc' && sg.pts.length < 4) sg.type='line'; }
+
+  // 인접 직선 병합 — 단 직전 구간이 'sharp'로 끝났으면 병합하지 않음(각진 코너 보존)
+  const merged = [];
+  for (const sg of segments){
+    const prev = merged.length ? merged[merged.length-1] : null;
+    if (sg.type==='line' && prev && prev.type==='line' && prev.endedBy!=='sharp'){
+      prev.pts.push(sg.pts[sg.pts.length-1]);
+      prev.endedBy = sg.endedBy;
+    } else {
+      merged.push({ type: sg.type, pts: sg.pts.slice(), endedBy: sg.endedBy });
+    }
+  }
+  // 원형 마무리: 첫 구간과 마지막 구간이 둘 다 line이고 마지막이 sharp가 아니면 병합
+  if (merged.length>1){
+    const first=merged[0], last=merged[merged.length-1];
+    if (first.type==='line' && last.type==='line' && last.endedBy!=='sharp'){
+      // last의 점들을 first 앞에 붙이는 대신, first 시작점을 last 시작점으로 확장
+      first.pts = last.pts.slice(0,-1).concat(first.pts);
+      merged.pop();
+    }
+  }
+
+  // 최소제곱 직선
+  const segLineFit = (seg) => {
+    let mx=0,my=0; seg.forEach(p=>{mx+=p.x;my+=p.y;}); mx/=seg.length; my/=seg.length;
+    let sxx=0,sxy=0,syy=0;
+    seg.forEach(p=>{const dx=p.x-mx,dy=p.y-my; sxx+=dx*dx; sxy+=dx*dy; syy+=dy*dy;});
+    const theta=0.5*Math.atan2(2*sxy, sxx-syy);
+    return { dir:{x:Math.cos(theta),y:Math.sin(theta)}, pt:{x:mx,y:my} };
+  };
+  // 최소제곱 원(Kasa)
+  const fitCircle = (seg) => {
+    const m=seg.length; if(m<3)return null;
+    let Sx=0,Sy=0,Sxx=0,Syy=0,Sxy=0,Sxz=0,Syz=0,Sz=0;
+    for(const p of seg){const x=p.x,y=p.y,z=x*x+y*y;Sx+=x;Sy+=y;Sxx+=x*x;Syy+=y*y;Sxy+=x*y;Sxz+=x*z;Syz+=y*z;Sz+=z;}
+    const A=[[Sxx,Sxy,Sx],[Sxy,Syy,Sy],[Sx,Sy,m]];const B=[Sxz,Syz,Sz];
+    const det3=M=>M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])-M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])+M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]);
+    const D=det3(A); if(Math.abs(D)<1e-6)return null;
+    const rep=(M,col,v)=>{const C=M.map(r=>r.slice());for(let r=0;r<3;r++)C[r][col]=v[r];return C;};
+    const a=det3(rep(A,0,B))/D,b=det3(rep(A,1,B))/D,c=det3(rep(A,2,B))/D;
+    const cx=a/2,cy=b/2,r=Math.sqrt(Math.max(0,c+cx*cx+cy*cy));
+    if(!isFinite(r)||r<1)return null;
+    return {cx,cy,r};
+  };
+  const lineInt=(a,da,b,db)=>{const den=da.x*db.y-da.y*db.x;if(Math.abs(den)<1e-9)return null;const t=((b.x-a.x)*db.y-(b.y-a.y)*db.x)/den;return {x:a.x+da.x*t,y:a.y+da.y*t};};
+
+  const M = merged.length;
+  if (M < 2) return empty;
+
+  // 각 구간 양끝 꼭짓점을 결정:
+  //  line-line 코너 → 두 직선 교점
+  //  그 외 → 구간 경계 원본점 평균
+  const fits = merged.map(sg => sg.type==='line' ? segLineFit(sg.pts) : null);
+  const startV = new Array(M), endV = new Array(M);
+  for (let c=0;c<M;c++){
+    const a=merged[c], b=merged[(c+1)%M];
+    const boundary = a.pts[a.pts.length-1]; // 원본 경계점
+    let v=boundary;
+    if (a.type==='line' && b.type==='line'){
+      const ix=lineInt(fits[c].pt,fits[c].dir, fits[(c+1)%M].pt,fits[(c+1)%M].dir);
+      if (ix && Math.hypot(ix.x-boundary.x, ix.y-boundary.y) < medLen*30 + 300) v=ix;
+    }
+    endV[c]={x:v.x,y:v.y};
+    startV[(c+1)%M]={x:v.x,y:v.y};
+  }
+
+  const lines=[], arcs=[];
+  for (let c=0;c<M;c++){
+    const sg=merged[c];
+    const A=startV[c], B=endV[c];
+    if (sg.type==='line'){
+      lines.push({ p1:{x:A.x,y:A.y}, p2:{x:B.x,y:B.y} });
+    } else {
+      const cir=fitCircle(sg.pts);
+      if (!cir){ lines.push({p1:{x:A.x,y:A.y},p2:{x:B.x,y:B.y}}); continue; }
+      const a0=Math.atan2(A.y-cir.cy, A.x-cir.cx);
+      const a1=Math.atan2(B.y-cir.cy, B.x-cir.cx);
+      const mid=sg.pts[Math.floor(sg.pts.length/2)];
+      const am=Math.atan2(mid.y-cir.cy, mid.x-cir.cx);
+      const inCW=(s,m,e)=>{const ns=norm(s),ne=norm(e),nm=norm(m);return (ns<=ne)?(nm>=ns&&nm<=ne):(nm>=ns||nm<=ne);};
+      const ccw=!inCW(a0,am,a1);
+      arcs.push({ cx:cir.cx, cy:cir.cy, r:cir.r, startAngle:a0, endAngle:a1, ccw });
+    }
+  }
+  return { lines, arcs };
+}
+
 
 // ====== 도형 렌더 ======
 function drawShape(ctx, s, selected) {

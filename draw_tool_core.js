@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.95  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.97  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -5051,10 +5051,21 @@ function runBreakAllIntersections() {
       intersectionCount++;
     }
   }
-  // 직선-원 교차: 직선을 원 교점에서 분할
+  // 직선-원 교차: 직선을 원 교점에서 분할 + 원에는 교점 각도 수집 (선 분할 전이라 정확)
+  for (const c of circs) c._angs = [];
   for (const L of targets) {
     for (const c of circs) {
+      // 분할용 t (선분 내부)
       lineCircleTs(L, c).forEach(t => { cutMap.get(L.id).push(t); intersectionCount++; });
+      // 원 분할용 각도 (선분 범위 내 교점, 끝점 포함)
+      const dx=L.p2.x-L.p1.x, dy=L.p2.y-L.p1.y;
+      const fx=L.p1.x-c.cx, fy=L.p1.y-c.cy;
+      const A=dx*dx+dy*dy, B=2*(fx*dx+fy*dy), C=fx*fx+fy*fy-c.r*c.r;
+      const disc=B*B-4*A*C; if(disc<0||A<1e-9) continue;
+      const sq=Math.sqrt(disc);
+      [(-B-sq)/(2*A),(-B+sq)/(2*A)].forEach(t=>{
+        if(t>=-1e-6&&t<=1+1e-6){ const x=L.p1.x+t*dx,y=L.p1.y+t*dy; c._angs.push(Math.atan2(y-c.cy, x-c.cx)); }
+      });
     }
   }
 
@@ -5097,22 +5108,10 @@ function runBreakAllIntersections() {
 
   // Rev.16.95: 원/호를 교점(선과의)에서 호 조각으로 분할
   let circSegs = 0;
-  const allLinesForCirc = shapes.filter(s => s.type === 'line');
-  for (const ct of circTargets){
-    const c = ct.type==='circle'
-      ? { cx:ct.p1.x, cy:ct.p1.y, r:Math.hypot(ct.p2.x-ct.p1.x, ct.p2.y-ct.p1.y) }
-      : { cx:ct.cx, cy:ct.cy, r:ct.r, arc:true, a0:ct.startAngle, a1:ct.endAngle };
-    const angs = [];
-    for (const L of allLinesForCirc){
-      const dx=L.p2.x-L.p1.x, dy=L.p2.y-L.p1.y;
-      const fx=L.p1.x-c.cx, fy=L.p1.y-c.cy;
-      const A=dx*dx+dy*dy, B=2*(fx*dx+fy*dy), C=fx*fx+fy*fy-c.r*c.r;
-      const disc=B*B-4*A*C; if(disc<0||A<1e-9) continue;
-      const sq=Math.sqrt(disc);
-      [(-B-sq)/(2*A),(-B+sq)/(2*A)].forEach(t=>{
-        if(t>=-1e-6&&t<=1+1e-6){ const x=L.p1.x+t*dx,y=L.p1.y+t*dy; angs.push(Math.atan2(y-c.cy, x-c.cx)); }
-      });
-    }
+  for (let ci=0; ci<circTargets.length; ci++){
+    const ct = circTargets[ci];
+    const c = circs[ci];
+    const angs = c._angs || [];
     if (angs.length < 1) continue;
     const norm=a=>{while(a<0)a+=2*Math.PI;while(a>=2*Math.PI)a-=2*Math.PI;return a;};
     let cuts = Array.from(new Set(angs.map(a=>Math.round(norm(a)*10000)/10000))).sort((x,y)=>x-y);
@@ -5123,6 +5122,8 @@ function runBreakAllIntersections() {
       const within = cuts.filter(a => (a0<=a1) ? (a>a0+1e-4&&a<a1-1e-4) : (a>a0+1e-4||a<a1-1e-4));
       bounds = [a0, ...within, a1];
     } else {
+      // 원: 교점이 1개뿐이면 분할 불가(접점) → 2개 이상일 때만
+      if (cuts.length < 2) continue;
       bounds = [...cuts, cuts[0]+2*Math.PI];
     }
     if (bounds.length < 2) continue;
@@ -5132,7 +5133,7 @@ function runBreakAllIntersections() {
       if (Math.abs(s1-s0) < 1e-3) continue;
       shapes.push({
         id:++shapeIdSeq, type:'arc',
-        cx:c.cx, cy:c.cy, r:c.r, startAngle:s0, endAngle:s1,
+        cx:c.cx, cy:c.cy, r:c.r, startAngle:s0, endAngle:s1, ccw:false,
         stroke: ct.stroke||'#fff', strokeWidth: ct.strokeWidth||1, layer: ct.layer
       });
       circSegs++;
@@ -7207,7 +7208,11 @@ function isPointOnShape(p, s) {
     return Math.abs(Math.hypot(p.x-s.p1.x, p.y-s.p1.y) - r) <= tol;
   }
   if (s.type === 'arc') {
-    return Math.abs(Math.hypot(p.x-s.cx, p.y-s.cy) - s.r) <= tol;
+    // Rev.16.97: 반지름 거리 + 각도 범위 모두 만족해야 선택 (분할된 호 조각 구분)
+    if (Math.abs(Math.hypot(p.x-s.cx, p.y-s.cy) - s.r) > tol) return false;
+    if (s.startAngle == null || s.endAngle == null) return true;
+    const ang = Math.atan2(p.y - s.cy, p.x - s.cx);
+    return isAngleInArcRange(ang, s.startAngle, s.endAngle, s.ccw);
   }
   if (s.type === 'ellipse') {
     const bb = shapeBoundingBox(s);

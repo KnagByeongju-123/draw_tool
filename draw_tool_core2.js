@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.85  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.86  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1081,9 +1081,11 @@ function penSyncFromShapes(){
   // 연속된 앞부분만 유효 (중간 빈 곳에서 끊김)
   let n = 0;
   while (pts[n] !== undefined) n++;
+  const prevCur = penCur;   // Rev.16.86: 취소 후에도 현재점 유지
   penPoints = pts.slice(0, n);
   penLabelIds = labels.slice(0, n);
-  penCur = penPoints.length - 1;
+  // 기존 현재점이 여전히 유효하면 유지, 아니면 마지막 점으로
+  penCur = (prevCur >= 0 && prevCur < penPoints.length) ? prevCur : (penPoints.length - 1);
 }
 
 // Rev.16.32: 지정 점(pt) 근처에서 끝점이 만나는 두 선을 찾아 지름 dia 필렛

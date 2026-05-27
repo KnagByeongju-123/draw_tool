@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.83  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.85  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -728,6 +728,18 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
+  // Rev.16.84: 절교/절각으로 시작했는데 위 분기에 안 걸린 경우 — 원인 안내 (조용히 사라지지 않게)
+  if (toks[0] === '절교' || toks[0] === '절각'){
+    const ri = parsePenIdx((toks[toks[0]==='절교' ? (['상','하','좌','우','U','D','L','R'].includes(toks[2])?4:3) : 3]||'').replace(/^점/,''));
+    let why = '형식을 확인하세요';
+    if (parsePenIdx(toks[1]) == null) why = `${toks[1]||'?'}번 점이 잘못됨`;
+    else if (!penPoints[parsePenIdx(toks[1])]) why = `${toks[1]}번 점이 없음`;
+    else if (toks[0]==='절교' && ['상','하','좌','우','U','D','L','R'].includes(toks[2]) && ri!=null && !penPoints[ri]) why = `기준 ${toks[4]}번 점이 없음`;
+    document.getElementById('statusHint').textContent = `⚠ ${toks[0]} 실행 안 됨: ${why} (예: 절교 2 우 수직 0 — 0번 점이 실제로 있어야 함)`;
+    cmdLog(`⚠ ${toks[0]} 실행 안 됨: ${why}`, 'error');
+    return true;
+  }
+
   // Rev.16.57: 연장 - i1-i2 선의 i2쪽을 늘림.
   //   연장 1 2 30     → 30mm 연장 (거리)
   //   연장 1 2 교점   → i1→i2 방향으로 늘려 처음 만나는 선과의 교점까지
@@ -1114,6 +1126,19 @@ function penChamferAtPoint(pt, cMm){
 
 // Rev.16.46/51/82: 텍스트입력(한붓그리기) 시작 — 함수화하여 여러 버튼에서 호출
 function startTextMode(){
+  // Rev.16.85: 이미 텍스트 모드이거나 점이 있으면 초기화 여부 확인 (중복 시작으로 0번 중복/작업소실 방지)
+  if (penPickMode || (typeof penPoints !== 'undefined' && penPoints.length)){
+    const hasPts = (typeof penPoints !== 'undefined' && penPoints.length);
+    if (hasPts && !confirm(`이미 한붓그리기 점 ${penPoints.length}개가 있습니다.\n새로 시작하면 기존 점이 모두 사라집니다.\n\n확인=새로 시작 / 취소=기존 작업 이어서`)){
+      // 기존 작업 유지: 모드만 보장하고 종료
+      penPickMode = true; penAwaitOrigin = false;
+      const _t = document.getElementById('headerBtnTextMode'); if (_t) _t.classList.add('active');
+      const _n = document.getElementById('headerBtnNormalMode'); if (_n) _n.classList.remove('active');
+      const _ci = document.getElementById('cmdInput'); if (_ci) _ci.focus();
+      document.getElementById('statusHint').textContent = `⌨ 텍스트 모드 (기존 작업 이어서) · 점 ${penPoints.length}개`;
+      return;
+    }
+  }
   penPoints = []; penLabelIds = []; penCur = -1;
   penPickMode = true; penPickFirst = -1; pointMode = false;
   penOriginPx = null; penAwaitOrigin = true;   // 첫 클릭으로 원점 지정 대기

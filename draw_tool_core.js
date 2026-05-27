@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.16.82  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.16.83  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -281,8 +281,8 @@ document.getElementById('zoom').addEventListener('input', e => {
   if (!wrap || !zEl) return;
   wrap.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const zMin = parseInt(zEl.min) || 1;
-    const zMax = parseInt(zEl.max) || 1000;
+    const zMin = (parseInt(zEl.min) || 1) / 100;
+    const zMax = (parseInt(zEl.max) || 1000) / 100;
     const oldZoom = zoom;
     // 커서의 콘텐츠 기준 위치 (스크롤 포함)
     const rect = wrap.getBoundingClientRect();
@@ -290,11 +290,13 @@ document.getElementById('zoom').addEventListener('input', e => {
     const cy = e.clientY - rect.top  + wrap.scrollTop;
     const ratioX = cx / (baseW * oldZoom || 1);
     const ratioY = cy / (baseH * oldZoom || 1);
-    // 휠 위로 = 확대
-    const factor = (e.deltaY < 0) ? 1.1 : (1/1.1);
-    let zp = Math.round(oldZoom * factor * 100);
-    zp = Math.max(zMin, Math.min(zMax, zp));
-    zoom = zp / 100;
+    // 휠 위로 = 확대. 실수 배율로 직접 곱해 미세 줌도 반영
+    const factor = (e.deltaY < 0) ? 1.15 : (1/1.15);
+    let newZoom = oldZoom * factor;
+    newZoom = Math.max(zMin, Math.min(zMax, newZoom));
+    zoom = newZoom;
+    // 슬라이더 표시는 정수 %로 (실제 zoom은 실수 유지)
+    const zp = Math.round(zoom * 100);
     zEl.value = zp;
     const zv = document.getElementById('zoomVal'); if (zv) zv.textContent = zp + '%';
     setCanvasSize(baseW, baseH);

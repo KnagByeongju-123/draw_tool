@@ -6752,17 +6752,20 @@ function drawShape(ctx, s, selected) {
   // Rev.11.18/16.46: 버텍스(점) - 현재 선택점은 노란 원 강조
   if (s.type === 'point') {
     ctx.save();
-    const r = 5 / zoom;
+    // Rev.16.53: 기준점(anchor)은 큰 십자로 표시
+    const r = (s.anchor ? 12 : 5) / zoom;
     const isPenCur = (penPickMode && s.penIdx != null && s.penIdx === penCur);
     ctx.strokeStyle = selected ? '#ffcc00' : (s.stroke || '#16e0b0');
-    ctx.lineWidth = 1.5 / zoom;
+    ctx.lineWidth = (s.anchor ? 2 : 1.5) / zoom;
     ctx.beginPath();
     ctx.moveTo(s.p1.x - r, s.p1.y); ctx.lineTo(s.p1.x + r, s.p1.y);
     ctx.moveTo(s.p1.x, s.p1.y - r); ctx.lineTo(s.p1.x, s.p1.y + r);
     ctx.stroke();
-    ctx.fillStyle = selected ? '#ffcc00' : (s.stroke || '#16e0b0');
-    const hr = 2.5 / zoom;
-    ctx.fillRect(s.p1.x - hr, s.p1.y - hr, hr*2, hr*2);
+    if (!s.anchor){
+      ctx.fillStyle = selected ? '#ffcc00' : (s.stroke || '#16e0b0');
+      const hr = 2.5 / zoom;
+      ctx.fillRect(s.p1.x - hr, s.p1.y - hr, hr*2, hr*2);
+    }
     if (isPenCur){ ctx.strokeStyle='#ffcc00'; ctx.lineWidth=2/zoom; ctx.beginPath(); ctx.arc(s.p1.x,s.p1.y,10/zoom,0,Math.PI*2); ctx.stroke(); }
     ctx.restore();
     return;
@@ -6782,6 +6785,11 @@ function drawShape(ctx, s, selected) {
   if (typeof LINE_TYPES !== 'undefined') {
     const lt = s.lineType || (s.layer && typeof getLayer === 'function' ? getLayer(s.layer).lineType : 'solid');
     ctx.setLineDash(LINE_TYPES[lt] || []);
+  }
+  // Rev.16.55: 보조선(aux/dashed)은 점선으로 강제 표시
+  if (s.aux || s.dashed){
+    const Z = zoom || 1;
+    ctx.setLineDash([6/Z, 4/Z]);
   }
 
   // Rev.12.6: 도면베이스 가이드선 → 두께 1, lineType 적용 (dashdot 유지)

@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.52  최신본 — 한붓그리기/명령어 (점·선·지름·거리두기·=수식·이동[번호생략=현재점]) #####
+// ##### draw_tool_core2.js  Rev.16.55  최신본 — 명령어 (점·선·지름·거리두기·=수식·이동·기준점·각교점·호[호 2 3 시계 각 45 / 호 2 3 시계 교점, 중심점지정+반지름+점선보조]) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -32,8 +32,18 @@ function penFindNearestPoint(p){
 function handlePenPickClick(p){
   if (!penPickMode) return false;
   const idx = penFindNearestPoint(p);
-  if (idx < 0){ penPickFirst=-1;
-    document.getElementById('statusHint').textContent='점이 아닌 곳 클릭 — 점은 명령으로만 추가됩니다'; return true; }
+  if (idx < 0){
+    // 빈 곳 클릭: 연결 대기중이면 선택 해제만, 아니면 그 좌표를 기준점(앵커)으로
+    if (penPickFirst >= 0){ penPickFirst = -1;
+      document.getElementById('statusHint').textContent='선택 해제'; redrawDraw(); return true; }
+    const a = penAddAnchor(p.x, p.y);   // Rev.16.53: 빈 곳 클릭 = 기준점
+    const m = penPxToMm(p.x, p.y);
+    cmdLog(`✛ 기준점 ${a} = (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm (마우스)`,'user');
+    penPickFirst = a;
+    redoStack=[]; pushHistory(); redrawDraw(); updateCount();
+    document.getElementById('statusHint').textContent=`✛ 기준점 ${a} 생성 · 여기서 우/좌/상/하로 이어그리기`;
+    return true;
+  }
   if (penPickFirst < 0){ penPickFirst=idx; penCur=idx;
     const m=penPxToMm(penPoints[idx].x,penPoints[idx].y);
     document.getElementById('statusHint').textContent=`▸ ${idx}번 점 선택 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm · 다른 점 클릭=연결`;
@@ -63,6 +73,24 @@ function penAddPoint(px, py){
   penLabelIds[idx] = lbId;
   return idx;
 }
+// Rev.16.53: 기준점(앵커) 추가 - 점 마커 대신 큰 십자(+)로 표시. 번호는 동일하게 부여(이어그리기용).
+//   '빈 공간 좌표만 선택' 용도. 이후 우/좌/상/하 등으로 여기서부터 이어그리기 가능.
+function penAddAnchor(px, py){
+  const tolPx = 1/mmPerPixel * 0.05;
+  for (let i=0;i<penPoints.length;i++){
+    if (Math.hypot(penPoints[i].x-px, penPoints[i].y-py) < tolPx){ penCur = i; return i; }
+  }
+  const idx = penPoints.length;
+  penPoints.push({ x:px, y:py });
+  penCur = idx;
+  // 큰 십자 앵커 마커 (점이 아님을 구분: anchor=true, 노란색)
+  shapes.push({ id:++shapeIdSeq, type:'point', p1:{x:px,y:py}, stroke:'#ffcc00', strokeWidth:1, penIdx:idx, anchor:true });
+  // 라벨 Pn
+  const lbId = ++shapeIdSeq;
+  shapes.push({ id:lbId, type:'text', pos:{x:px + 8/(zoom||1), y:py - 22/(zoom||1)}, text:''+idx, sizePx: 16/(zoom||1), stroke:'#ffcc00', layer:(currentLayer||'default'), penLabel:idx });
+  penLabelIds[idx] = lbId;
+  return idx;
+}
 function penAddLine(x1,y1,x2,y2){
   const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
   const stroke = document.getElementById('strokeColor').value || '#ffffff';
@@ -83,6 +111,56 @@ function penAutoIntersect(newLine){
     }
   }
 }
+// Rev.16.54: 시작점 ox,oy 에서 단위방향 (ux,uy) 으로 나가는 반직선이 기존 선분들과 만나는
+//   가장 가까운 교점 반환 (자기 시작점 제외). 없으면 null.
+function penRayFirstHit(ox, oy, ux, uy, maxPx){
+  let best=null, bestT=Infinity;
+  const far = { x: ox + ux*maxPx, y: oy + uy*maxPx };
+  for (const s of shapes){
+    if (s.type !== 'line' || !s.p1 || !s.p2) continue;
+    const ix = lineSegmentIntersection({x:ox,y:oy}, far, s.p1, s.p2);
+    if (!ix) continue;
+    const t = (ix.x-ox)*ux + (ix.y-oy)*uy;   // 시작점에서의 거리(부호)
+    if (t > 1/mmPerPixel*0.05 && t < bestT){ bestT = t; best = {x:ix.x, y:ix.y}; }
+  }
+  return best;
+}
+// Rev.16.54: 중심(cx,cy) 반지름 r 원이 기존 선분들과 만나는 교점들을, startA에서 sweep방향으로
+//   각도 순서로 정렬해 첫 교점 반환 (ccw=캔버스 반시계). 없으면 null.
+function penArcFirstHit(cx, cy, r, startA, ccw){
+  const hits = [];
+  for (const s of shapes){
+    if (s.type !== 'line' || !s.p1 || !s.p2) continue;
+    const pts = circleSegmentIntersections(cx, cy, r, s.p1, s.p2);
+    for (const p of pts) hits.push(p);
+  }
+  if (!hits.length) return null;
+  // 시작각 기준으로 sweep 방향 진행량(0~2π) 계산해 최소인 것
+  let best=null, bestSweep=Infinity;
+  for (const h of hits){
+    let a = Math.atan2(h.y-cy, h.x-cx);
+    let sweep;
+    if (!ccw){ sweep = a - startA; } else { sweep = startA - a; }
+    while (sweep < 1e-6) sweep += Math.PI*2;   // 0 이하(시작점)는 한 바퀴로
+    if (sweep < bestSweep){ bestSweep = sweep; best = {x:h.x, y:h.y, ang:a, sweep:sweep}; }
+  }
+  return best;
+}
+// Rev.16.54: 원(cx,cy,r)과 선분(p1,p2)의 교점들 반환 (0~2개)
+function circleSegmentIntersections(cx, cy, r, p1, p2){
+  const dx=p2.x-p1.x, dy=p2.y-p1.y;
+  const fx=p1.x-cx, fy=p1.y-cy;
+  const a=dx*dx+dy*dy, b=2*(fx*dx+fy*dy), c=fx*fx+fy*fy-r*r;
+  let disc=b*b-4*a*c;
+  if (disc < 0 || a < 1e-9) return [];
+  disc=Math.sqrt(disc);
+  const res=[];
+  for (const t of [(-b-disc)/(2*a), (-b+disc)/(2*a)]){
+    if (t >= -0.01 && t <= 1.01){ res.push({x:p1.x+t*dx, y:p1.y+t*dy}); }
+  }
+  return res;
+}
+
 function penFinish(msg){
   redoStack = []; pushHistory();
   if (typeof redrawFills === 'function') redrawFills();
@@ -196,6 +274,80 @@ function tryPenCommand(cmdStr){
     penPoints[idx] = { x:nx, y:ny };
     penUpdateLabel(idx, nx, ny);
     penFinish(`✥ ${idx}번 점 ${mdir} ${mval}mm 이동`);
+    return true;
+  }
+
+  // Rev.16.55: 호 명령 - 지정한 점을 중심으로 반지름 R 원호.
+  //   호 2 3 시계 각 45  → P2 중심, 반지름3, 시계방향 45도
+  //   호 2 3 시계 교점   → P2 중심, 반지름3, 시계방향으로 돌다 첫 교점까지
+  //   방향: 시계/반시계 (CW/CCW). 기준점(현재점)↔중심(P2) 사이는 점선 보조선 표시.
+  if (toks[0] === '호' || toks[0] === 'ARC'){
+    const ci = parsePenIdx(toks[1]);
+    if (ci == null || !penPoints[ci]){
+      document.getElementById('statusHint').textContent = '⚠ 호: 중심 점 이름이 필요합니다 (예: 호 2 3 시계 각 45)';
+      return true;
+    }
+    const R = evalExpr(toks[2]);
+    if (!isFinite(R)) return false;
+    const r = Math.abs(R) / mmPerPixel;   // 반지름(mm) → px
+    const cx = penPoints[ci].x, cy = penPoints[ci].y;
+
+    // 기준점(현재점)↔중심(P_ci) 점선 보조선 (서로 다른 점일 때만)
+    const baseRef = (penCur >= 0 && penPoints[penCur] && penCur !== ci) ? penPoints[penCur] : null;
+    if (baseRef){
+      shapes.push({ id:++shapeIdSeq, type:'line', p1:{x:baseRef.x,y:baseRef.y}, p2:{x:cx,y:cy},
+        stroke:'#ffcc00', strokeWidth:1, dashed:true, layer:(currentLayer||'default'), aux:true });
+    }
+
+    // 시작각: 직전 선의 끝 방향에서 이어서 (중심으로 들어온 선의 진행 방향)
+    let startA = 0;
+    let lastLine = null;
+    for (let i=shapes.length-1;i>=0;i--){ const s=shapes[i]; if (s.type==='line' && !s.aux){ lastLine=s; break; } }
+    const tol = 1/mmPerPixel*0.2;
+    if (lastLine){
+      let from=null, to=null;
+      if (Math.hypot(lastLine.p2.x-cx,lastLine.p2.y-cy)<tol){ from=lastLine.p1; to=lastLine.p2; }
+      else if (Math.hypot(lastLine.p1.x-cx,lastLine.p1.y-cy)<tol){ from=lastLine.p2; to=lastLine.p1; }
+      if (from && to){ startA = Math.atan2(to.y-from.y, to.x-from.x); }
+      else { startA = Math.atan2(lastLine.p2.y-lastLine.p1.y, lastLine.p2.x-lastLine.p1.x); }
+    } else if (baseRef){
+      // 직전 선이 없으면 기준점→중심 방향을 시작각으로
+      startA = Math.atan2(cy-baseRef.y, cx-baseRef.x);
+    }
+
+    // 방향/끝조건 토큰: 호 2 3 시계 각 45  /  호 2 3 시계 교점
+    const dirTok = toks[3];
+    const isCW = (dirTok==='시계'||dirTok==='CW');
+    const isCCW = (dirTok==='반시계'||dirTok==='CCW');
+    if (!isCW && !isCCW){ document.getElementById('statusHint').textContent='호: 방향은 시계/반시계'; return true; }
+    const ccw = isCCW;
+
+    let isAngMode=false, sweepTok;
+    if (toks[4] === '각' || toks[4] === 'ANG'){ isAngMode=true; sweepTok=toks[5]; }
+    else { sweepTok=toks[4]; }   // 교점
+
+    const startPt = { x: cx + Math.cos(startA)*r, y: cy + Math.sin(startA)*r };
+    let endA;
+    if (isAngMode){
+      const sweepDeg = evalExpr(sweepTok);
+      if (!isFinite(sweepDeg)) return false;
+      const sweepRad = sweepDeg*Math.PI/180;
+      endA = isCW ? (startA + sweepRad) : (startA - sweepRad);
+    } else {
+      if (sweepTok !== '교점' && sweepTok !== 'IX'){ document.getElementById('statusHint').textContent='호: 각 A 또는 교점'; return true; }
+      const hit = penArcFirstHit(cx, cy, r, startA, ccw);
+      if (!hit){ document.getElementById('statusHint').textContent='호: 만나는 교점이 없습니다'; return true; }
+      endA = hit.ang;
+    }
+    const endPt = { x: cx + Math.cos(endA)*r, y: cy + Math.sin(endA)*r };
+    const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
+    const stroke = document.getElementById('strokeColor').value || '#ffffff';
+    shapes.push({ id:++shapeIdSeq, type:'arc', cx, cy, r,
+      startAngle: startA, endAngle: endA, ccw,
+      stroke, strokeWidth: sw, layer:(currentLayer||'default'),
+      p1:{x:startPt.x,y:startPt.y}, p2:{x:endPt.x,y:endPt.y} });
+    penAddPoint(endPt.x, endPt.y);   // 호 끝점에 번호
+    penFinish(`⌒ 호 중심P${ci} 반지름${R} ${isCW?'시계':'반시계'} ${isAngMode?evalExpr(sweepTok)+'°':'교점까지'} → ${penCur}`);
     return true;
   }
 
@@ -382,6 +534,38 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
+  // Rev.16.53: 기준 X Y - 빈 공간 좌표를 기준점(앵커)으로 잡기 (점 안 찍고 십자 표시)
+  //   이후 우/좌/상/하 등으로 여기서부터 이어그리기 가능
+  if ((toks[0] === '기준' || toks[0] === 'BASE') && toks.length >= 3){
+    const xmm = evalExpr(toks[1]), ymm = evalExpr(toks[2]);
+    if (!isFinite(xmm) || !isFinite(ymm)) return false;
+    const p = penMmToPx(xmm, ymm);
+    penAddAnchor(p.x, p.y);
+    penFinish(`✛ 기준점 ${penCur} = (${xmm}, ${ymm})mm`);
+    return true;
+  }
+
+  // Rev.16.53: 좌표 지 130 110 - 지름 기반 기준점. 130=지름→X=좌측 반지름(-65), 110=Y
+  if (toks[0] === '좌표' && toks[1] === '지' && toks.length >= 4){
+    const D = evalExpr(toks[2]), ymm = evalExpr(toks[3]);
+    if (!isFinite(D) || !isFinite(ymm)) return false;
+    const xmm = -Math.abs(D)/2;   // 지름 → 좌측 반지름
+    const p = penMmToPx(xmm, ymm);
+    penAddAnchor(p.x, p.y);
+    penFinish(`✛ 좌표 ${penCur} = 지름 ${D} → 좌측 X=${xmm}, Y=${ymm}mm`);
+    return true;
+  }
+
+  // Rev.16.53: 좌표 X Y - 빈 공간 좌표 기준점 (기준 X Y 와 동일, 별칭)
+  if (toks[0] === '좌표' && toks.length >= 3 && toks[1] !== '지'){
+    const xmm = evalExpr(toks[1]), ymm = evalExpr(toks[2]);
+    if (!isFinite(xmm) || !isFinite(ymm)) return false;
+    const p = penMmToPx(xmm, ymm);
+    penAddAnchor(p.x, p.y);
+    penFinish(`✛ 좌표 ${penCur} = (${xmm}, ${ymm})mm`);
+    return true;
+  }
+
   // 선 P1 P4 : 두 점 직접 연결
   if ((toks[0] === '선' || toks[0] === 'LINK') && toks.length >= 3){
     const i1 = parsePenIdx(toks[1]), i2 = parsePenIdx(toks[2]);
@@ -438,14 +622,25 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // 각도: 도 A D
+  // 각도: 도 A D  또는  각 A 교점 (45도 방향 직진 → 첫 교점까지)
   if (dir === '각' || dir === '도' || dir === 'ANG'){
     const ang = evalExpr(toks[off+1]);
-    const dist = evalExpr(toks[off+2]);
-    if (!isFinite(ang) || !isFinite(dist)) return false;
+    if (!isFinite(ang)) return false;
     const rad = ang * Math.PI/180;
-    const dx = Math.cos(rad)*dist/mmPerPixel;
-    const dy = -Math.sin(rad)*dist/mmPerPixel;  // 반시계 양수=화면 위
+    const ux = Math.cos(rad), uy = -Math.sin(rad);   // 반시계 양수=화면 위
+    // Rev.16.54: 각 A 교점 - 그 방향으로 직진하다 처음 만나는 선과의 교점까지
+    if (toks[off+2] === '교점' || toks[off+2] === 'IX'){
+      const maxPx = Math.hypot(baseW, baseH);
+      const hit = penRayFirstHit(sp.x, sp.y, ux, uy, maxPx);
+      if (!hit){ document.getElementById('statusHint').textContent = `각 ${ang}° 방향에 만나는 선이 없습니다`; return true; }
+      penAddLine(sp.x, sp.y, hit.x, hit.y);
+      penAddPoint(hit.x, hit.y);
+      penFinish(`✎ ${startIdx} → ${ang}° 교점까지 → ${penCur}`);
+      return true;
+    }
+    const dist = evalExpr(toks[off+2]);
+    if (!isFinite(dist)) return false;
+    const dx = ux*dist/mmPerPixel, dy = uy*dist/mmPerPixel;
     const nx = sp.x + dx, ny = sp.y + dy;
     penAddLine(sp.x, sp.y, nx, ny);
     penAddPoint(nx, ny);

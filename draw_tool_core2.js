@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.68  최신본 — 명령어 (점·선·지름·거리두기·연장·절교/절각·선방향교점[선 좌 교점]/점방향교점[점 좌 교점]·기준점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.69  최신본 — 명령어 (점·선[선 좌 교점/선 좌 지]·지름·거리두기·연장·절교/절각·점방향교점·기준점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -398,6 +398,27 @@ function tryPenCommand(cmdStr){
     const first = penPoints.length;
     found.forEach(p => penAddPoint(p.x, p.y));
     penFinish(`✕ 교점 ${found.length}개에 번호 부여 (${first}~${penPoints.length-1})`);
+    return true;
+  }
+
+  // Rev.16.69: 선 좌 지 110 130 - 현재점에서 (130-110)/2 만큼 방향으로 선 긋기 (기존 '좌 지'와 동일, 직관적 이름)
+  if (toks[0] === '선' && ['상','하','좌','우','U','D','L','R'].includes(toks[1]) && toks[2] === '지'){
+    if (penCur < 0 || !penPoints[penCur]){
+      document.getElementById('statusHint').textContent = '⚠ 먼저 점을 선택하세요 (점 5 또는 점 클릭)'; return true;
+    }
+    const sdir = toks[1];
+    const d1 = evalExpr(toks[3]), d2 = evalExpr(toks[4]);
+    if (!isFinite(d1) || !isFinite(d2)) return false;
+    const moveMm = Math.abs(d2 - d1) / 2;
+    const base = penPoints[penCur]; const dpx = moveMm/mmPerPixel;
+    let nx=base.x, ny=base.y;
+    if (sdir==='우'||sdir==='R') nx+=dpx;
+    else if (sdir==='좌'||sdir==='L') nx-=dpx;
+    else if (sdir==='상'||sdir==='U') ny-=dpx;
+    else if (sdir==='하'||sdir==='D') ny+=dpx;
+    penAddLine(base.x, base.y, nx, ny);
+    penAddPoint(nx, ny);
+    penFinish(`✎ ${penCur}번 → 선 ${sdir} 지름 ${d1}→${d2} = ${moveMm}mm → ${penCur}`);
     return true;
   }
 
@@ -1032,7 +1053,7 @@ function penChamferAtPoint(pt, cMm){
     const ci = document.getElementById('cmdInput');
     if (ci){ ci.focus(); ci.value = ''; }
     document.getElementById('statusHint').textContent =
-      `⌨ 한붓그리기: 점=명령(점 X,Y / 점 상 2.5 / 점 좌 지 110 130) · 선=좌/우/상/하/각, 좌 지 110 130 · 점 클릭=선택 · 수식 =(100-90)/2`;
+      `⌨ 한붓그리기: 점=명령(점 X,Y / 점 상 2.5 / 점 좌 지 110 130) · 선=좌/우/상/하/각, 선 좌 지 110 130 · 점 클릭=선택 · 수식 =(100-90)/2`;
     cmdLog(`⌨ 한붓그리기 시작`, 'system');
   });
 })();

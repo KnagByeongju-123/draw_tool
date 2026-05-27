@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.55  최신본 — 명령어 (점·선·지름·거리두기·=수식·이동·기준점·각교점·호[호 2 3 시계 각 45 / 호 2 3 시계 교점, 중심점지정+반지름+점선보조]) #####
+// ##### draw_tool_core2.js  Rev.16.57  최신본 — 명령어 (점·선·지름·거리두기·연장[거리/교점/X좌표/Y좌표]·=수식·이동·기준점·각교점·호) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -480,31 +480,59 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // Rev.16.36: 연장 1 2 30 - 1-2 선에서 2번 쪽(뒤 번호)을 30mm 연장
+  // Rev.16.57: 연장 - i1-i2 선의 i2쪽을 늘림.
+  //   연장 1 2 30     → 30mm 연장 (거리)
+  //   연장 1 2 교점   → i1→i2 방향으로 늘려 처음 만나는 선과의 교점까지
+  //   연장 1 2 X 50   → i2쪽 끝의 X좌표가 50mm 될 때까지 연장
+  //   연장 1 2 Y 30   → i2쪽 끝의 Y좌표가 30mm 될 때까지 연장
   if ((toks[0] === '연장' || toks[0] === 'EXTEND') && toks.length >= 4){
     const i1 = parsePenIdx(toks[1]), i2 = parsePenIdx(toks[2]);
-    const dist = evalExpr(toks[3]);
-    if (i1 == null || i2 == null || !penPoints[i1] || !penPoints[i2] || !isFinite(dist)) return false;
+    if (i1 == null || i2 == null || !penPoints[i1] || !penPoints[i2]) return false;
     const ln = penFindLineByEndpoints(i1, i2);
     if (!ln){ document.getElementById('statusHint').textContent = `연장 실패: ${i1}-${i2}를 끝점으로 가진 선이 없음`; return true; }
-    // 1→2 방향 단위벡터로 2번 끝을 dist 연장
     const a = penPoints[i1], b = penPoints[i2];
     const len = Math.hypot(b.x-a.x, b.y-a.y);
     if (len < 1e-6) return true;
     const ux = (b.x-a.x)/len, uy = (b.y-a.y)/len;
-    const nx = b.x + ux*dist/mmPerPixel, ny = b.y + uy*dist/mmPerPixel;
-    // 선의 2번 끝점을 갱신 (어느 p가 2번인지 찾아서)
+    let nx, ny, label;
+    const mode = toks[3];
+
+    if (mode === '교점' || mode === 'IX'){
+      // i2 끝에서 i1→i2 방향 반직선이 처음 만나는 선과의 교점
+      const maxPx = Math.hypot(baseW, baseH);
+      const hit = penRayFirstHit(b.x, b.y, ux, uy, maxPx);
+      if (!hit){ document.getElementById('statusHint').textContent='연장: 그 방향에 만나는 선이 없습니다'; return true; }
+      nx = hit.x; ny = hit.y; label = '교점까지';
+    } else if (mode === 'X' || mode === 'x'){
+      const xmm = evalExpr(toks[4]);
+      if (!isFinite(xmm)) return false;
+      const targetPx = penMmToPx(xmm, 0).x;     // 목표 X(px)
+      if (Math.abs(ux) < 1e-6){ document.getElementById('statusHint').textContent='연장: 세로선은 X좌표로 연장 불가'; return true; }
+      const t = (targetPx - b.x) / ux;          // b에서 방향으로 t만큼
+      nx = b.x + ux*t; ny = b.y + uy*t; label = `X=${xmm}`;
+    } else if (mode === 'Y' || mode === 'y'){
+      const ymm = evalExpr(toks[4]);
+      if (!isFinite(ymm)) return false;
+      const targetPy = penMmToPx(0, ymm).y;     // 목표 Y(px)
+      if (Math.abs(uy) < 1e-6){ document.getElementById('statusHint').textContent='연장: 가로선은 Y좌표로 연장 불가'; return true; }
+      const t = (targetPy - b.y) / uy;
+      nx = b.x + ux*t; ny = b.y + uy*t; label = `Y=${ymm}`;
+    } else {
+      const dist = evalExpr(mode);
+      if (!isFinite(dist)) return false;
+      nx = b.x + ux*dist/mmPerPixel; ny = b.y + uy*dist/mmPerPixel; label = `${dist}mm`;
+    }
+
     const which = (Math.hypot(ln.p1.x-b.x, ln.p1.y-b.y) < Math.hypot(ln.p2.x-b.x, ln.p2.y-b.y)) ? 'p1' : 'p2';
     ln[which] = { x:nx, y:ny };
-    // 2번 점 좌표도 갱신
     penPoints[i2] = { x:nx, y:ny };
-    // 라벨 위치도 이동
     penUpdateLabel(i2, nx, ny);
-    penFinish(`↦ ${i1}-${i2} 선 ${i2}번 쪽 ${dist}mm 연장`);
+    penFinish(`↦ ${i1}-${i2} 선 ${i2}번 쪽 ${label} 연장`);
     return true;
   }
 
-  // Rev.16.43: 거리두기 4 5 좌 1 (방향 생략시 기본 좌) - 진행방향 기준 평행복제
+  // Rev.16.56: 거리두기 4 5 좌 1 - 진행방향 좌/우 평행복제.
+  //   원본 끝점에 붙은 인접선과 만나도록 평행선을 연장/단축(폐곽 유지), 끝점에 번호 부여.
   if ((toks[0] === '거리두기' || toks[0] === 'OFFSET')
       && parsePenIdx(toks[1]) != null && parsePenIdx(toks[2]) != null){
     const i1 = parsePenIdx(toks[1]), i2 = parsePenIdx(toks[2]);
@@ -518,9 +546,32 @@ function tryPenCommand(cmdStr){
     if (len<1e-6){ document.getElementById('statusHint').textContent=`거리두기 실패: ${i1},${i2}가 같은 위치`; return true; }
     const ux=dx/len, uy=dy/len, nx=isLeft?uy:-uy, ny=isLeft?-ux:ux;
     const offPx=dmm/mmPerPixel, ox=nx*offPx, oy=ny*offPx;
-    penAddLine(a.x+ox,a.y+oy,b.x+ox,b.y+oy);
-    penAddPoint(a.x+ox,a.y+oy); penAddPoint(b.x+ox,b.y+oy);
-    penFinish(`⫴ ${i1}→${i2} 진행방향 ${isLeft?'좌':'우'}측 ${dmm}mm 평행복제`);
+    // 평행 이동한 임시 끝점
+    let na = { x:a.x+ox, y:a.y+oy };
+    let nb = { x:b.x+ox, y:b.y+oy };
+
+    // 원본 i1-i2 선 자신을 찾아 제외
+    const tol = 1/mmPerPixel*0.15;
+    const onPt = (P,Q)=>Math.hypot(P.x-Q.x,P.y-Q.y)<tol;
+    const selfLine = shapes.find(s=>s.type==='line'&&s.p1&&s.p2&&
+      ((onPt(s.p1,a)&&onPt(s.p2,b))||(onPt(s.p1,b)&&onPt(s.p2,a))));
+    // 끝점 P에 붙은 인접선(원본 제외) 1개 찾기
+    const adjLineAt = (P)=>{
+      for (const s of shapes){
+        if (s.type!=='line'||!s.p1||!s.p2||s===selfLine) continue;
+        if (onPt(s.p1,P)||onPt(s.p2,P)) return s;
+      }
+      return null;
+    };
+    const adjA = adjLineAt(a), adjB = adjLineAt(b);
+    // 새 평행선(무한직선) na-nb 와 인접선(무한직선)의 교점으로 끝점 보정
+    if (adjA){ const ix=lineLineIntersection(na,nb,adjA.p1,adjA.p2); if(ix) na={x:ix.x,y:ix.y}; }
+    if (adjB){ const ix=lineLineIntersection(na,nb,adjB.p1,adjB.p2); if(ix) nb={x:ix.x,y:ix.y}; }
+
+    penAddLine(na.x,na.y,nb.x,nb.y);
+    const ea = penAddPoint(na.x,na.y);
+    const eb = penAddPoint(nb.x,nb.y);
+    penFinish(`⫴ ${i1}→${i2} ${isLeft?'좌':'우'}측 ${dmm}mm 평행복제 → P${ea}, P${eb}`);
     return true;
   }
 

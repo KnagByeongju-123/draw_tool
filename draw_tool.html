@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.16.69</title>
+<title>도면 작도기 Rev.16.70</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.16.69</h1>
+  <h1>📐 도면 작도기 Rev.16.70</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -1171,7 +1171,7 @@
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>수식 =(식)</b></td><td style="padding:4px 8px;">숫자 자리에 = 붙여 계산. 예: <b>좌 =(130-110)/2</b> · <b>점 상 =5+3</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>시작 X Y</b></td><td style="padding:4px 8px;">시작점 0번을 (X,Y)mm로 설정. 0,0=화면 우측하단 기준, 위=+Y. 예: <b>시작 0 0</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>연결 1 4 (선 1 4)</b></td><td style="padding:4px 8px;">두 점(1번, 4번)을 직접 연결. 마우스로 두 점 클릭해도 연결</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>우/좌/상/하 D · 선 좌 교점</b></td><td style="padding:4px 8px;">방향 D mm 선 긋고 새 번호(예: <b>우 50</b>). <b>선 좌 교점</b>=그 방향 첫 교점까지 선(=좌 교점)</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>우 50 · 선 상 3.7 · 선 좌 교점</b></td><td style="padding:4px 8px;">방향 D mm 선 긋기. <b>우 50</b>=접두없이도 OK, <b>선 상 3.7</b>=선 접두. <b>선 좌 교점</b>=그 방향 첫 교점까지(=좌 교점)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 N</b></td><td style="padding:4px 8px;">N번 점을 현재점으로 선택. 예: <b>점 5</b> (마우스로 점 클릭해도 선택)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 X,Y</b></td><td style="padding:4px 8px;">좌표 (X,Y)mm에 점 찍기. 예: <b>점 -100,100</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>점 상 2.5</b></td><td style="padding:4px 8px;">현재 선택점에서 방향(상/하/좌/우)+거리에 독립 점만 찍기 (선 없음)</td></tr>
@@ -1371,11 +1371,11 @@
 
 <!-- ===== 분리된 메인 스크립트 (편집 용이) ===== -->
 <!-- 1편: 전역상태·캔버스/렌더링·마우스/키보드 이벤트·기본도구 -->
-<script src="draw_tool_core.js?v=1669"></script>
+<script src="draw_tool_core.js?v=1670"></script>
 <!-- 1.5편: 한붓그리기/명령어 처리(점·선·지름·거리두기·=수식) - core 다음에 로드 -->
-<script src="draw_tool_core2.js?v=1669"></script>
+<script src="draw_tool_core2.js?v=1670"></script>
 <!-- 2편: 복사/이동/회전/대칭/배열, 폴리라인/타원/텍스트, 레이어/해치, DXF/패닝/측정, OSNAP -->
-<script src="draw_tool_tools.js?v=1669"></script>
+<script src="draw_tool_tools.js?v=1670"></script>
 
 <!-- ===== OSNAP 다이얼로그 (Rev.10.8) ===== -->
 <div class="osnap-overlay" id="osnapDlg">

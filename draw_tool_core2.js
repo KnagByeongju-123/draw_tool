@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.69  최신본 — 명령어 (점·선[선 좌 교점/선 좌 지]·지름·거리두기·연장·절교/절각·점방향교점·기준점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.16.70  최신본 — 명령어 (점·선[선 상 3.7/선 좌 교점/선 좌 지]·지름·거리두기·연장·절교/절각·점방향교점·기준점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -398,6 +398,27 @@ function tryPenCommand(cmdStr){
     const first = penPoints.length;
     found.forEach(p => penAddPoint(p.x, p.y));
     penFinish(`✕ 교점 ${found.length}개에 번호 부여 (${first}~${penPoints.length-1})`);
+    return true;
+  }
+
+  // Rev.16.70: 선 상 3.7 - 현재점에서 방향으로 거리만큼 선 긋기 (접두 없는 '상 3.7'과 동일, 일관된 이름)
+  if (toks[0] === '선' && ['상','하','좌','우','U','D','L','R'].includes(toks[1])
+      && toks[2] !== '지' && toks[2] !== '교점' && isFinite(evalExpr(toks[2]))){
+    if (penCur < 0 || !penPoints[penCur]){
+      document.getElementById('statusHint').textContent = '⚠ 먼저 점을 선택하세요 (점 5 또는 점 클릭)'; return true;
+    }
+    const sdir = toks[1];
+    const sdist = evalExpr(toks[2]);
+    if (!isFinite(sdist)) return false;
+    const base = penPoints[penCur]; const dpx = sdist/mmPerPixel;
+    let nx=base.x, ny=base.y;
+    if (sdir==='우'||sdir==='R') nx+=dpx;
+    else if (sdir==='좌'||sdir==='L') nx-=dpx;
+    else if (sdir==='상'||sdir==='U') ny-=dpx;   // 화면 위=Y감소
+    else if (sdir==='하'||sdir==='D') ny+=dpx;
+    penAddLine(base.x, base.y, nx, ny);
+    penAddPoint(nx, ny);
+    penFinish(`✎ ${penCur}번 → 선 ${sdir} ${sdist}mm → ${penCur}`);
     return true;
   }
 

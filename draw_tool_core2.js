@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.16.58  최신본 — 명령어 (점·선·지름·거리두기·연장·기준점[기준 X Y / 기준 지, 좌표→기준 통일]·=수식·이동·각교점·호) #####
+// ##### draw_tool_core2.js  Rev.16.60  최신본 — 명령어 (점·선·지름·거리두기·연장·기준점·방향교점·선택방향교점[선택 상 교점]·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -188,6 +188,29 @@ function tryPenCommand(cmdStr){
     penSyncFromShapes();
     document.getElementById('statusHint').textContent = '↩ 백: 직전 작업 취소';
     cmdLog('  백(취소)', 'system');
+    return true;
+  }
+
+  // Rev.16.60: 선택 상/하/좌/우 교점 - 현재점에서 그 방향 직진하다 첫 교점에 점만 찍고 선택 (선 없음)
+  if ((toks[0] === '선택' || toks[0] === 'SEL' || toks[0] === 'SELECT')
+      && ['상','하','좌','우','U','D','L','R'].includes(toks[1])
+      && (toks[2] === '교점' || toks[2] === 'IX')){
+    if (penCur < 0 || !penPoints[penCur]){
+      document.getElementById('statusHint').textContent = '⚠ 먼저 점을 선택하세요 (점 5 또는 점 클릭)';
+      return true;
+    }
+    const dir2 = toks[1];
+    let ux=0, uy=0;
+    if (dir2==='우'||dir2==='R') ux = 1;
+    else if (dir2==='좌'||dir2==='L') ux = -1;
+    else if (dir2==='상'||dir2==='U') uy = -1;   // 화면 위=Y감소
+    else if (dir2==='하'||dir2==='D') uy = 1;
+    const sp2 = penPoints[penCur];
+    const maxPx = Math.hypot(baseW, baseH);
+    const hit = penRayFirstHit(sp2.x, sp2.y, ux, uy, maxPx);
+    if (!hit){ document.getElementById('statusHint').textContent = `${dir2} 방향에 만나는 선이 없습니다`; return true; }
+    penAddPoint(hit.x, hit.y);   // 선 없이 점만
+    penFinish(`▸ ${dir2} 교점 점 = ${penCur}번 선택 (선 없음)`);
     return true;
   }
 
@@ -703,6 +726,23 @@ function tryPenCommand(cmdStr){
     penAddLine(sp.x, sp.y, nx, ny);
     penAddPoint(nx, ny);
     penFinish(`⌀ ${startIdx} → ${dir} 지름 ${d1}→${d2} = ${moveMm}mm 선긋기 → ${penCur}`);
+    return true;
+  }
+
+  // Rev.16.59: 상/하/좌/우 교점 - 그 방향으로 직진하다 처음 만나는 선과의 교점까지 선긋기
+  if (toks[off+1] === '교점' || toks[off+1] === 'IX'){
+    let ux=0, uy=0;
+    if (dir==='우'||dir==='R') ux = 1;
+    else if (dir==='좌'||dir==='L') ux = -1;
+    else if (dir==='상'||dir==='U') uy = -1;   // 화면 위=Y감소
+    else if (dir==='하'||dir==='D') uy = 1;
+    else return false;
+    const maxPx = Math.hypot(baseW, baseH);
+    const hit = penRayFirstHit(sp.x, sp.y, ux, uy, maxPx);
+    if (!hit){ document.getElementById('statusHint').textContent = `${dir} 방향에 만나는 선이 없습니다`; return true; }
+    penAddLine(sp.x, sp.y, hit.x, hit.y);
+    penAddPoint(hit.x, hit.y);
+    penFinish(`✎ ${startIdx} → ${dir} 교점까지 → ${penCur}`);
     return true;
   }
 

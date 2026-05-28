@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.24</title>
+<title>도면 작도기 Rev.19.25</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -73,6 +73,22 @@
   #cmdMicBtn:hover { background:#333; color:#fff; }
   #cmdMicBtn.listening { background:#c0392b; border-color:#e74c3c; color:#fff; animation:micPulse .7s infinite alternate; }
   @keyframes micPulse { from{opacity:1} to{opacity:.5} }
+  /* 명령어 패널 */
+  #cmdRefPanel {
+    display:none; position:fixed; left:0; right:0; bottom:32px;
+    z-index:2490; background:#111; border-top:1px solid #555;
+    max-height:240px; overflow-y:auto; padding:6px 10px 4px;
+    font-size:11px; font-family:monospace;
+  }
+  #cmdRefPanel .cmd-section { color:#f39c12; font-weight:bold; margin:6px 0 3px; font-size:11px; }
+  #cmdRefPanel table { width:100%; border-collapse:collapse; }
+  #cmdRefPanel td { padding:2px 6px; vertical-align:top; border-bottom:1px solid #222; }
+  #cmdRefPanel td:first-child { color:#5bc8e8; white-space:nowrap; width:160px; }
+  #cmdRefPanel td:last-child { color:#bbb; }
+  #cmdRefPanel tr:hover td { background:#1a2a1a; }
+  #cmdRefToggle { background:#222; border:1px solid #555; border-radius:4px; color:#aaa; font-size:12px; padding:4px 8px; cursor:pointer; white-space:nowrap; }
+  #cmdRefToggle:hover { background:#333; color:#fff; }
+  #cmdRefToggle.open { background:#1a3a1a; border-color:#5bc8e8; color:#5bc8e8; }
   .cmd-prompt { color: #f39c12; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; font-weight: bold; min-width: 110px; }
   .cmd-input { flex: 1; padding: 4px 8px; background: #000; color: #0f0; border: 1px solid #555; border-radius: 3px; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; outline: none; }
   .cmd-input:focus { border-color: #f39c12; }
@@ -332,7 +348,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.24</h1>
+  <h1>📐 도면 작도기 Rev.19.25</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -756,6 +772,73 @@
   </div>
 </div>
 
+<!-- 명령어 참조 패널 (Rev.19.25) -->
+<div id="cmdRefPanel">
+  <div class="cmd-section">▶ 그리기</div>
+  <table>
+    <tr><td>사각형 W H</td><td>가로×세로 사각형. 예: 사각형 40 25</td></tr>
+    <tr><td>원 D / 원 X Y D</td><td>지름D 원. 좌표지정: 원 -50 50 5</td></tr>
+    <tr><td>가로선 L / 세로선 L</td><td>길이L 가로/세로선. 예: 가로선 100</td></tr>
+    <tr><td>LINE x1 y1 x2 y2</td><td>두 점 잇는 선. 예: LINE 0 0 100 0</td></tr>
+    <tr><td>호 N R 시계 각 45</td><td>N번중심 반지름R 시계방향 45도 호</td></tr>
+    <tr><td>호 N R 시계 교점</td><td>N번중심 반지름R 호를 돌다 첫교점까지</td></tr>
+  </table>
+  <div class="cmd-section">▶ 한붓그리기 (점번호 자동)</div>
+  <table>
+    <tr><td>우/좌/상/하 D</td><td>방향으로 D mm 선 긋기. 예: 우 50</td></tr>
+    <tr><td>선 우/좌/상/하 D</td><td>방향 D mm 선 (선 접두). 예: 선 상 3.7</td></tr>
+    <tr><td>우/좌/상/하 교점</td><td>방향으로 첫 교점까지 선 긋기</td></tr>
+    <tr><td>우/좌 지 D1 D2</td><td>지름차 (D2−D1)/2 만큼 방향으로 선</td></tr>
+    <tr><td>각 A D</td><td>각도A°(수평0°,반시계+) D mm 선</td></tr>
+    <tr><td>각 A 교점</td><td>그 각도로 직진하다 첫교점까지</td></tr>
+    <tr><td>점 N</td><td>N번 점을 현재점으로 선택. 예: 점 5</td></tr>
+    <tr><td>점 X,Y</td><td>좌표에 점 찍기. 예: 점 -100,100</td></tr>
+    <tr><td>점 상/하/좌/우 D</td><td>방향+거리에 독립 점 찍기(선 없음)</td></tr>
+    <tr><td>점 좌 지 D1 D2</td><td>지름차만큼 방향으로 독립 점</td></tr>
+    <tr><td>선택 N</td><td>현재점을 N번으로 이동. 예: 선택 10</td></tr>
+    <tr><td>시작 X Y</td><td>시작점0번을 (X,Y)mm로 설정</td></tr>
+    <tr><td>기준 X Y</td><td>기준점(노란십자) 설정. 예: 기준 -50 30</td></tr>
+    <tr><td>기준 상/하/좌/우 D</td><td>현기준점에서 방향D만큼 새 기준점</td></tr>
+    <tr><td>기준 지 D1 D2</td><td>지름D1→좌측반지름(-D1/2), Y=D2 기준점</td></tr>
+    <tr><td>닫기</td><td>현재점→0번 선 연결</td></tr>
+    <tr><td>백 / 점초기화</td><td>직전1회취소 / 번호리셋</td></tr>
+  </table>
+  <div class="cmd-section">▶ 편집</div>
+  <table>
+    <tr><td>연결 N1 N2 / 선 N1 N2</td><td>두 점 직선 연결. 예: 연결 1 2</td></tr>
+    <tr><td>삭제 N1 N2 / 삭제 N</td><td>N1-N2선 삭제 / N번점 삭제</td></tr>
+    <tr><td>이동 N 우 D</td><td>N번점을 방향D만큼 이동(선도함께)</td></tr>
+    <tr><td>거리두기 N1 N2 좌/우 D</td><td>진행방향기준 좌/우로D mm 평행복제</td></tr>
+    <tr><td>두께 N1 N2 좌/우</td><td>N1~N2경로를 소재두께만큼 평행</td></tr>
+    <tr><td>연장 N1 N2 D</td><td>N1→N2방향으로D mm 연장</td></tr>
+    <tr><td>연장 N1 N2 교점</td><td>N1→N2방향으로 첫교점까지 연장</td></tr>
+    <tr><td>줄이기 N1 N2 D</td><td>N1-N2선을 N2쪽에서D mm 축소</td></tr>
+    <tr><td>알 N R / 알 N1 N2 R</td><td>N번교점 두선에 필렛R. 예: 알 3 0.1</td></tr>
+    <tr><td>모따기 N R</td><td>N번교점 C모따기. 예: 모따기 3 0.5</td></tr>
+    <tr><td>절교 N1 N2 N3 수직/수평</td><td>N1→N2연장선이 N3기준 수직/수평선과 만나는점까지</td></tr>
+    <tr><td>절교 N 방향 수평/수직 N2</td><td>N번에서 방향으로 N2점 수평/수직선까지</td></tr>
+    <tr><td>절각 N A N2 수직/수평</td><td>N번에서A°연장선이 N2기준 수직/수평선까지</td></tr>
+  </table>
+  <div class="cmd-section">▶ 교점·참조</div>
+  <table>
+    <tr><td>교점</td><td>모든 선·원·호 교차점에 일괄 번호부여</td></tr>
+    <tr><td>만남 / 만남 N1 N2</td><td>두선을 무한연장한 교점에 번호부여(두께선도 가능)</td></tr>
+    <tr><td>라벨 / 번호</td><td>라벨없는 모든 점·꼭짓점에 자동 P번호부여</td></tr>
+    <tr><td>수식 =(식)</td><td>숫자자리에 수식. 예: 좌 =(130-110)/2</td></tr>
+  </table>
+  <div class="cmd-section">▶ 기타</div>
+  <table>
+    <tr><td>정리 [N]</td><td>점+N mm이하 짧은선 일괄삭제. 기본0.1</td></tr>
+    <tr><td>선택 / SEL</td><td>선택 모드</td></tr>
+    <tr><td>DI</td><td>캘리브레이션(실제거리 기준설정)</td></tr>
+    <tr><td>TR / EX</td><td>트리밍 / 선연장</td></tr>
+    <tr><td>H / BPOLY</td><td>영역채움 / 모든영역 자동채움</td></tr>
+    <tr><td>DIM / DAL / DRA</td><td>선형/평행/반지름 치수</td></tr>
+    <tr><td>CO</td><td>복사</td></tr>
+    <tr><td>?</td><td>전체 명령 목록 표시</td></tr>
+  </table>
+</div>
+
 <!-- 명령창 (Rev.16.42: 텍스트로 도면 그리기 - 화면 하단 표시, 한글 입력 허용) -->
 <div class="cmd-bar" style="position:fixed; left:0; right:0; bottom:0; z-index:2500; background:#1a1a1a; border-top:1px solid #444; padding:5px 10px; display:flex; flex-direction:column; gap:3px;">
   <div class="cmd-history" id="cmdHistory" style="max-height:60px; overflow-y:auto; font-size:11px; color:#9bbf6a; font-family:monospace; line-height:1.4;">
@@ -764,6 +847,7 @@
     <span class="cmd-prompt" id="cmdPrompt" style="color:#f39c12; font-weight:bold; font-size:12px;">명령: </span>
     <input type="text" id="cmdInput" class="cmd-input" autocomplete="off" spellcheck="false" style="flex:1; background:#000; color:#fff; border:1px solid #555; border-radius:4px; padding:5px 8px; font-size:13px; font-family:monospace;" placeholder="예: 사각형 40 25  ·  원 20  ·  가로선 100  ·  LINE 0 0 100 0  (Enter 실행)">
     <button id="cmdMicBtn" title="음성 입력 (클릭 후 말하기)">🎙️</button>
+    <button id="cmdRefToggle" title="명령어 목록 펼치기/접기">📋 명령어</button>
     <!-- Rev.19.20: AI 프롬프트 / .txt 불러오기 버튼 삭제 (JS 호환용 숨김 더미만 유지) -->
     <button id="cmdScriptLoad" style="display:none;">📁</button>
     <button id="cmdAiPrompt" style="display:none;">📋</button>
@@ -1624,13 +1708,37 @@
 </div>
 
 <script>
-/* ── 음성 입력 (Rev.19.24) ───────────────────────────────────────────────
+/* ── 음성 입력 (Rev.19.25) ───────────────────────────────────────────────
    Web Speech API: SpeechRecognition (Chrome/Edge)
    동작: 마이크 버튼 클릭 → 인식 → 한글숫자 변환 → cmdInput에 채움 (Enter는 사용자가 직접)
 ──────────────────────────────────────────────────────────────────────── */
 (function(){
   const btn = document.getElementById('cmdMicBtn');
   const inp = document.getElementById('cmdInput');
+
+  // ── 명령어 패널 토글 ────────────────────────────────────────────────
+  const refToggle = document.getElementById('cmdRefToggle');
+  const refPanel  = document.getElementById('cmdRefPanel');
+  if (refToggle && refPanel) {
+    refToggle.addEventListener('click', () => {
+      const open = refPanel.style.display === 'block';
+      refPanel.style.display = open ? 'none' : 'block';
+      refToggle.classList.toggle('open', !open);
+      refToggle.textContent = open ? '📋 명령어' : '📋 닫기';
+      // 패널 높이만큼 cmd-bar 위로 올리기
+      const bar = document.querySelector('.cmd-bar');
+      if (bar) bar.style.bottom = open ? '0' : refPanel.offsetHeight + 'px';
+      if (!open) inp.focus();
+    });
+    // 패널 안 행 클릭 → 명령어 첫 토큰을 입력창에 삽입
+    refPanel.addEventListener('click', e => {
+      const td = e.target.closest('td:first-child');
+      if (!td) return;
+      const cmd = td.textContent.trim().split(/[\s\/]/)[0];
+      inp.value = cmd + ' ';
+      inp.focus();
+    });
+  }
   if (!btn || !inp) return;
 
   // SpeechRecognition 지원 확인

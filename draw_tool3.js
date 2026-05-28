@@ -1209,23 +1209,22 @@ function initThree(){
   gridMain.userData.isMainGrid = true;
   scene.add(gridMain);
   gridHelper.userData.subGrid = gridMain; // 같이 토글되도록 참조 저장
-  // v7.1.4d: 축선을 명시적 LineSegments로 직접 생성 (AxesHelper 정점순서 모호성 제거)
-  //   X=빨강(가로), Y=연두(세로/위), Z=흰색(가로). 양 끝점 동일 색 → 끝부분 흐려짐 없음.
+  // v7.1.4f: 흰색↔녹색만 교환 — 세로(위)=흰색, 가로축B=녹색, 가로축A=빨강
   {
     const AX = 70; // 축 길이(mm)
-    const cX = new THREE.Color(0xff2222); // X 빨강
-    const cY = new THREE.Color(0x66ff33); // Y 연두
-    const cZ = new THREE.Color(0xffffff); // Z 흰색
+    const cHorizA = new THREE.Color(0xff2222); // 가로축 A 빨강 (유지)
+    const cVert   = new THREE.Color(0xffffff); // 세로(위) 흰색
+    const cHorizB = new THREE.Color(0x33dd33); // 가로축 B 녹색
     // 각 축: 원점 → 양의 방향 끝
     const positions = new Float32Array([
-      0,0,0,  AX,0,0,    // X축
-      0,0,0,  0,AX,0,    // Y축 (위로)
-      0,0,0,  0,0,AX     // Z축
+      0,0,0,  AX,0,0,    // 가로축 A
+      0,0,0,  0,AX,0,    // 세로축 (위로)
+      0,0,0,  0,0,AX     // 가로축 B
     ]);
     const cols = new Float32Array([
-      cX.r,cX.g,cX.b,  cX.r,cX.g,cX.b,
-      cY.r,cY.g,cY.b,  cY.r,cY.g,cY.b,
-      cZ.r,cZ.g,cZ.b,  cZ.r,cZ.g,cZ.b
+      cHorizA.r,cHorizA.g,cHorizA.b,  cHorizA.r,cHorizA.g,cHorizA.b,
+      cVert.r,cVert.g,cVert.b,        cVert.r,cVert.g,cVert.b,
+      cHorizB.r,cHorizB.g,cHorizB.b,  cHorizB.r,cHorizB.g,cHorizB.b
     ]);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));

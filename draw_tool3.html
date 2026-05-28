@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v7.3.0 - 단면+작동 모션 추가</title>
+<title>tool3 v7.4.1 - 중복 툴바 정리</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v7.3.0</h1>
+  <h1>📐 tool3 v7.4.1</h1>
   <span class="ver">v7.1.10 - 회전축 Y/Z 매핑·색 일치(Z-up)</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -252,6 +252,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <div class="menu-item" onclick="openExtrudeModal()"><span class="ico">⬆️</span>돌출 (Extrude)</div>
       <div class="menu-item" onclick="openRevolveModal()"><span class="ico">🔄</span>회전체 (Revolve)</div>
       <div class="menu-item" onclick="openSvgRevolverModal()"><span class="ico">🌀</span>SVG Revolver</div>
+      <div class="menu-item" onclick="toggleFloorSketch()"><span class="ico">👁️</span>바닥 스케치 표시/숨김</div>
     </div>
   </div>
   <div class="menu">
@@ -319,13 +320,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <label>두께:</label>
     <input type="number" id="lineWidth" value="2" min="1" max="10" style="width:36px">
   </div>
-  <!-- v2.2: 돌출/회전체는 양쪽 모드에서 모두 사용 가능 (3D에서 바닥 스케치 보면서 누를 수 있도록) -->
-  <div class="group">
-    <button class="purple" onclick="openExtrudeModal()" title="돌출 (Extrude)">⬆️ 돌출</button>
-    <button class="purple" onclick="openRevolveModal()" title="회전체 (Revolve)">🔄 회전체</button>
-    <button class="purple" onclick="openSvgRevolverModal()" title="SVG Revolver - SVG 단면으로 회전체 생성">🌀 SVG</button>
-    <button onclick="toggleFloorSketch()" title="바닥 스케치 표시/숨김">👁️ 바닥</button>
-  </div>
+  <!-- v7.4.1: 돌출/회전체/SVG/바닥 툴스트립 그룹 삭제 (상단 '스케치 3D' 메뉴에 동일 기능 존재) -->
 
   <!-- 모드 전환 (작게) -->
   <div class="group">

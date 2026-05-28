@@ -1797,6 +1797,83 @@ function cancelPenDraw(){
   if (typeof preCtx !== 'undefined') preCtx.clearRect(0,0,baseW,baseH);
 }
 
+// Rev.19.32: 사용자좌표 → 픽셀 좌표 역변환 (더블클릭 좌표수정에서 사용)
+function penUserCoordToPx(ux, uy){
+  if (!penOriginPx) return null;
+  let dxMm, dyMm;
+  if (penOriginUserCoord){
+    const Cx = penOriginUserCoord.x || 0;
+    const Cy = penOriginUserCoord.y || 0;
+    // Rev.19.34: 표시X = Cx − 2×dxMm  →  dxMm = (Cx − ux) / 2
+    dxMm = (Cx - ux) / 2;
+    dyMm = uy - Cy;
+  } else {
+    dxMm = ux; dyMm = uy;
+  }
+  return {
+    x: penOriginPx.x + dxMm / mmPerPixel,
+    y: penOriginPx.y - dyMm / mmPerPixel
+  };
+}
+
+// Rev.19.32: 점 더블클릭 → 좌표 수정 팝업
+let penCoordEditTargetIdx = -1;
+function openPenCoordEdit(idx, e){
+  const pt = penPoints[idx]; if (!pt) return;
+  penCoordEditTargetIdx = idx;
+  // 현재 사용자좌표 계산해 입력란에 채우기
+  const dxMm = (pt.x - penOriginPx.x) * mmPerPixel;
+  const dyMm = -(pt.y - penOriginPx.y) * mmPerPixel;
+  let ux, uy, xLbl, yLbl, titleSuffix;
+  if (penOriginUserCoord){
+    const Cx = penOriginUserCoord.x||0, Cy = penOriginUserCoord.y||0;
+    ux = Cx - 2*dxMm;   // 새 직경 공식 표시값
+    uy = Cy + dyMm;
+    xLbl = '⌀X (mm)'; yLbl = 'Y (mm)';
+    titleSuffix = ` — 직경좌표 (회전축=원점우측 ${(Cx/2).toFixed(2)}mm)`;
+  } else {
+    ux = dxMm; uy = dyMm;
+    xLbl = 'X (mm)'; yLbl = 'Y (mm)';
+    titleSuffix = ' — 절대좌표 (원점 기준)';
+  }
+  document.getElementById('penCoordEditTitle').textContent = `P${idx} 좌표 수정` + titleSuffix;
+  document.getElementById('penCoordEditXLbl').textContent = xLbl;
+  document.getElementById('penCoordEditYLbl').textContent = yLbl;
+  const xi = document.getElementById('penCoordEditX');
+  const yi = document.getElementById('penCoordEditY');
+  xi.value = ux.toFixed(2);
+  yi.value = uy.toFixed(2);
+  // 팝업 위치: 점 근처 (없으면 화면 중앙)
+  const pop = document.getElementById('penCoordEditPop');
+  pop.style.display = 'block';
+  try {
+    const r = drawCanvas.getBoundingClientRect();
+    pop.style.left = Math.min(window.innerWidth - 260, Math.max(10, r.left + pt.x * (zoom||1) + 20)) + 'px';
+    pop.style.top  = Math.min(window.innerHeight - 160, Math.max(10, r.top + pt.y * (zoom||1) + 20)) + 'px';
+  } catch(_) {
+    pop.style.left = '50%'; pop.style.top = '40%'; pop.style.transform = 'translate(-50%,-50%)';
+  }
+  setTimeout(() => { xi.focus(); xi.select(); }, 0);
+}
+function closePenCoordEdit(){
+  document.getElementById('penCoordEditPop').style.display = 'none';
+  penCoordEditTargetIdx = -1;
+}
+function applyPenCoordEdit(){
+  if (penCoordEditTargetIdx < 0) return closePenCoordEdit();
+  const idx = penCoordEditTargetIdx;
+  const ux = parseFloat(document.getElementById('penCoordEditX').value);
+  const uy = parseFloat(document.getElementById('penCoordEditY').value);
+  if (isNaN(ux) || isNaN(uy)){
+    document.getElementById('statusHint').textContent = '⚠ 좌표 입력값이 잘못되었습니다';
+    return;
+  }
+  const np = penUserCoordToPx(ux, uy);
+  if (!np){ closePenCoordEdit(); return; }
+  penMovePoint(idx, np.x, np.y);
+  closePenCoordEdit();
+}
+
 // ===== Rev.19.31: 직경좌표 / 마우스좌표 라벨 / 점좌표 라벨 / 클릭이동 =====
 let penOriginUserCoord = null;  // {x,y} - 직경 모드 ON 시 원점에 부여된 사용자 좌표 (mm)
 let penShowCoordLabel = false;  // 점 옆에 좌표 라벨 표시 여부
@@ -1809,9 +1886,13 @@ function penFormatUserCoord(px, py){
   const dxMm = (px - penOriginPx.x) * mmPerPixel;
   const dyMm = -(py - penOriginPx.y) * mmPerPixel;  // Y는 위쪽이 +
   if (penOriginUserCoord){
+    // Rev.19.34: 직경좌표 = 반경×2 (표준 직경 정의). 절대이동거리에 ×2 적용.
+    //   표시X = Cx − 2 × dxMm  (좌측 5mm → 직경 +10)
+    //   회전축(직경 0)은 직경원점에서 우측 Cx÷2 mm 위치.
+    //   Y는 회전축 방향이라 1배 비례: Cy + dyMm
     const Cx = penOriginUserCoord.x || 0;
     const Cy = penOriginUserCoord.y || 0;
-    return `(${(dxMm/2 + Cx).toFixed(2)}, ${(dyMm/2 + Cy).toFixed(2)})⌀`;
+    return `(${(Cx - 2*dxMm).toFixed(2)}, ${(Cy + dyMm).toFixed(2)})⌀`;
   }
   return `(${dxMm.toFixed(2)}, ${dyMm.toFixed(2)})`;
 }
@@ -1911,7 +1992,7 @@ function penToggleDiameterMode(){
     const Cx = parseFloat(cxEl ? cxEl.value : '0') || 0;
     const Cy = parseFloat(cyEl ? cyEl.value : '0') || 0;
     penOriginUserCoord = { x: Cx, y: Cy };
-    cmdLog(`⌀ 직경좌표 모드 ON: 원점=(${Cx}, ${Cy}) · 표시 = 절대이동/2 + 원점값`, 'system');
+    cmdLog(`⌀ 직경좌표 모드 ON: 원점=(${Cx}, ${Cy}) · 표시X = Cx − 2×절대이동 (직경=반경×2, 좌측 5mm → +10)`, 'system');
   }
   if (penShowCoordLabel) penRefreshLabels();
   // 토글 버튼 active 표시
@@ -2042,6 +2123,32 @@ function startNormalMode(){
       }
     });
   });
+
+  // Rev.19.32: 좌표수정 모달 버튼/키 바인딩
+  const bApply  = document.getElementById('penCoordEditApply');
+  if (bApply)  bApply.addEventListener('click',  applyPenCoordEdit);
+  const bCancel = document.getElementById('penCoordEditCancel');
+  if (bCancel) bCancel.addEventListener('click', closePenCoordEdit);
+  ['penCoordEditX','penCoordEditY'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter'){ ev.preventDefault(); applyPenCoordEdit(); }
+      else if (ev.key === 'Escape'){ ev.preventDefault(); closePenCoordEdit(); }
+    });
+  });
+  // 더블클릭: 텍스트모드에서 점 근처 → 좌표 수정 팝업
+  if (typeof drawCanvas !== 'undefined' && drawCanvas){
+    drawCanvas.addEventListener('dblclick', e => {
+      if (!penPickMode) return;
+      if (penAwaitOrigin) return;  // 원점 지정 전엔 의미 없음
+      const p = getCanvasPoint(e);
+      const near = (typeof penFindNearestPoint === 'function') ? penFindNearestPoint(p) : -1;
+      if (near < 0) return;
+      e.preventDefault();
+      openPenCoordEdit(near, e);
+    });
+  }
 
   // 저장된 단순화 설정 복원 (기본: OFF)
   try {

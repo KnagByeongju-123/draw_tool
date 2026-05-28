@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.31</title>
+<title>도면 작도기 Rev.19.34</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -365,7 +365,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.31</h1>
+  <h1>📐 도면 작도기 Rev.19.34</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -935,6 +935,23 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 </div>
 
 <!-- Rev.12.1: 선 길이/각도/상대거리 입력 팝업 (선 끝점 위치 표시) -->
+<!-- Rev.19.32: 점 좌표 수정 팝업 (점/라벨 더블클릭 시 표시) -->
+<div id="penCoordEditPop" style="display:none; position:fixed; z-index:3000; background:#2b2b2b; border:1px solid #7d4296; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,0.6); padding:10px 12px; min-width:230px;">
+  <div style="font-size:12px; color:#cdb4d8; margin-bottom:8px;" id="penCoordEditTitle">점 좌표 수정</div>
+  <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+    <label style="font-size:11px; color:#aaa; min-width:48px;" id="penCoordEditXLbl">X</label>
+    <input type="number" id="penCoordEditX" step="0.01" style="flex:1; padding:4px 6px; background:#1f1f1f; color:#fff; border:1px solid #7d4296; border-radius:4px; font-size:12px;">
+  </div>
+  <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+    <label style="font-size:11px; color:#aaa; min-width:48px;" id="penCoordEditYLbl">Y</label>
+    <input type="number" id="penCoordEditY" step="0.01" style="flex:1; padding:4px 6px; background:#1f1f1f; color:#fff; border:1px solid #7d4296; border-radius:4px; font-size:12px;">
+  </div>
+  <div style="display:flex; gap:6px; justify-content:flex-end;">
+    <button id="penCoordEditCancel" style="padding:5px 10px; background:#444; color:#fff; border:1px solid #666; border-radius:4px; cursor:pointer; font-size:11px;">취소(Esc)</button>
+    <button id="penCoordEditApply" style="padding:5px 12px; background:#7d4296; color:#fff; border:1px solid #9b59b6; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold;">적용(Enter)</button>
+  </div>
+</div>
+
 <div id="lineDimPop" style="display:none; position:fixed; z-index:3000; background:#2b2b2b; border:1px solid #4a6fa5; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,0.6); padding:10px 12px; min-width:240px;">
   <div style="font-size:12px; color:#aac8ff; font-weight:bold; margin-bottom:8px;">📏 선 길이 / 각도 / 상대거리</div>
   <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">

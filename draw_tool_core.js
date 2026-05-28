@@ -2206,6 +2206,12 @@ window.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Escape') {
+    // Rev.19.32: 좌표수정 팝업이 열려 있으면 우선 닫기
+    const _coordPop = document.getElementById('penCoordEditPop');
+    if (_coordPop && _coordPop.style.display !== 'none'){
+      if (typeof closePenCoordEdit === 'function') closePenCoordEdit();
+      return;
+    }
     // Rev.19.31: 클릭이동 모드면 우선 종료
     if (typeof penMoveMode !== 'undefined' && penMoveMode){
       penToggleMoveMode();

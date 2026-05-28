@@ -506,6 +506,7 @@ function selectTool(toolName){
   arcPath = [];
   // Rev.16.81/82: 다른 도구 선택 시 텍스트입력(한붓그리기) 모드 자동 해제
   if (typeof penPickMode !== 'undefined' && penPickMode){
+    if (typeof cancelPenDraw === 'function') cancelPenDraw(); // Rev.19.26
     penPickMode = false;
     if (typeof penPickFirst !== 'undefined') penPickFirst = -1;
     if (typeof penAwaitOrigin !== 'undefined') penAwaitOrigin = false;
@@ -1187,6 +1188,14 @@ drawCanvas.addEventListener('mousemove', e => {
   const unit = calibSet ? `${mmX}, ${mmY} mm` : `${p.x}, ${p.y} px`;
   document.getElementById('statusCoord').textContent = unit + (p.snapped ? ' 🧲' : '');
 
+  // Rev.19.26: 텍스트모드 마우스 드로잉 미리보기 (Shift=슬로우 미세이동)
+  if (typeof penDrawActive === 'function' && penDrawActive()) {
+    const pd = penDrawResolvePoint(e);
+    penDrawCurPt = { x: pd.x, y: pd.y };
+    penDrawPreview(pd);
+    return;
+  }
+
   // Rev.16.24: 필렛 방향 미리보기 (지름 입력 후 진행 중)
   if (filletPreview){
     drawFilletPreview(p);
@@ -1557,6 +1566,9 @@ drawCanvas.addEventListener('mousemove', e => {
 drawCanvas.addEventListener('mousedown', e => {
   // Rev.11.26: 휠 클릭(가운데 버튼)은 패닝 전용 → 작도/선택 처리 안 함
   if (e.button === 1) return;
+
+  // Rev.19.26: 텍스트모드 마우스 드로잉 중에는 박스선택/도구 드래그 진입 금지 (click 이벤트로만 처리)
+  if (typeof penDrawActive === 'function' && penDrawActive() && e.button === 0) return;
 
   // Rev.16.24: 필렛 방향 미리보기 중 - 좌클릭=확정, 우클릭=취소
   if (filletPreview){
@@ -2015,6 +2027,10 @@ drawCanvas.addEventListener('click', e => {
   }
   // Rev.16.46: 점 마우스 선택 모드
   if (penPickMode) {
+    // Rev.19.26: 텍스트모드 마우스 드로잉(선긋기) 우선 처리
+    if (typeof penDrawActive === 'function' && penDrawActive()) {
+      if (typeof handlePenDrawClick === 'function' && handlePenDrawClick(e)) return;
+    }
     const pPk = getCanvasPoint(e);
     if (handlePenPickClick(pPk)) return;
   }
@@ -2179,6 +2195,12 @@ window.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Escape') {
+    // Rev.19.26: 텍스트모드 드로잉 진행 중이면 그 선만 취소 (모드는 유지)
+    if (typeof penDrawFirst !== 'undefined' && penDrawFirst){
+      cancelPenDraw();
+      document.getElementById('statusHint').textContent = '／ 텍스트선 그리기 취소 (텍스트 모드 유지)';
+      return;
+    }
     // Rev.12.6: 거리두기 좌/우 선택 모드 우선 취소
     if (offsetTwinPickMode){
       cancelOffsetTwinPick();
@@ -2301,7 +2323,7 @@ window.addEventListener('keydown', e => {
     }
   }
 });
-window.addEventListener('keyup', e => { if (e.key === 'Shift') shiftDown = false; });
+window.addEventListener('keyup', e => { if (e.key === 'Shift'){ shiftDown = false; if (typeof penDrawSlowAnchor !== 'undefined') penDrawSlowAnchor = null; } }); // Rev.19.26: Shift 해제 시 슬로우 기준 리셋
 
 function applyShiftConstraint(p1, p2) {
   if (!shiftDown || tool !== 'line') return p2;
@@ -10114,6 +10136,27 @@ function applyLineDim(){
     mov.y = fix.y - Math.sin(rad) * targetPx;
     document.getElementById('statusHint').textContent = `✓ 선 보정: 실제 ${valMm.toFixed(2)}mm · ${angRaw.toFixed(1)}°`;
   }
+  // Rev.19.26: 텍스트모드 드로잉으로 만든 선이면 끝점 펜번호(점/라벨) 좌표도 동기화
+  if (typeof penDimEndIdx !== 'undefined' && penDimEndIdx >= 0 &&
+      typeof penPoints !== 'undefined' && penPoints[penDimEndIdx]){
+    const oldPt = { x: penPoints[penDimEndIdx].x, y: penPoints[penDimEndIdx].y };
+    const np = mov; // 방금 이동된 끝점
+    const dxp = np.x - oldPt.x, dyp = np.y - oldPt.y;
+    if (Math.abs(dxp) > 1e-9 || Math.abs(dyp) > 1e-9){
+      penPoints[penDimEndIdx] = { x: np.x, y: np.y };
+      // 점 마커 이동
+      shapes.forEach(s => {
+        if (s.type === 'point' && s.penIdx === penDimEndIdx && s.p1){ s.p1.x = np.x; s.p1.y = np.y; }
+        if (s.type === 'text' && s.penLabel === penDimEndIdx && s.pos){ s.pos.x += dxp; s.pos.y += dyp; }
+      });
+      // 연속선 진행 중이면 다음 시작점도 갱신
+      if (typeof penDrawFirstIdx !== 'undefined' && penDrawFirstIdx === penDimEndIdx && penDrawFirst){
+        penDrawFirst = { x: np.x, y: np.y };
+        penDrawCurPt = { x: np.x, y: np.y };
+      }
+    }
+    penDimEndIdx = -1;
+  }
   redoStack = []; pushHistory();
   if (typeof redrawFills === 'function') redrawFills();
   redrawDraw(); updateCount();
@@ -10123,6 +10166,7 @@ function applyLineDim(){
 function closeLineDimModal(){
   document.getElementById('lineDimPop').style.display = 'none';
   lineDimTargetId = null;
+  if (typeof penDimEndIdx !== 'undefined') penDimEndIdx = -1; // Rev.19.26: 펜번호 동기화 타깃 리셋
 }
 
 document.getElementById('btnLineDimApply').addEventListener('click', applyLineDim);

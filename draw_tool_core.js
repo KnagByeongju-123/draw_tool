@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.18.9  최신본 (거리두기연속모드[생성후다음선선택]·배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신) #####
+// ##### draw_tool_core.js  Rev.19.0  최신본 (선택판정tol을zoom보정[줌아웃에서도선선택가능]·거리두기연속모드·배경맞춤·점앵커십자·점선보조선·아크렌더) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -7196,8 +7196,13 @@ function pointInPolygon(p, vertices) {
 }
 
 function isPointOnShape(p, s) {
-  const tol = Math.max(5, s.strokeWidth + 3);
-  if (s.type === 'point') return Math.hypot(p.x - s.p1.x, p.y - s.p1.y) <= Math.max(tol, 7);
+  // Rev.19.0: tol을 화면 기준 일정 픽셀로 보정. 기존엔 월드좌표 고정 5px이라
+  //   줌 아웃(zoom=0.06 등) 상태에서 화면상 0.3px밖에 안 돼 선 선택이 거의 불가능했음.
+  //   화면상 약 9px에 해당하는 월드 거리 = 9 / zoom. 선 두께도 더해 굵은 선은 더 넉넉히.
+  const Z = (typeof zoom === 'number' && zoom > 0) ? zoom : 1;
+  const screenTolPx = 9;                        // 화면상 허용 반경(px)
+  const tol = (screenTolPx / Z) + (s.strokeWidth || 1);
+  if (s.type === 'point') return Math.hypot(p.x - s.p1.x, p.y - s.p1.y) <= Math.max(tol, 7/Z);
   if (s.type === 'line') return pointToSegmentDist(p, s.p1, s.p2) <= tol;
   if (s.type === 'rect') {
     const x=Math.min(s.p1.x,s.p2.x), y=Math.min(s.p1.y,s.p2.y);
@@ -7242,7 +7247,7 @@ function isPointOnShape(p, s) {
   if (s.type && s.type.startsWith('dim-')) {
     if (s.offset) {
       const d = Math.hypot(p.x - s.offset.x, p.y - s.offset.y);
-      if (d <= 20) return true;
+      if (d <= 20/Z) return true;   // Rev.19.0: zoom 보정
     }
     // 선형/평행 치수는 치수선 위도 hit
     if ((s.type === 'dim-linear' || s.type === 'dim-aligned') && s.p1 && s.p2 && s.offset) {

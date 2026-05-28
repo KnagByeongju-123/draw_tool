@@ -1209,21 +1209,30 @@ function initThree(){
   gridMain.userData.isMainGrid = true;
   scene.add(gridMain);
   gridHelper.userData.subGrid = gridMain; // 같이 토글되도록 참조 저장
-  axesHelper = new THREE.AxesHelper(60);
-  // v7.1.4c: 축 색상 커스텀 — X=빨강, Y=연두, Z=흰색
-  //   AxesHelper 정점 색상 순서: X(2점), Y(2점), Z(2점)
+  // v7.1.4d: 축선을 명시적 LineSegments로 직접 생성 (AxesHelper 정점순서 모호성 제거)
+  //   X=빨강(가로), Y=연두(세로/위), Z=흰색(가로). 양 끝점 동일 색 → 끝부분 흐려짐 없음.
   {
-    const cX = new THREE.Color(0xff3333); // X 빨강
-    const cY = new THREE.Color(0x88ff44); // Y 연두
+    const AX = 70; // 축 길이(mm)
+    const cX = new THREE.Color(0xff2222); // X 빨강
+    const cY = new THREE.Color(0x66ff33); // Y 연두
     const cZ = new THREE.Color(0xffffff); // Z 흰색
-    const colors = new Float32Array([
-      cX.r, cX.g, cX.b,  cX.r, cX.g, cX.b,   // X축 두 점
-      cY.r, cY.g, cY.b,  cY.r, cY.g, cY.b,   // Y축 두 점
-      cZ.r, cZ.g, cZ.b,  cZ.r, cZ.g, cZ.b    // Z축 두 점
+    // 각 축: 원점 → 양의 방향 끝
+    const positions = new Float32Array([
+      0,0,0,  AX,0,0,    // X축
+      0,0,0,  0,AX,0,    // Y축 (위로)
+      0,0,0,  0,0,AX     // Z축
     ]);
-    axesHelper.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    axesHelper.material.vertexColors = true;
-    axesHelper.material.needsUpdate = true;
+    const cols = new Float32Array([
+      cX.r,cX.g,cX.b,  cX.r,cX.g,cX.b,
+      cY.r,cY.g,cY.b,  cY.r,cY.g,cY.b,
+      cZ.r,cZ.g,cZ.b,  cZ.r,cZ.g,cZ.b
+    ]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    const mat = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 2, depthTest: false, transparent: true, opacity: 1.0 });
+    axesHelper = new THREE.LineSegments(geo, mat);
+    axesHelper.renderOrder = 999; // 그리드 위에 항상 보이게
   }
   scene.add(axesHelper);
   

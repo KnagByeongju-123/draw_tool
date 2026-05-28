@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v7.1.8 - 크기조절 개별 중심(오리진) 고정</title>
+<title>tool3 v7.1.9 - 개별 기준점(오리진) 지정</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,8 +190,8 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v7.1.8</h1>
-  <span class="ver">v7.1.8 - 크기조절 시 부품 중심(개별 오리진) 고정</span>
+  <h1>📐 tool3 v7.1.9</h1>
+  <span class="ver">v7.1.9 - 개별 기준점(오리진) 9점 지정 · 크기/회전 기준</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
 </header>
@@ -1008,6 +1008,32 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <div class="modal-row"><label>X축</label><input type="number" id="psRotX" value="0" step="5"></div>
       <div class="modal-row"><label>Y축</label><input type="number" id="psRotY" value="0" step="5"></div>
       <div class="modal-row"><label>Z축</label><input type="number" id="psRotZ" value="0" step="5"></div>
+    </fieldset>
+    <fieldset style="border:1px solid #d35400; padding:8px; margin:6px 0;">
+      <legend style="color:#d35400; font-size:11px;">📍 기준점(오리진) — 크기조절·회전 기준</legend>
+      <div class="modal-row">
+        <label>평면 XY</label>
+        <select id="psOriginXY" style="flex:1">
+          <option value="cc">중앙 (기본)</option>
+          <option value="ll">좌·앞</option>
+          <option value="cl">중앙·앞</option>
+          <option value="rl">우·앞</option>
+          <option value="lc">좌·중앙</option>
+          <option value="rc">우·중앙</option>
+          <option value="lr">좌·뒤</option>
+          <option value="cr">중앙·뒤</option>
+          <option value="rr">우·뒤</option>
+        </select>
+      </div>
+      <div class="modal-row">
+        <label>높이 Z</label>
+        <select id="psOriginZ" style="flex:1">
+          <option value="c">중앙 (기본)</option>
+          <option value="b">바닥</option>
+          <option value="t">상단</option>
+        </select>
+      </div>
+      <div style="font-size:11px;color:#aaa;margin-top:4px">※ 선택한 기준점을 중심으로 커지고/회전합니다. (위치값도 이 기준점 좌표)</div>
     </fieldset>
     <div class="modal-actions">
       <button onclick="closeModal('posSizeModal')">취소</button>

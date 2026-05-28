@@ -909,7 +909,9 @@ function serializePart(p){
     sourceShapes: p.sourceShapes ? JSON.parse(JSON.stringify(p.sourceShapes)) : undefined,
     params: p.params ? JSON.parse(JSON.stringify(p.params)) : {},
     _isHole: !!p._isHole,
-    _xform: t
+    _xform: t,
+    _origin: p._origin || null,      // v7.1.9: 기준점(오리진)
+    _worldRot: p._worldRot || null   // v7.1.6: 표시용 월드축 각도
   };
 }
 
@@ -936,6 +938,8 @@ function deserializePart(pdata){
     part.mesh.rotation.set(t.rot[0], t.rot[1], t.rot[2]);
     part.mesh.scale.set(t.scl[0], t.scl[1], t.scl[2]);
   }
+  if(part && pdata._origin) part._origin = pdata._origin;       // v7.1.9
+  if(part && pdata._worldRot) part._worldRot = pdata._worldRot; // v7.1.6
   // v5.9: 구멍 상태 복원 (빨간 반투명 표시 포함)
   if(part && pdata._isHole){
     part._isHole = true;
@@ -4447,7 +4451,47 @@ function openPosSizeModal(){
     document.getElementById('psRotY').value = (wr.y||0).toFixed(1);
     document.getElementById('psRotZ').value = (wr.z||0).toFixed(1);
   }
+  // v7.1.9: 현재 기준점(오리진) 선택값 복원
+  {
+    const sel = normToOriginSel(target._origin);
+    const oxy = document.getElementById('psOriginXY');
+    const oz = document.getElementById('psOriginZ');
+    if(oxy) oxy.value = sel.xy;
+    if(oz) oz.value = sel.z;
+  }
   document.getElementById('posSizeModal').classList.add('show');
+}
+
+// v7.1.9: 기준점(오리진) — 부품 로컬 BB 기준 정규화 좌표(각 축 0/0.5/1, 내부축)
+//   UI 선택값 → 내부축 정규화 {x,y,z}. 기본=중앙(0.5,0.5,0.5)
+function originSelToNorm(xySel, zSel){
+  const m = { l:0, c:0.5, r:1 };
+  const ux = m[(xySel||'cc')[0]] ?? 0.5;            // 사용자 X
+  const uy = m[(xySel||'cc')[1]] ?? 0.5;            // 사용자 Y = 내부 Z
+  const uz = { b:0, c:0.5, t:1 }[zSel||'c'] ?? 0.5; // 사용자 Z(높이) = 내부 Y
+  return { x: ux, y: uz, z: uy }; // 내부축 {x, y(높이), z}
+}
+// 정규화 오리진 → UI 선택값 복원
+function normToOriginSel(n){
+  const inv = v => (v<0.25?'l':v>0.75?'r':'c');
+  const invZ = v => (v<0.25?'b':v>0.75?'t':'c');
+  if(!n) return { xy:'cc', z:'c' };
+  return { xy: inv(n.x) + inv(n.z), z: invZ(n.y) };
+}
+// 부품의 현재 월드 기준점 좌표 (정규화 오리진 → 월드 위치)
+function getOriginWorld(mesh, norm){
+  norm = norm || {x:0.5,y:0.5,z:0.5};
+  // 로컬 지오메트리 BB
+  const box = new THREE.Box3(); let has=false;
+  mesh.traverse(o=>{ if(o.isMesh&&o.geometry){ if(!o.geometry.boundingBox)o.geometry.computeBoundingBox(); box.union(o.geometry.boundingBox); has=true; } });
+  if(!has) return mesh.position.clone();
+  const lp = new THREE.Vector3(
+    box.min.x + (box.max.x-box.min.x)*norm.x,
+    box.min.y + (box.max.y-box.min.y)*norm.y,
+    box.min.z + (box.max.z-box.min.z)*norm.z
+  );
+  mesh.updateMatrixWorld(true);
+  return lp.applyMatrix4(mesh.matrixWorld);
 }
 
 // v7.1.7: 부품의 "로컬" 치수(mm) — 회전과 무관. 지오메트리 BB × |scale|.
@@ -4532,21 +4576,24 @@ function applyPosSize(){
     y: parseFloat(document.getElementById('psRotY').value) || 0,
     z: parseFloat(document.getElementById('psRotZ').value) || 0
   };
-  // v7.1.8: 입력 위치 = 부품 중심이 되도록 보정 (개별 오리진=중심 기준)
+  // v7.1.9: 기준점(오리진) 저장 + 입력 위치 = 기준점 좌표가 되도록 보정
+  const oxy = document.getElementById('psOriginXY');
+  const oz = document.getElementById('psOriginZ');
+  target._origin = originSelToNorm(oxy ? oxy.value : 'cc', oz ? oz.value : 'c');
   const wantPos = new THREE.Vector3(
     parseFloat(document.getElementById('psPosX').value) || 0,
-    parseFloat(document.getElementById('psPosZ').value) || 0,
-    parseFloat(document.getElementById('psPosY').value) || 0
+    parseFloat(document.getElementById('psPosZ').value) || 0,   // 내부 Y ← 사용자 Z
+    parseFloat(document.getElementById('psPosY').value) || 0    // 내부 Z ← 사용자 Y
   );
   target.mesh.updateMatrixWorld(true);
-  const c = new THREE.Box3().setFromObject(target.mesh).getCenter(new THREE.Vector3());
-  target.mesh.position.add(wantPos.clone().sub(c));
+  const ow = getOriginWorld(target.mesh, target._origin);
+  target.mesh.position.add(wantPos.clone().sub(ow));
 
   closeModal('posSizeModal');
   if(transformState.activePart === target) showTransformHandles(target);
   refreshPropPanelTransform(target);
   pushHistory();
-  toast('✅ 위치 · 크기(mm) · 회전 적용됨');
+  toast('✅ 위치 · 크기 · 회전 적용 (기준점 고정)');
 }
 
 // v6.2: 도형 클릭 시 입력창 자동 표시 토글
@@ -6433,23 +6480,24 @@ function applyPropSize(axisChar){
   // v7.1.5 Z-up: 사용자 축 → 내부 축 (Y↔Z 스왑). 이하 로직은 내부 축 기준.
   const uAxis = axisChar.toLowerCase();
   axisChar = (uAxis === 'y') ? 'z' : (uAxis === 'z') ? 'y' : 'x';
-  // v7.1.8: 부품 자기 중심 기준으로 커지도록 — 변경 전 월드 BB 중심 기록
+  // v7.1.9: 부품의 지정 기준점(오리진) 고정 — 변경 전 오리진 월드좌표 기록
+  const norm = part._origin || {x:0.5,y:0.5,z:0.5};
   part.mesh.updateMatrixWorld(true);
-  const centerBefore = new THREE.Box3().setFromObject(part.mesh).getCenter(new THREE.Vector3());
+  const originBefore = getOriginWorld(part.mesh, norm);
   const localSz = getLocalSize(part.mesh);
   const cur = localSz[axisChar];
   if(cur < 0.001){ toast('현재 크기를 측정할 수 없습니다'); return; }
   const factor = newSize / cur;
   // 부품 mesh.scale에 해당 (로컬)축 factor 곱하기
   part.mesh.scale[axisChar] *= factor;
-  // 중심 고정: 변경 후 중심이 원래 중심과 같도록 위치 보정 (개별 오리진=중심 기준)
+  // 기준점 고정: 변경 후 오리진이 원래 위치에 머물도록 위치 보정
   part.mesh.updateMatrixWorld(true);
-  const centerAfter = new THREE.Box3().setFromObject(part.mesh).getCenter(new THREE.Vector3());
-  part.mesh.position.add(centerBefore.clone().sub(centerAfter));
+  const originAfter = getOriginWorld(part.mesh, norm);
+  part.mesh.position.add(originBefore.clone().sub(originAfter));
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   refreshPropPanelTransform(part);
-  toast('📐 ' + uAxis.toUpperCase() + ' 크기 = ' + newSize.toFixed(1) + ' mm (중심 고정)');
+  toast('📐 ' + uAxis.toUpperCase() + ' 크기 = ' + newSize.toFixed(1) + ' mm (기준점 고정)');
   setStat('크기 변경: ' + uAxis.toUpperCase() + '축 ' + newSize.toFixed(1) + ' mm');
 }
 
@@ -6462,10 +6510,18 @@ function applyPropRotation(){
   const rx = parseFloat(document.getElementById('psRotX').value);
   const ry = parseFloat(document.getElementById('psRotY').value);
   const rz = parseFloat(document.getElementById('psRotZ').value);
+  // v7.1.9: 지정 기준점(오리진) 둘레로 회전 — 회전 전 오리진 월드좌표 기록
+  const norm = part._origin || {x:0.5,y:0.5,z:0.5};
+  part.mesh.updateMatrixWorld(true);
+  const originBefore = getOriginWorld(part.mesh, norm);
   // v7.1.6: 월드 고정축 자세 — Z박스는 항상 월드 up 둘레
   const q = worldEulerToQuat(isNaN(rx)?0:rx, isNaN(ry)?0:ry, isNaN(rz)?0:rz);
   part.mesh.quaternion.copy(q);
   part._worldRot = { x: isNaN(rx)?0:rx, y: isNaN(ry)?0:ry, z: isNaN(rz)?0:rz }; // v7.1.6
+  // 기준점 고정 보정
+  part.mesh.updateMatrixWorld(true);
+  const originAfter = getOriginWorld(part.mesh, norm);
+  part.mesh.position.add(originBefore.clone().sub(originAfter));
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   // 크기는 회전으로 인해 월드 BB가 바뀌므로 갱신

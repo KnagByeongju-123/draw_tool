@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.2</title>
+<title>도면 작도기 Rev.19.3</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.2</h1>
+  <h1>📐 도면 작도기 Rev.19.3</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -411,6 +411,15 @@
       <div class="menu-section">편집 보조</div>
       <div class="menu-item" id="menuContinueFromSel"><span class="ico">▶</span> 끝점에서 이어 그리기</div>
       <div class="menu-item" id="menuConnectSel"><span class="ico">🔗</span> 선택된 선들 연결</div>
+      <div class="menu-sep"></div>
+      <div class="menu-section">마우스 작도 도구 (텍스트 작도 시 거의 불필요)</div>
+      <div class="menu-item" onclick="document.getElementById('headerBtnPoint')?.click()"><span class="ico">•</span> 점(버텍스) 찍기</div>
+      <div class="menu-item" onclick="document.querySelector('.edit-act-btn[data-edit=copy]')?.click()"><span class="ico">⧉</span> 복사 (CO)</div>
+      <div class="menu-item" onclick="document.querySelector('.edit-act-btn[data-edit=move]')?.click()"><span class="ico">✥</span> 이동 (M)</div>
+      <div class="menu-item" onclick="document.getElementById('headerBtnSubdivide')?.click()"><span class="ico">✂</span> N등분 (선 분할)</div>
+      <div class="menu-item" onclick="document.getElementById('headerBtnBreakAll')?.click()"><span class="ico">⊞</span> 교차점 분할</div>
+      <div class="menu-item" onclick="document.getElementById('headerBtnDiagX')?.click()"><span class="ico">╲</span> 대각선 (교점 연결)</div>
+      <div class="menu-item" onclick="document.getElementById('headerBtnSwipeErase')?.click()"><span class="ico">🧹</span> 쓸어 지우기</div>
     </div>
   </div>
   
@@ -593,10 +602,10 @@
     <button class="ts-btn tool-strip-btn" data-tool="rect"><span class="ico">▭</span><span class="lbl">사각형</span><span class="sc">REC</span></button>
     <button class="ts-btn tool-strip-btn" data-tool="circle"><span class="ico">○</span><span class="lbl">원</span><span class="sc">C</span></button>
     <button class="ts-btn tool-strip-btn" data-tool="arc"><span class="ico">⌒</span><span class="lbl">호</span><span class="sc">A</span></button>
-    <button class="ts-btn tool-strip-btn" data-tool="fill"><span class="ico">🎨</span><span class="lbl">채움</span><span class="sc">H</span></button>
-    <button class="ts-btn tool-strip-btn" data-tool="calib"><span class="ico">📏</span><span class="lbl">캘리브</span><span class="sc">M</span></button>
+    <button class="ts-btn tool-strip-btn" data-tool="fill" style="display:none"><span class="ico">🎨</span><span class="lbl">채움</span><span class="sc">H</span></button>
+    <button class="ts-btn tool-strip-btn" data-tool="calib" style="display:none"><span class="ico">📏</span><span class="lbl">캘리브</span><span class="sc">M</span></button>
     <span class="ts-sep"></span>
-    <button id="headerBtnPoint" class="ts-btn" title="버텍스(점) 찍기 - 좌표를 클릭해 점 1개 생성"><span class="ico">•</span><span class="lbl">점</span></button>
+    <button id="headerBtnPoint" class="ts-btn" title="버텍스(점) 찍기 - 좌표를 클릭해 점 1개 생성" style="display:none"><span class="ico">•</span><span class="lbl">점</span></button>
     <!-- Rev.18.2: 텍스트입력·명령판은 상단 헤더로 이동 -->
     <button id="headerBtnConnect" class="ts-btn" title="연결(F) - 두 점을 클릭하면 선 1개 생성" style="display:none"><span class="ico">🔗</span><span class="lbl">연결</span><span class="sc">F</span></button>
     <button id="headerBtnExtrude" class="ts-btn" title="연장(Extrude/E) - 선택한 점/선을 드래그해서 선/면 만들기" style="display:none"><span class="ico">⬄</span><span class="lbl">연장</span></button>
@@ -608,29 +617,29 @@
     <span class="ts-label edit" title="대상을 선택한 후 버튼을 클릭하세요">✂ 편집</span>
     <button class="ts-btn tool-strip-btn" data-tool="trim" title="트림 (T)" style="display:none"><span class="ico">✂</span><span class="lbl">트림</span></button>
     <button class="ts-btn tool-strip-btn" data-tool="extend" title="연장 (E)" style="display:none"><span class="ico">↔</span><span class="lbl">연장</span></button>
-    <button class="ts-btn tool-strip-btn" data-tool="fillet" title="필렛 (R)"><span class="ico">◜</span><span class="lbl">필렛</span></button>
-    <button class="ts-btn tool-strip-btn" data-tool="chamfer" title="챔퍼/C면취 (CH)"><span class="ico">⌐</span><span class="lbl">챔퍼</span></button>
-    <input type="number" id="chamferCInput" value="5" step="0.01" min="0.01" style="width:48px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #e67e22; border-radius:4px; font-size:11px;" title="챔퍼 C값(mm)">
-    <span style="font-size:10px; color:#e67e22;">C</span>
-    <button class="ts-btn tool-strip-btn" data-tool="tangent" title="호-직선 접선 연결 (TAN)"><span class="ico">⌒</span><span class="lbl">접선</span></button>
+    <button class="ts-btn tool-strip-btn" data-tool="fillet" title="필렛 (R)" style="display:none"><span class="ico">◜</span><span class="lbl">필렛</span></button>
+    <button class="ts-btn tool-strip-btn" data-tool="chamfer" title="챔퍼/C면취 (CH)" style="display:none"><span class="ico">⌐</span><span class="lbl">챔퍼</span></button>
+    <input type="number" id="chamferCInput" value="5" step="0.01" min="0.01" style="display:none; width:48px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #e67e22; border-radius:4px; font-size:11px;" title="챔퍼 C값(mm)">
+    <span style="font-size:10px; color:#e67e22; display:none;">C</span>
+    <button class="ts-btn tool-strip-btn" data-tool="tangent" title="호-직선 접선 연결 (TAN)" style="display:none"><span class="ico">⌒</span><span class="lbl">접선</span></button>
     <button class="ts-btn tool-strip-btn" data-tool="offset" title="오프셋 (O)" style="display:none"><span class="ico">∥</span><span class="lbl">오프셋</span></button>
     <button class="ts-btn tool-strip-btn" data-tool="break" title="분할 (BR)" style="display:none"><span class="ico">✄</span><span class="lbl">분할</span></button>
     <span class="ts-sep"></span>
-    <button class="ts-btn edit-act-btn" data-edit="copy" title="복사 (CO)"><span class="ico">⧉</span><span class="lbl">복사</span></button>
-    <button class="ts-btn edit-act-btn" data-edit="move" title="이동 (M)"><span class="ico">✥</span><span class="lbl">이동</span></button>
+    <button class="ts-btn edit-act-btn" data-edit="copy" title="복사 (CO)" style="display:none"><span class="ico">⧉</span><span class="lbl">복사</span></button>
+    <button class="ts-btn edit-act-btn" data-edit="move" title="이동 (M)" style="display:none"><span class="ico">✥</span><span class="lbl">이동</span></button>
     <button class="ts-btn edit-act-btn" data-edit="rotate" title="회전 (RO)" style="display:none"><span class="ico">↻</span><span class="lbl">회전</span></button>
     <button class="ts-btn edit-act-btn" data-edit="mirror" title="대칭 (MI)" style="display:none"><span class="ico">◫</span><span class="lbl">대칭</span></button>
     <button class="ts-btn edit-act-btn" data-edit="array" title="배열 (AR)" style="display:none"><span class="ico">⊞</span><span class="lbl">배열</span></button>
-    <button class="ts-btn edit-act-btn" data-edit="distcopy" title="거리복사 (DC)"><span class="ico">⇉</span><span class="lbl">거리</span></button>
+    <button class="ts-btn edit-act-btn" data-edit="distcopy" title="거리복사 (DC)" style="display:none"><span class="ico">⇉</span><span class="lbl">거리</span></button>
     <span class="ts-sep"></span>
     <button class="ts-btn edit-act-btn" data-edit="delete" title="삭제 (Del)"><span class="ico">🗑</span><span class="lbl">삭제</span></button>
     <span class="ts-sep"></span>
-    <button id="headerBtnBreakAll" class="ts-btn" title="교차점 분할 - 선택한 선들이 겹치거나 교차하는 지점에서 모두 잘라 분리 (선택 없으면 전체 선)"><span class="ico">⊞</span><span class="lbl">교차</span></button>
-    <button id="headerBtnSubdivide" class="ts-btn" title="분할(Subdivide) - 선 클릭 → 휠로 분할 수 조절 → 좌클릭 적용"><span class="ico">✂</span><span class="lbl">N등분</span></button>
-    <button id="headerBtnDiagX" class="ts-btn" title="대각선(교점): Shift+드래그로 시작 교점 최대2개 선택 → Shift+드래그로 끝 교점 선택 → 확인 팝업 → 대각선 생성. 휠=선택범위, 우클릭/Esc=취소"><span class="ico">╲</span><span class="lbl">대각선</span></button>
-    <button id="headerBtnSwipeErase" class="ts-btn" title="쓸어 지우기: 드래그로 경로를 그으면 그 경로가 가로지른 선들 중 드래그 방향과 각도차가 설정값 이상인 선만 삭제 (직각·대각선 정리용). 우클릭/Esc=종료"><span class="ico">🧹</span><span class="lbl">쓸기</span></button>
-    <input type="number" id="swipeAngleInput" value="30" min="0" max="90" step="1" style="width:42px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #e67e22; border-radius:4px; font-size:11px;" title="삭제 각도 임계값(°): 드래그 방향과 이 각도 이상 어긋난 선만 삭제">
-    <span style="font-size:10px; color:#e89a5c;">°</span>
+    <button id="headerBtnBreakAll" class="ts-btn" title="교차점 분할 - 선택한 선들이 겹치거나 교차하는 지점에서 모두 잘라 분리 (선택 없으면 전체 선)" style="display:none"><span class="ico">⊞</span><span class="lbl">교차</span></button>
+    <button id="headerBtnSubdivide" class="ts-btn" title="분할(Subdivide) - 선 클릭 → 휠로 분할 수 조절 → 좌클릭 적용" style="display:none"><span class="ico">✂</span><span class="lbl">N등분</span></button>
+    <button id="headerBtnDiagX" class="ts-btn" title="대각선(교점): Shift+드래그로 시작 교점 최대2개 선택 → Shift+드래그로 끝 교점 선택 → 확인 팝업 → 대각선 생성. 휠=선택범위, 우클릭/Esc=취소" style="display:none"><span class="ico">╲</span><span class="lbl">대각선</span></button>
+    <button id="headerBtnSwipeErase" class="ts-btn" title="쓸어 지우기: 드래그로 경로를 그으면 그 경로가 가로지른 선들 중 드래그 방향과 각도차가 설정값 이상인 선만 삭제 (직각·대각선 정리용). 우클릭/Esc=종료" style="display:none"><span class="ico">🧹</span><span class="lbl">쓸기</span></button>
+    <input type="number" id="swipeAngleInput" value="30" min="0" max="90" step="1" style="display:none; width:42px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #e67e22; border-radius:4px; font-size:11px;" title="삭제 각도 임계값(°): 드래그 방향과 이 각도 이상 어긋난 선만 삭제">
+    <span style="font-size:10px; color:#e89a5c; display:none;">°</span>
     <span class="ts-sep"></span>
     <button id="alignLeft" class="ts-btn" title="왼쪽 정렬"><span class="ico">⬅</span></button>
     <button id="alignCenterH" class="ts-btn" title="수평 가운데 정렬"><span class="ico">↔</span></button>

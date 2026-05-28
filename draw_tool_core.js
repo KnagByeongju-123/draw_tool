@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.19.14  최신본 (도구모음팝업화·마우스호도구단축키제거[호는텍스트명령전용]·선택tol상향·거리두기연속·배경맞춤·점앵커십자) #####
+// ##### draw_tool_core.js  Rev.19.17  최신본 (도구모음팝업화·마우스호도구단축키제거[호는텍스트명령전용]·선택tol상향·거리두기연속·배경맞춤·점앵커십자) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -10235,8 +10235,11 @@ function connectSelectedPoints(){
 
 // ===== Rev.14.7: 도면 정리 (끝점 맞물림 + 일직선 병합) =====
 // ===== Rev.16.26: 도면 정리 - 점 + 지정 길이 이하 짧은 선 전체 삭제 =====
-function cleanupDrawing(){
-  const minLenMm = parseFloat(document.getElementById('cleanupTolInput').value) || 1;
+function cleanupDrawing(minLenMmArg){
+  // Rev.19.17: 인자로 치수(mm)를 받으면 그 값 사용, 없으면 도구바 입력칸 값
+  const minLenMm = (typeof minLenMmArg === 'number' && isFinite(minLenMmArg) && minLenMmArg > 0)
+    ? minLenMmArg
+    : (parseFloat(document.getElementById('cleanupTolInput').value) || 1);
   const minLenPx = minLenMm / mmPerPixel;
 
   // 대상: 선택된 도형이 있으면 그 안에서만, 없으면 전체
@@ -10269,7 +10272,7 @@ function cleanupDrawing(){
     `🧹 정리 완료: 점/짧은 선 ${removeIds.length}개 삭제 (${minLenMm}mm 이하${hasSel ? ', 선택 영역' : ', 전체'})`;
 }
 
-document.getElementById('headerBtnCleanup').addEventListener('click', cleanupDrawing);
+document.getElementById('headerBtnCleanup').addEventListener('click', () => cleanupDrawing());
 
 // ===== Rev.15.6: 그룹화 (선택한 선들을 하나의 폴리라인으로 — 블렌더 J처럼) =====
 //  이어지는 끝점은 최대한 연결, 안 이어져도 갈래를 한 폴리라인에 모두 담음. 절대 실패 안 함.

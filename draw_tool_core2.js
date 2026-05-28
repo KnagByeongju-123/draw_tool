@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.19.16  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
+// ##### draw_tool_core2.js  Rev.19.17  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -271,6 +271,22 @@ function tryPenCommand(cmdStr){
     penSyncFromShapes();
     document.getElementById('statusHint').textContent = '↩ 백: 직전 작업 취소';
     cmdLog('  백(취소)', 'system');
+    return true;
+  }
+
+  // Rev.19.17: 정리 N - 점과 N mm 이하의 짧은 선을 삭제 (N 생략 시 도구바 칸 값)
+  if (toks[0] === '정리' || toks[0] === 'CLEANUP'){
+    let tolMm;
+    if (toks.length >= 2){
+      tolMm = evalExpr(toks[1]);
+      if (!isFinite(tolMm) || tolMm <= 0){
+        document.getElementById('statusHint').textContent = '정리: 치수(mm)를 숫자로 입력하세요. 예: 정리 1'; return true;
+      }
+      // 도구바 칸도 동기화(다음 버튼 클릭 시 일관)
+      const el = document.getElementById('cleanupTolInput'); if (el) el.value = tolMm;
+    }
+    if (typeof cleanupDrawing === 'function') cleanupDrawing(tolMm);
+    penSyncFromShapes();   // 정리로 점이 사라졌을 수 있으니 동기화
     return true;
   }
 
@@ -1714,8 +1730,7 @@ function tryDimCommand(cmdStr){
       { l:'만남', t:'만남', ex:'만남 → 선택한 두 선의 무한직선 교점에 번호 부여 (두께 평행선처럼 번호 없는 선도 OK). 두 선 선택 후 입력 · 또는 "만남 3 5"=3번/5번 점이 속한 선 자동' },
       { l:'🏷 라벨 자동', t:'라벨', ex:'🏷 라벨이 없는 점·도형 꼭짓점에 자동 번호 부여 (이미 라벨 있는 건 제외)' },
       // Rev.19.16: 정리·외곽선·채움을 텍스트도구에서도 직접 호출
-      { l:'🧹 정리', action: () => { document.getElementById('headerBtnCleanup')?.click(); },
-        ex:'🧹 정리: 점과 짧은 선(옆 정리 칸 mm 이하)을 한 번에 삭제. 선택된 도형 있으면 그 안에서만' },
+      { l:'🧹 정리', t:'정리 ', ex:'🧹 정리 1 → 1mm 이하 짧은 선과 모든 점 삭제 (치수 생략 시 도구바 칸 값). 선택된 도형 있으면 그 안에서만' },
       { l:'🖊 외곽선', action: () => { document.getElementById('headerBtnOutline')?.click(); },
         ex:'🖊 외곽선: 닫힌 영역을 클릭하면 경계를 닫힌 폴리라인(외곽선)으로 추출. 픽셀 계단 자동 정리. Esc=종료' },
       { l:'🎨 채움', action: () => { document.querySelector('.tool-strip-btn[data-tool=fill]')?.click(); },

@@ -1576,6 +1576,13 @@ drawCanvas.addEventListener('mousemove', e => {
 });
 
 drawCanvas.addEventListener('mousedown', e => {
+  // Rev.19.42: 휠 클릭 + 연결 모드면 점 연결 처리 (패닝 차단)
+  if (e.button === 1 && typeof penConnectByWheelMode !== 'undefined' && penConnectByWheelMode){
+    e.preventDefault();
+    e.stopPropagation();  // wrap의 패닝 시작 막기
+    if (typeof handlePenConnectWheelClick === 'function') handlePenConnectWheelClick(e);
+    return;
+  }
   // Rev.11.26: 휠 클릭(가운데 버튼)은 패닝 전용 → 작도/선택 처리 안 함
   if (e.button === 1) return;
 
@@ -2232,6 +2239,12 @@ window.addEventListener('keydown', e => {
     if (typeof penThicknessMode !== 'undefined' && penThicknessMode){
       cancelPenThickness();
       document.getElementById('statusHint').textContent = '⚙ 두께 모드 취소 (ESC)';
+      return;
+    }
+    // Rev.19.42: 연결 모드 취소
+    if (typeof penConnectByWheelMode !== 'undefined' && penConnectByWheelMode){
+      cancelPenConnectByWheel();
+      document.getElementById('statusHint').textContent = '⚡ 연결 모드 취소 (ESC)';
       return;
     }
     // Rev.19.31: 클릭이동 모드면 우선 종료

@@ -98,7 +98,6 @@ function handlePenPickClick(p){
   }
   // Rev.16.92: 마우스 클릭은 항상 그 점을 현재 기준점으로 선택만 (자동 선긋기 안 함, 연결은 「연결 1 4」 명령)
   penCur = idx; penPickFirst = idx;
-  if (typeof penTrackRecentPoint === 'function') penTrackRecentPoint(idx); // Rev.19.38
   const m = penPxToMm(penPoints[idx].x, penPoints[idx].y);
   document.getElementById('statusHint').textContent = `▸ ${idx}번 점 선택됨 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm · 여기서 우/좌/상/하·각 명령으로 작도`;
   redrawDraw();
@@ -1642,48 +1641,6 @@ function penChamferAtPoint(pt, cMm){
   return applyChamferToTwoLines(near[0].line, near[1].line, near[0].click, near[1].click, cMm);
 }
 
-// ===== Rev.19.38: 최근 클릭한 두 점 추적 — "연결2" 버튼용 =====
-let penRecentTwoIdx = []; // [최근, 그전]
-function penTrackRecentPoint(idx){
-  if (typeof idx !== 'number' || idx < 0) return;
-  if (penRecentTwoIdx[0] === idx) return; // 같은 점 중복 클릭은 무시
-  penRecentTwoIdx.unshift(idx);
-  if (penRecentTwoIdx.length > 2) penRecentTwoIdx.length = 2;
-}
-// 연결2: 최근 두 점이 있으면 즉시 연결 (없으면 안내)
-function penConnectRecentTwo(){
-  const arr = penRecentTwoIdx.filter(i => penPoints[i]);
-  if (arr.length < 2){
-    document.getElementById('statusHint').textContent =
-      '⚠ 연결2: 먼저 도면에서 점 두 개를 차례로 클릭한 뒤 [연결2]를 누르세요';
-    return false;
-  }
-  const i1 = arr[0], i2 = arr[1];
-  const a = penPoints[i1], b = penPoints[i2];
-  // 같은 위치(거의 0 길이)면 무시
-  if (Math.hypot(a.x-b.x, a.y-b.y) < 1e-6){
-    document.getElementById('statusHint').textContent = '⚠ 연결2: 두 점이 같은 위치입니다';
-    return false;
-  }
-  // 중복선 방지
-  const tol = 1/mmPerPixel * 0.05;
-  const exists = shapes.some(s => s.type==='line' && s.p1 && s.p2 &&
-    ((Math.hypot(s.p1.x-a.x,s.p1.y-a.y)<tol && Math.hypot(s.p2.x-b.x,s.p2.y-b.y)<tol) ||
-     (Math.hypot(s.p1.x-b.x,s.p1.y-b.y)<tol && Math.hypot(s.p2.x-a.x,s.p2.y-a.y)<tol)));
-  if (exists){
-    document.getElementById('statusHint').textContent = `▸ 연결2: P${i1}-P${i2}는 이미 연결됨`;
-    return false;
-  }
-  const sw = parseInt((document.getElementById('strokeWidth')||{}).value) || 1;
-  const stroke = (document.getElementById('strokeColor')||{}).value || '#ffffff';
-  shapes.push({ id:++shapeIdSeq, type:'line', p1:{x:a.x,y:a.y}, p2:{x:b.x,y:b.y},
-                stroke, strokeWidth:sw, layer:(currentLayer||'default') });
-  redoStack = []; pushHistory(); redrawDraw(); updateCount();
-  cmdLog(`／ 연결2: P${i1}-P${i2} 선 생성`, 'user');
-  document.getElementById('statusHint').textContent = `／ 연결2: P${i1}-P${i2} 선 생성됨`;
-  return true;
-}
-
 // ===== Rev.19.26: 텍스트 모드 마우스 드로잉 (일반모드처럼 선긋기 + 점번호 + 치수수정) =====
 //   - 빈 곳 클릭 → 첫 점 시작, 두 번째 클릭 → 선 생성
 //   - 연속선 토글(continuousMode) 적용: ON이면 끝점이 다음 시작점으로 이어짐
@@ -1881,6 +1838,86 @@ function penUserCoordToPx(ux, uy){
     x: penOriginPx.x + dxMm / mmPerPixel,
     y: penOriginPx.y - dyMm / mmPerPixel
   };
+}
+
+// ===== Rev.19.42: 휠 클릭 두 점 연결 (1회용) =====
+let penConnectByWheelMode = false;
+let penConnectByWheelFirst = -1;
+
+function penToggleConnectByWheel(){
+  if (penConnectByWheelMode){
+    penConnectByWheelMode = false; penConnectByWheelFirst = -1;
+    const b = document.getElementById('penBtnConnect'); if (b) b.classList.remove('active');
+    document.getElementById('statusHint').textContent = '⚡ 연결 모드 OFF';
+    cmdLog('⚡ 연결 모드 OFF', 'system');
+    return;
+  }
+  // 텍스트 모드 자동 진입
+  if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
+  // 진행 중 다른 작업 정리
+  if (typeof cancelPenDraw === 'function') cancelPenDraw();
+  penConnectByWheelMode = true;
+  penConnectByWheelFirst = -1;
+  const b = document.getElementById('penBtnConnect'); if (b) b.classList.add('active');
+  document.getElementById('statusHint').textContent =
+    '⚡ 연결 ON (1회용): 첫 점에서 마우스 휠 클릭 → 둘째 점에서 휠 클릭 → 선 생성 후 자동 OFF (ESC=취소)';
+  cmdLog('⚡ 연결 ON (1회용): 휠 클릭 × 2', 'system');
+}
+
+function cancelPenConnectByWheel(){
+  penConnectByWheelMode = false;
+  penConnectByWheelFirst = -1;
+  const b = document.getElementById('penBtnConnect'); if (b) b.classList.remove('active');
+}
+
+// 휠 클릭 핸들러 (mousedown e.button===1에서 호출)
+function handlePenConnectWheelClick(e){
+  if (!penConnectByWheelMode) return false;
+  const p = getCanvasPoint(e);
+  const idx = (typeof penFindNearestPoint === 'function') ? penFindNearestPoint(p) : -1;
+  if (idx < 0){
+    document.getElementById('statusHint').textContent = '⚡ 연결: 점 위에서 휠 클릭하세요';
+    return true;
+  }
+  // 첫 점 선택
+  if (penConnectByWheelFirst < 0){
+    penConnectByWheelFirst = idx;
+    penCur = idx; penPickFirst = idx;
+    document.getElementById('statusHint').textContent =
+      `⚡ 연결 시작점 P${idx} → 둘째 점에서 휠 클릭`;
+    redrawDraw();
+    return true;
+  }
+  // 같은 점 — 무시
+  if (penConnectByWheelFirst === idx){
+    document.getElementById('statusHint').textContent = '⚡ 연결: 다른 점을 클릭하세요';
+    return true;
+  }
+  // 둘째 점 → 선 생성
+  const i1 = penConnectByWheelFirst, i2 = idx;
+  const a = penPoints[i1], b = penPoints[i2];
+  if (a && b){
+    const tol = 1/mmPerPixel * 0.05;
+    const exists = shapes.some(s => s.type==='line' && s.p1 && s.p2 &&
+      ((Math.hypot(s.p1.x-a.x,s.p1.y-a.y)<tol && Math.hypot(s.p2.x-b.x,s.p2.y-b.y)<tol) ||
+       (Math.hypot(s.p1.x-b.x,s.p1.y-b.y)<tol && Math.hypot(s.p2.x-a.x,s.p2.y-a.y)<tol)));
+    if (!exists){
+      const sw = parseInt((document.getElementById('strokeWidth')||{}).value) || 1;
+      const stroke = (document.getElementById('strokeColor')||{}).value || '#ffffff';
+      shapes.push({ id:++shapeIdSeq, type:'line', p1:{x:a.x,y:a.y}, p2:{x:b.x,y:b.y},
+        stroke, strokeWidth:sw, layer:(currentLayer||'default') });
+      redoStack = []; pushHistory(); redrawDraw(); updateCount();
+      cmdLog(`⚡ 연결: P${i1}-P${i2}`, 'user');
+      document.getElementById('statusHint').textContent = `⚡ 연결: P${i1}-P${i2} 선 생성 후 자동 OFF`;
+    } else {
+      cmdLog(`⚡ P${i1}-P${i2}는 이미 연결됨 — 자동 OFF`, 'system');
+      document.getElementById('statusHint').textContent = `⚡ P${i1}-P${i2} 이미 연결됨 — 자동 OFF`;
+    }
+    penCur = i2; penPickFirst = i2;
+  }
+  // 1회용 자동 OFF
+  cancelPenConnectByWheel();
+  return true;
 }
 
 // ===== Rev.19.37: 소재 두께 적용 =====
@@ -2458,6 +2495,9 @@ function startNormalMode(){
   // Rev.19.37: 두께 버튼 바인딩 + 드래그 mouseup 등록
   const bThk = document.getElementById('penBtnThickness');
   if (bThk) bThk.addEventListener('click', penToggleThicknessMode);
+  // Rev.19.42: 휠 연결 버튼
+  const bCon = document.getElementById('penBtnConnect');
+  if (bCon) bCon.addEventListener('click', penToggleConnectByWheel);
   if (typeof drawCanvas !== 'undefined' && drawCanvas){
     drawCanvas.addEventListener('mouseup', e => {
       if (e.button !== 0) return;
@@ -2559,14 +2599,6 @@ function tryDimCommand(cmdStr){
       { l:'선 좌 지름', t:'선 좌 지름 ', ex:'선 좌 지름 110 130 → 지름차/2 좌측 선 (지=지름)' },
       // Rev.18.7: '선 상 거리' 삭제 — '우/좌/상/하' 버튼 + 숫자키로 동일 결과 가능 (중복 제거)
       { l:'연결', t:'연결 ', ex:'연결 1 4 → 1번·4번 직선 연결' },
-      // Rev.19.38: 연결2 — 최근 클릭한 두 점을 즉시 선으로 연결 (점 번호 입력 없이)
-      { l:'⚡ 연결2', action: () => {
-          // Rev.19.40: 텍스트 모드 자동 진입
-          if (typeof penPickMode !== 'undefined' && !penPickMode
-              && typeof startTextMode === 'function') startTextMode();
-          if (typeof penConnectRecentTwo === 'function') penConnectRecentTwo();
-        },
-        ex:'⚡ 연결2: 도면에서 점 두 개를 차례로 클릭한 뒤 이 버튼 → 그 두 점 사이에 선 1개 생성' },
       { l:'각 A 거리', t:'각 ', ex:'각 45 100 / 각 45 교점 / 각 45 수평 -5 (Y=-5까지) / 수직 10 (X=10까지)' },
       { l:'호', t:'호 ', ex:'호 2 3 시계 각 45 / 호 2 3 시계 교점' },
     ],

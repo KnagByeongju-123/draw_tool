@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.40</title>
+<title>도면 작도기 Rev.19.42</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -366,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.40</h1>
+  <h1>📐 도면 작도기 Rev.19.42</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -612,6 +612,9 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
     <button id="penBtnThickness" class="ts-btn" title="소재 두께 적용: ON → 박스 드래그로 점 선택 → 우/좌측 클릭으로 두께만큼 평행선 생성 (1회용)"><span class="ico">⚙</span><span class="lbl">두께</span></button>
     <input type="number" id="penThicknessInput" value="0.6" step="0.01" min="0" title="소재 두께 (mm)" style="width:54px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #d35400; border-radius:4px; font-size:11px;">
     <span style="font-size:10px; color:#e89a5c;">mm</span>
+    <span style="width:6px;"></span>
+    <!-- Rev.19.42: 휠클릭 연결 -->
+    <button id="penBtnConnect" class="ts-btn" title="연결: 켠 후 두 점에서 마우스 휠 클릭(가운데 버튼) → 선 1개 생성 + 자동 OFF (1회용)"><span class="ico">⚡</span><span class="lbl">연결</span></button>
     <!-- Rev.19.17: 「텍스트입력」 버튼 제거 — 「텍스트」와 동일 동작(중복), 입력란은 하단에 상시 표시 -->
     <button id="headerBtnPenInput" class="ts-btn" title="텍스트입력(숨김 호환용)" style="display:none; padding:3px 8px;"><span class="ico">⌨</span><span class="lbl">텍스트입력</span></button>
   </div>

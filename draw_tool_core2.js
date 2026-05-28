@@ -1840,6 +1840,178 @@ function penUserCoordToPx(ux, uy){
   };
 }
 
+// ===== Rev.19.43: 텍스트모드 박스 선택(우클릭) + 좌클릭 드래그 이동 + 삭제 =====
+let penTxtBoxStart = null;      // 우클릭 박스 시작점(px)
+let penTxtBoxDragging = false;
+let penTxtMoveStart = null;     // 좌클릭 이동 시작점(px)
+let penTxtMoveSnap = null;      // 이동 전 도형 좌표 스냅샷
+let penTxtMoving = false;
+
+// 도형 bbox 계산
+function penTxtShapeBBox(s){
+  if (!s) return null;
+  if ((s.type === 'line' || s.type === 'rect') && s.p1 && s.p2){
+    return { minX:Math.min(s.p1.x,s.p2.x), maxX:Math.max(s.p1.x,s.p2.x),
+             minY:Math.min(s.p1.y,s.p2.y), maxY:Math.max(s.p1.y,s.p2.y) };
+  }
+  if (s.type === 'point' && s.p1){
+    return { minX:s.p1.x-2, maxX:s.p1.x+2, minY:s.p1.y-2, maxY:s.p1.y+2 };
+  }
+  if (s.type === 'circle' && s.c && s.r != null){
+    return { minX:s.c.x-s.r, maxX:s.c.x+s.r, minY:s.c.y-s.r, maxY:s.c.y+s.r };
+  }
+  if (s.type === 'text' && s.pos){
+    const sz = s.sizePx || 14;
+    const w = (s.text||'').length * sz * 0.6;
+    return { minX:s.pos.x, maxX:s.pos.x+w, minY:s.pos.y, maxY:s.pos.y+sz };
+  }
+  if (s.type === 'polyline' && Array.isArray(s.points) && s.points.length){
+    let mnX=Infinity,mxX=-Infinity,mnY=Infinity,mxY=-Infinity;
+    s.points.forEach(pt=>{ if(pt){mnX=Math.min(mnX,pt.x);mxX=Math.max(mxX,pt.x);mnY=Math.min(mnY,pt.y);mxY=Math.max(mxY,pt.y);}});
+    return { minX:mnX, maxX:mxX, minY:mnY, maxY:mxY };
+  }
+  return null;
+}
+
+// 점이 선택된 도형의 bbox 안인지
+function penTxtPointInsideAnySelected(p){
+  const tolPx = 12 / (zoom||1);
+  for (const id of selectedIds){
+    const s = shapes.find(x => x.id === id);
+    const bb = penTxtShapeBBox(s);
+    if (!bb) continue;
+    if (p.x >= bb.minX-tolPx && p.x <= bb.maxX+tolPx &&
+        p.y >= bb.minY-tolPx && p.y <= bb.maxY+tolPx) return true;
+  }
+  return false;
+}
+
+// 선택 도형 스냅샷 (이동 시작 시)
+function penTxtSnapshotSelected(){
+  const snap = {};
+  selectedIds.forEach(id => {
+    const s = shapes.find(x => x.id === id);
+    if (!s) return;
+    snap[id] = {
+      p1: s.p1 ? {x:s.p1.x, y:s.p1.y} : null,
+      p2: s.p2 ? {x:s.p2.x, y:s.p2.y} : null,
+      p3: s.p3 ? {x:s.p3.x, y:s.p3.y} : null,
+      pos: s.pos ? {x:s.pos.x, y:s.pos.y} : null,
+      c:   s.c   ? {x:s.c.x,   y:s.c.y}   : null,
+      points: Array.isArray(s.points) ? s.points.map(pt => pt?{x:pt.x,y:pt.y}:pt) : null,
+      penIdx: s.penIdx,
+      penPt: (s.penIdx != null && penPoints[s.penIdx]) ? {x:penPoints[s.penIdx].x, y:penPoints[s.penIdx].y} : null
+    };
+  });
+  return snap;
+}
+
+// 스냅샷 + (dx,dy)로 도형 이동 적용
+function penTxtApplyMove(snap, dx, dy){
+  Object.entries(snap).forEach(([id, o]) => {
+    const s = shapes.find(x => String(x.id) === String(id));
+    if (!s) return;
+    if (o.p1)  s.p1  = { x:o.p1.x+dx,  y:o.p1.y+dy };
+    if (o.p2)  s.p2  = { x:o.p2.x+dx,  y:o.p2.y+dy };
+    if (o.p3)  s.p3  = { x:o.p3.x+dx,  y:o.p3.y+dy };
+    if (o.pos) s.pos = { x:o.pos.x+dx, y:o.pos.y+dy };
+    if (o.c)   s.c   = { x:o.c.x+dx,   y:o.c.y+dy   };
+    if (o.points) s.points = o.points.map(pt => pt?{x:pt.x+dx, y:pt.y+dy}:pt);
+    // 점 마커가 선택된 경우 penPoints도 동기화
+    if (s.type === 'point' && o.penIdx != null && o.penPt){
+      penPoints[o.penIdx] = { x:o.penPt.x+dx, y:o.penPt.y+dy };
+    }
+  });
+}
+
+// ===== 핸들러 =====
+function penTxtMouseDown(e){
+  if (!penPickMode) return false;
+  // 우클릭 = 박스 선택 시작
+  if (e.button === 2){
+    e.preventDefault(); e.stopPropagation();
+    const p = getCanvasPoint(e);
+    if (!e.shiftKey){ selectedIds.clear(); if (typeof updateSelStat==='function') updateSelStat(); }
+    penTxtBoxStart = p; penTxtBoxDragging = true;
+    document.getElementById('statusHint').textContent = '🔲 박스 선택 중... (Shift=추가, ESC=해제)';
+    redrawDraw();
+    return true;
+  }
+  // 좌클릭 + 선택된 도형 위 = 이동 시작
+  if (e.button === 0 && selectedIds.size > 0){
+    const p = getCanvasPoint(e);
+    if (penTxtPointInsideAnySelected(p)){
+      e.preventDefault();
+      penTxtMoveStart = p;
+      penTxtMoveSnap = penTxtSnapshotSelected();
+      penTxtMoving = true;
+      document.getElementById('statusHint').textContent = `✥ 이동 중 (${selectedIds.size}개)...`;
+      return true;
+    }
+  }
+  return false;
+}
+
+function penTxtMouseMove(e){
+  if (!penPickMode) return false;
+  if (penTxtBoxDragging && penTxtBoxStart){
+    const p = getCanvasPoint(e);
+    if (typeof drawBoxSelectPreview === 'function') drawBoxSelectPreview(penTxtBoxStart, p);
+    return true;
+  }
+  if (penTxtMoving && penTxtMoveStart && penTxtMoveSnap){
+    const p = getCanvasPoint(e);
+    const dx = p.x - penTxtMoveStart.x, dy = p.y - penTxtMoveStart.y;
+    penTxtApplyMove(penTxtMoveSnap, dx, dy);
+    redrawDraw();
+    document.getElementById('statusHint').textContent =
+      `✥ 이동: Δ(${(dx*mmPerPixel).toFixed(2)}, ${(-dy*mmPerPixel).toFixed(2)})mm`;
+    return true;
+  }
+  return false;
+}
+
+function penTxtMouseUp(e){
+  if (!penPickMode) return false;
+  if (penTxtBoxDragging && penTxtBoxStart){
+    const p = getCanvasPoint(e);
+    // 박스 너무 작으면(거의 클릭) 해제만
+    if (Math.abs(p.x-penTxtBoxStart.x) < 3 && Math.abs(p.y-penTxtBoxStart.y) < 3){
+      penTxtBoxDragging = false; penTxtBoxStart = null;
+      preCtx.clearRect(0,0,baseW,baseH); redrawDraw();
+      document.getElementById('statusHint').textContent = '선택 해제';
+      return true;
+    }
+    if (typeof boxSelect === 'function') boxSelect(penTxtBoxStart, p, e.shiftKey);
+    penTxtBoxDragging = false; penTxtBoxStart = null;
+    preCtx.clearRect(0,0,baseW,baseH);
+    document.getElementById('statusHint').textContent =
+      `🔲 ${selectedIds.size}개 선택됨 — 좌클릭 드래그로 이동, Del=삭제, ESC=해제`;
+    return true;
+  }
+  if (penTxtMoving){
+    penTxtMoving = false; penTxtMoveStart = null; penTxtMoveSnap = null;
+    redoStack = []; pushHistory();
+    document.getElementById('statusHint').textContent = `✥ 이동 완료 (${selectedIds.size}개)`;
+    return true;
+  }
+  return false;
+}
+
+function cancelPenTxtSelect(){
+  if (penTxtBoxDragging || penTxtMoving){
+    penTxtBoxDragging = false; penTxtBoxStart = null;
+    penTxtMoving = false; penTxtMoveStart = null; penTxtMoveSnap = null;
+    if (typeof preCtx !== 'undefined') preCtx.clearRect(0,0,baseW,baseH);
+    redrawDraw();
+  }
+  if (selectedIds.size > 0){
+    selectedIds.clear();
+    if (typeof updateSelStat === 'function') updateSelStat();
+    redrawDraw();
+  }
+}
+
 // ===== Rev.19.42: 휠 클릭 두 점 연결 (1회용) =====
 let penConnectByWheelMode = false;
 let penConnectByWheelFirst = -1;
@@ -2500,12 +2672,21 @@ function startNormalMode(){
   if (bCon) bCon.addEventListener('click', penToggleConnectByWheel);
   if (typeof drawCanvas !== 'undefined' && drawCanvas){
     drawCanvas.addEventListener('mouseup', e => {
+      // Rev.19.43: 박스선택/이동 mouseup (우클릭은 button=2, 좌클릭=0)
+      if (typeof penTxtMouseUp === 'function' && penTxtMouseUp(e)){
+        e.preventDefault();
+        return;
+      }
       if (e.button !== 0) return;
       if (penPickMode && typeof penThicknessMode !== 'undefined' && penThicknessMode === 'box'
           && typeof penThicknessMouseUp === 'function'){
         penThicknessMouseUp(e);
         e.preventDefault();
       }
+    });
+    // Rev.19.43: 텍스트모드 우클릭 시 컨텍스트메뉴 차단
+    drawCanvas.addEventListener('contextmenu', e => {
+      if (penPickMode){ e.preventDefault(); }
     });
   }
 

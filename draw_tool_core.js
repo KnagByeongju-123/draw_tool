@@ -1195,6 +1195,8 @@ drawCanvas.addEventListener('mousemove', e => {
   const unit = calibSet ? `${mmX}, ${mmY} mm` : `${p.x}, ${p.y} px`;
   document.getElementById('statusCoord').textContent = unit + (p.snapped ? ' 🧲' : '');
 
+  // Rev.19.43: 박스선택/이동 미리보기 우선
+  if (typeof penTxtMouseMove === 'function' && penTxtMouseMove(e)) return;
   // Rev.19.26: 텍스트모드 마우스 드로잉 미리보기 (Shift=직선/45°)
   if (typeof penDrawActive === 'function' && penDrawActive()) {
     // Rev.19.37: 두께 모드면 두께 미리보기로 우회
@@ -1576,6 +1578,8 @@ drawCanvas.addEventListener('mousemove', e => {
 });
 
 drawCanvas.addEventListener('mousedown', e => {
+  // Rev.19.43: 텍스트모드 박스선택(우클릭) / 좌클릭 드래그 이동 우선 처리
+  if (typeof penTxtMouseDown === 'function' && penTxtMouseDown(e)) return;
   // Rev.19.42: 휠 클릭 + 연결 모드면 점 연결 처리 (패닝 차단)
   if (e.button === 1 && typeof penConnectByWheelMode !== 'undefined' && penConnectByWheelMode){
     e.preventDefault();
@@ -2245,6 +2249,15 @@ window.addEventListener('keydown', e => {
     if (typeof penConnectByWheelMode !== 'undefined' && penConnectByWheelMode){
       cancelPenConnectByWheel();
       document.getElementById('statusHint').textContent = '⚡ 연결 모드 취소 (ESC)';
+      return;
+    }
+    // Rev.19.43: 박스선택/이동 진행 중이거나 선택된 도형 있으면 해제
+    if (penPickMode && (
+        (typeof penTxtBoxDragging !== 'undefined' && penTxtBoxDragging) ||
+        (typeof penTxtMoving !== 'undefined' && penTxtMoving) ||
+        (typeof selectedIds !== 'undefined' && selectedIds.size > 0))){
+      cancelPenTxtSelect();
+      document.getElementById('statusHint').textContent = '선택 해제';
       return;
     }
     // Rev.19.31: 클릭이동 모드면 우선 종료

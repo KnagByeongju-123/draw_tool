@@ -1840,6 +1840,228 @@ function penUserCoordToPx(ux, uy){
   };
 }
 
+// ===== Rev.19.37: 소재 두께 적용 =====
+//   1) 버튼 ON → 'box' 단계: 드래그로 점 선택
+//   2) mouseup → 'direction' 단계: 마우스 위치로 우/좌측 미리보기
+//   3) 클릭 → 새 평행선들 생성 + 자동 OFF
+let penThicknessMode = false;        // false / 'box' / 'direction'
+let penThicknessBoxStart = null;     // {x,y} 박스 시작점(px)
+let penThicknessLines = [];          // 선택된 선 도형들 (참조)
+let penThicknessSkipNextClick = false;
+
+// 박스 안의 점 인덱스 배열 반환
+function penFindPointsInBox(box){
+  const xmin=Math.min(box.x1,box.x2), xmax=Math.max(box.x1,box.x2);
+  const ymin=Math.min(box.y1,box.y2), ymax=Math.max(box.y1,box.y2);
+  const out=[];
+  for (let i=0;i<penPoints.length;i++){
+    const pt = penPoints[i]; if (!pt) continue;
+    if (pt.x>=xmin && pt.x<=xmax && pt.y>=ymin && pt.y<=ymax) out.push(i);
+  }
+  return out;
+}
+
+// 점 인덱스 배열 → 연결된 line 도형들
+function penFindLinesConnectedTo(pointIndices){
+  if (!pointIndices || pointIndices.length===0) return [];
+  const tol = 1/mmPerPixel * 0.05;
+  const ptCoords = pointIndices.map(i => penPoints[i]).filter(Boolean);
+  return shapes.filter(s => {
+    if (s.type !== 'line') return false;
+    return ptCoords.some(pt =>
+      (Math.abs(s.p1.x-pt.x)<tol && Math.abs(s.p1.y-pt.y)<tol) ||
+      (Math.abs(s.p2.x-pt.x)<tol && Math.abs(s.p2.y-pt.y)<tol)
+    );
+  });
+}
+
+// 선을 마우스 방향으로 distMm 평행이동한 새 끝점(px) 계산
+function penOffsetLine(line, mousePt, distMm){
+  const dx = line.p2.x - line.p1.x, dy = line.p2.y - line.p1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return null;
+  // 두 법선 (단위): 좌측(-dy,dx)/len, 우측(dy,-dx)/len
+  const nLx = -dy/len, nLy = dx/len;
+  const nRx =  dy/len, nRy = -dx/len;
+  // 선 중간점 → 마우스 벡터
+  const midx = (line.p1.x + line.p2.x)/2, midy = (line.p1.y + line.p2.y)/2;
+  const mx = mousePt.x - midx, my = mousePt.y - midy;
+  // 마우스와 더 일치하는 법선 선택
+  const dotL = nLx*mx + nLy*my;
+  const nx = (dotL >= 0) ? nLx : nRx;
+  const ny = (dotL >= 0) ? nLy : nRy;
+  const distPx = distMm / mmPerPixel;
+  return {
+    p1: { x: line.p1.x + nx*distPx, y: line.p1.y + ny*distPx },
+    p2: { x: line.p2.x + nx*distPx, y: line.p2.y + ny*distPx }
+  };
+}
+
+// 진행 취소(ESC 또는 토글 끄기)
+function cancelPenThickness(){
+  penThicknessMode = false;
+  penThicknessBoxStart = null;
+  penThicknessLines = [];
+  penThicknessSkipNextClick = false;
+  if (typeof preCtx !== 'undefined') preCtx.clearRect(0,0,baseW,baseH);
+  const b = document.getElementById('penBtnThickness');
+  if (b) b.classList.remove('active');
+}
+
+// 토글
+function penToggleThicknessMode(){
+  if (penThicknessMode){
+    cancelPenThickness();
+    document.getElementById('statusHint').textContent = '⚙ 두께 모드 OFF';
+    cmdLog('⚙ 두께 모드 OFF', 'system');
+    return;
+  }
+  // 다른 진행 중 작업 정리
+  if (typeof cancelPenDraw === 'function') cancelPenDraw();
+  if (penMoveMode){ penMoveMode=false; penMoveTarget=-1; const bm=document.getElementById('penBtnMove'); if(bm)bm.classList.remove('active'); }
+  // 텍스트모드에 있어야 의미
+  if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
+  penThicknessMode = 'box';
+  document.getElementById('statusHint').textContent = '⚙ 두께 모드 ON: 드래그로 점 선택 → 마우스로 우/좌측 클릭 (ESC=취소)';
+  const b = document.getElementById('penBtnThickness'); if (b) b.classList.add('active');
+  cmdLog('⚙ 두께 모드 ON: 박스 드래그 → 방향 클릭', 'system');
+}
+
+// mousemove 미리보기 — 단계별
+function penThicknessPreview(p){
+  if (!penThicknessMode) return false;
+  const Z = zoom || 1;
+  preCtx.clearRect(0,0,baseW,baseH);
+  if (penThicknessMode === 'box' && penThicknessBoxStart){
+    const x1=penThicknessBoxStart.x, y1=penThicknessBoxStart.y, x2=p.x, y2=p.y;
+    preCtx.save();
+    preCtx.strokeStyle = '#9b59b6';
+    preCtx.fillStyle   = 'rgba(125,66,150,0.18)';
+    preCtx.lineWidth   = 1.5/Z;
+    preCtx.setLineDash([6/Z, 4/Z]);
+    preCtx.beginPath();
+    preCtx.rect(Math.min(x1,x2), Math.min(y1,y2), Math.abs(x2-x1), Math.abs(y2-y1));
+    preCtx.fill(); preCtx.stroke();
+    preCtx.setLineDash([]);
+    // 박스 안 점 강조
+    const ids = penFindPointsInBox({x1,y1,x2,y2});
+    preCtx.strokeStyle = '#ffcc00'; preCtx.lineWidth = 2/Z;
+    ids.forEach(i => {
+      const pt = penPoints[i]; if (!pt) return;
+      preCtx.beginPath(); preCtx.arc(pt.x, pt.y, 9/Z, 0, Math.PI*2); preCtx.stroke();
+    });
+    // 안내 텍스트
+    preCtx.fillStyle = '#cdb4d8'; preCtx.font = `${12/Z}px monospace`;
+    preCtx.fillText(`점 ${ids.length}개`, Math.min(x1,x2)+4/Z, Math.min(y1,y2)+14/Z);
+    preCtx.restore();
+    return true;
+  }
+  if (penThicknessMode === 'direction' && penThicknessLines.length){
+    const dist = parseFloat((document.getElementById('penThicknessInput')||{}).value) || 0;
+    preCtx.save();
+    // 원본 선들 강조 (노란)
+    preCtx.strokeStyle = '#ffcc00'; preCtx.lineWidth = 1.2/Z;
+    preCtx.setLineDash([3/Z, 3/Z]);
+    penThicknessLines.forEach(ln => {
+      preCtx.beginPath(); preCtx.moveTo(ln.p1.x, ln.p1.y); preCtx.lineTo(ln.p2.x, ln.p2.y); preCtx.stroke();
+    });
+    preCtx.setLineDash([]);
+    // 평행 선 미리보기 (청록 점선)
+    if (dist > 0){
+      preCtx.strokeStyle = '#16e0b0'; preCtx.lineWidth = 1.5/Z;
+      preCtx.setLineDash([5/Z, 3/Z]);
+      penThicknessLines.forEach(ln => {
+        const off = penOffsetLine(ln, p, dist);
+        if (off){
+          preCtx.beginPath(); preCtx.moveTo(off.p1.x, off.p1.y); preCtx.lineTo(off.p2.x, off.p2.y); preCtx.stroke();
+        }
+      });
+      preCtx.setLineDash([]);
+    }
+    preCtx.restore();
+    return true;
+  }
+  return false;
+}
+
+// 박스 시작 (mousedown)
+function penThicknessMouseDown(e){
+  if (penThicknessMode !== 'box') return false;
+  const p = getCanvasPoint(e);
+  penThicknessBoxStart = { x: p.x, y: p.y };
+  document.getElementById('statusHint').textContent = '⚙ 두께: 드래그 중...';
+  return true;
+}
+
+// 박스 확정 (mouseup)
+function penThicknessMouseUp(e){
+  if (penThicknessMode !== 'box' || !penThicknessBoxStart) return false;
+  const p = getCanvasPoint(e);
+  // 박스 너무 작으면 무시
+  if (Math.abs(p.x-penThicknessBoxStart.x) < 5/(zoom||1) && Math.abs(p.y-penThicknessBoxStart.y) < 5/(zoom||1)){
+    penThicknessBoxStart = null;
+    document.getElementById('statusHint').textContent = '⚙ 두께: 박스가 너무 작아요 — 다시 드래그';
+    if (typeof preCtx !== 'undefined') preCtx.clearRect(0,0,baseW,baseH);
+    return true;
+  }
+  const box = { x1:penThicknessBoxStart.x, y1:penThicknessBoxStart.y, x2:p.x, y2:p.y };
+  const ids = penFindPointsInBox(box);
+  if (ids.length === 0){
+    document.getElementById('statusHint').textContent = '⚙ 두께: 박스 안에 점이 없습니다 — 다시 드래그';
+    penThicknessBoxStart = null;
+    if (typeof preCtx !== 'undefined') preCtx.clearRect(0,0,baseW,baseH);
+    return true;
+  }
+  const lines = penFindLinesConnectedTo(ids);
+  if (lines.length === 0){
+    document.getElementById('statusHint').textContent = '⚙ 두께: 선택된 점에 연결된 선이 없습니다';
+    penThicknessBoxStart = null;
+    if (typeof preCtx !== 'undefined') preCtx.clearRect(0,0,baseW,baseH);
+    return true;
+  }
+  penThicknessLines = lines;
+  penThicknessMode = 'direction';
+  penThicknessBoxStart = null;
+  penThicknessSkipNextClick = true;  // mouseup 직후 click 무시
+  document.getElementById('statusHint').textContent =
+    `⚙ 두께: 점 ${ids.length}개·선 ${lines.length}개 선택됨 — 마우스로 우/좌측 클릭 (ESC=취소)`;
+  return true;
+}
+
+// 방향 확정 클릭 → 새 선 생성 → 자동 OFF
+function penThicknessClick(e){
+  if (!penThicknessMode) return false;
+  if (penThicknessSkipNextClick){ penThicknessSkipNextClick = false; return true; }
+  if (penThicknessMode !== 'direction') return true;
+  const p = getCanvasPoint(e);
+  const dist = parseFloat((document.getElementById('penThicknessInput')||{}).value) || 0;
+  if (dist <= 0){
+    document.getElementById('statusHint').textContent = '⚙ 두께값이 0보다 커야 합니다';
+    return true;
+  }
+  const newLines = [];
+  penThicknessLines.forEach(ln => {
+    const off = penOffsetLine(ln, p, dist);
+    if (off){
+      newLines.push({
+        id: ++shapeIdSeq, type: 'line',
+        p1: off.p1, p2: off.p2,
+        stroke: ln.stroke || '#ffffff',
+        strokeWidth: ln.strokeWidth || 1,
+        layer: ln.layer || (currentLayer||'default')
+      });
+    }
+  });
+  if (newLines.length){
+    shapes.push(...newLines);
+    redoStack = []; pushHistory(); redrawDraw(); updateCount();
+    cmdLog(`⚙ 두께 ${dist}mm 적용 → 평행선 ${newLines.length}개 생성`, 'user');
+  }
+  cancelPenThickness();
+  document.getElementById('statusHint').textContent = `⚙ 두께 ${dist}mm — ${newLines.length}개 생성 완료, 자동 OFF`;
+  return true;
+}
+
 // Rev.19.32: 점 더블클릭 → 좌표 수정 팝업
 let penCoordEditTargetIdx = -1;
 function openPenCoordEdit(idx, e){
@@ -2184,6 +2406,20 @@ function startNormalMode(){
       if (near < 0) return;
       e.preventDefault();
       openPenCoordEdit(near, e);
+    });
+  }
+
+  // Rev.19.37: 두께 버튼 바인딩 + 드래그 mouseup 등록
+  const bThk = document.getElementById('penBtnThickness');
+  if (bThk) bThk.addEventListener('click', penToggleThicknessMode);
+  if (typeof drawCanvas !== 'undefined' && drawCanvas){
+    drawCanvas.addEventListener('mouseup', e => {
+      if (e.button !== 0) return;
+      if (penPickMode && typeof penThicknessMode !== 'undefined' && penThicknessMode === 'box'
+          && typeof penThicknessMouseUp === 'function'){
+        penThicknessMouseUp(e);
+        e.preventDefault();
+      }
     });
   }
 

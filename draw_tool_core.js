@@ -1195,8 +1195,13 @@ drawCanvas.addEventListener('mousemove', e => {
   const unit = calibSet ? `${mmX}, ${mmY} mm` : `${p.x}, ${p.y} px`;
   document.getElementById('statusCoord').textContent = unit + (p.snapped ? ' 🧲' : '');
 
-  // Rev.19.26: 텍스트모드 마우스 드로잉 미리보기 (Shift=슬로우 미세이동)
+  // Rev.19.26: 텍스트모드 마우스 드로잉 미리보기 (Shift=직선/45°)
   if (typeof penDrawActive === 'function' && penDrawActive()) {
+    // Rev.19.37: 두께 모드면 두께 미리보기로 우회
+    if (typeof penThicknessMode !== 'undefined' && penThicknessMode){
+      if (typeof penThicknessPreview === 'function') penThicknessPreview(p);
+      return;
+    }
     const pd = penDrawResolvePoint(e);
     penDrawCurPt = { x: pd.x, y: pd.y };
     penDrawPreview(pd);
@@ -1575,7 +1580,14 @@ drawCanvas.addEventListener('mousedown', e => {
   if (e.button === 1) return;
 
   // Rev.19.26: 텍스트모드 마우스 드로잉 중에는 박스선택/도구 드래그 진입 금지 (click 이벤트로만 처리)
-  if (typeof penDrawActive === 'function' && penDrawActive() && e.button === 0) return;
+  if (typeof penDrawActive === 'function' && penDrawActive() && e.button === 0) {
+    // Rev.19.37: 두께 모드 박스 단계는 mousedown 처리 통과
+    if (typeof penThicknessMode !== 'undefined' && penThicknessMode === 'box'){
+      if (typeof penThicknessMouseDown === 'function') penThicknessMouseDown(e);
+      e.preventDefault();
+    }
+    return;
+  }
 
   // Rev.16.24: 필렛 방향 미리보기 중 - 좌클릭=확정, 우클릭=취소
   if (filletPreview){
@@ -2034,6 +2046,10 @@ drawCanvas.addEventListener('click', e => {
   }
   // Rev.16.46: 점 마우스 선택 모드
   if (penPickMode) {
+    // Rev.19.37: 두께 모드가 최우선 (skip flag/direction 처리)
+    if (typeof penThicknessMode !== 'undefined' && penThicknessMode){
+      if (typeof penThicknessClick === 'function' && penThicknessClick(e)) return;
+    }
     // Rev.19.31: 클릭이동 모드가 켜져 있으면 최우선 처리
     if (typeof penMoveMode !== 'undefined' && penMoveMode){
       if (typeof handlePenMoveClick === 'function' && handlePenMoveClick(e)) return;
@@ -2210,6 +2226,12 @@ window.addEventListener('keydown', e => {
     const _coordPop = document.getElementById('penCoordEditPop');
     if (_coordPop && _coordPop.style.display !== 'none'){
       if (typeof closePenCoordEdit === 'function') closePenCoordEdit();
+      return;
+    }
+    // Rev.19.37: 두께 모드 진행 중이면 취소
+    if (typeof penThicknessMode !== 'undefined' && penThicknessMode){
+      cancelPenThickness();
+      document.getElementById('statusHint').textContent = '⚙ 두께 모드 취소 (ESC)';
       return;
     }
     // Rev.19.31: 클릭이동 모드면 우선 종료

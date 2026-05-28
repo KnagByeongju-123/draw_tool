@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.38</title>
+<title>도면 작도기 Rev.19.40</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -345,7 +345,8 @@
   }
 
 /* ===== Rev.19.30: 단순화(텍스트 전용) 모드 — 일반 작도 UI 숨김 ===== */
-body.simple-mode #headerBtnNormalMode,
+/* Rev.19.39: 일반/텍스트 모드 진입 버튼은 항상 숨김 — 모드 전환은 단순화 토글이 담당 */
+#headerBtnNormalMode, #headerBtnTextMode, #simpleModeToggle { display:none !important; }  /* Rev.19.40: 단순화 버튼도 숨김 — 두 모드 구분없이 사용 */
 body.simple-mode #toolStripToggle { display:none !important; }
 /* 도구 스트립 팝업의 작성/편집/치수 그룹 숨김 (파일·스냅 그룹은 유지) */
 body.simple-mode #toolStrip .ts-group.draw,
@@ -365,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.38</h1>
+  <h1>📐 도면 작도기 Rev.19.40</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>

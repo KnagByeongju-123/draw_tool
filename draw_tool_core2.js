@@ -2285,6 +2285,9 @@ function penMovePoint(idx, newX, newY){
 
 // 직경좌표 모드 토글
 function penToggleDiameterMode(){
+  // Rev.19.40: 텍스트 모드 자동 진입 (원점 필요)
+  if (typeof penPickMode !== 'undefined' && !penPickMode
+      && typeof startTextMode === 'function') startTextMode();
   if (penOriginUserCoord){
     penOriginUserCoord = null;
     cmdLog('⌀ 직경좌표 모드 OFF (절대좌표)', 'system');
@@ -2313,6 +2316,9 @@ function penToggleCoordLabel(){
 
 // 클릭이동 모드 토글
 function penToggleMoveMode(){
+  // Rev.19.40: 텍스트 모드 자동 진입 (점 작업이므로)
+  if (!penMoveMode && typeof penPickMode !== 'undefined' && !penPickMode
+      && typeof startTextMode === 'function') startTextMode();
   penMoveMode = !penMoveMode;
   penMoveTarget = -1;
   const b = document.getElementById('penBtnMove');
@@ -2368,13 +2374,8 @@ function startNormalMode(){
     penMoveMode = false; penMoveTarget = -1;
     const b = document.getElementById('penBtnMove'); if (b) b.classList.remove('active');
   }
-  // Rev.19.30: 단순화 모드에서는 일반모드로 빠지지 않고 텍스트모드 유지 (빈 화면 방지)
-  if (document.body.classList.contains('simple-mode')){
-    if (typeof cancelPenDraw === 'function') cancelPenDraw();
-    if (typeof startTextMode === 'function') startTextMode();
-    return;
-  }
-  if (typeof cancelPenDraw === 'function') cancelPenDraw(); // Rev.19.26
+  // Rev.19.40: simple-mode 가드 제거 — 두 모드 자유롭게 전환
+  if (typeof cancelPenDraw === 'function') cancelPenDraw();
   penPickMode = false; penPickFirst = -1; penAwaitOrigin = false;
   const pbtn = document.getElementById('headerBtnPenInput'); if (pbtn) pbtn.classList.remove('active');
   const tbtn = document.getElementById('headerBtnTextMode'); if (tbtn) tbtn.classList.remove('active');
@@ -2399,9 +2400,11 @@ function startNormalMode(){
       const ts = document.getElementById('toolStrip'); if (ts) ts.classList.add('collapsed');
       // 텍스트 모드로 자동 진입
       if (typeof startTextMode === 'function') startTextMode();
-      document.getElementById('statusHint').textContent = '✨ 단순화 모드 ON — 텍스트 작업만 표시 (단순화 다시 누르면 전체 도구)';
+      document.getElementById('statusHint').textContent = '✨ 단순화 모드 ON — 텍스트 작업만 표시 (단순화 다시 누르면 일반 모드)';
     } else {
-      document.getElementById('statusHint').textContent = '🧰 전체 도구 표시 — 일반 작도 도구 복귀';
+      // Rev.19.39: 단순화 OFF면 일반 모드로 자동 복귀 (simple-mode 클래스는 이미 toggle로 제거됨)
+      if (typeof startNormalMode === 'function') startNormalMode();
+      document.getElementById('statusHint').textContent = '🧰 전체 도구 표시 — 일반 모드 복귀';
     }
   });
   // Rev.19.31: 텍스트모드 보조 UI 바인딩
@@ -2466,14 +2469,8 @@ function startNormalMode(){
     });
   }
 
-  // 저장된 단순화 설정 복원 (기본: OFF)
-  try {
-    if (localStorage.getItem('drawSimpleMode') === '1'){
-      document.body.classList.add('simple-mode');
-      const ts = document.getElementById('toolStrip'); if (ts) ts.classList.add('collapsed');
-      if (typeof startTextMode === 'function') setTimeout(startTextMode, 0);
-    }
-  } catch(e){}
+  // Rev.19.40: 단순화 토글 비활성화 — localStorage 복원도 비활성, 저장값도 제거
+  try { localStorage.removeItem('drawSimpleMode'); } catch(e){}
 })();
 
 function tryDimCommand(cmdStr){
@@ -2563,7 +2560,12 @@ function tryDimCommand(cmdStr){
       // Rev.18.7: '선 상 거리' 삭제 — '우/좌/상/하' 버튼 + 숫자키로 동일 결과 가능 (중복 제거)
       { l:'연결', t:'연결 ', ex:'연결 1 4 → 1번·4번 직선 연결' },
       // Rev.19.38: 연결2 — 최근 클릭한 두 점을 즉시 선으로 연결 (점 번호 입력 없이)
-      { l:'⚡ 연결2', action: () => { if (typeof penConnectRecentTwo === 'function') penConnectRecentTwo(); },
+      { l:'⚡ 연결2', action: () => {
+          // Rev.19.40: 텍스트 모드 자동 진입
+          if (typeof penPickMode !== 'undefined' && !penPickMode
+              && typeof startTextMode === 'function') startTextMode();
+          if (typeof penConnectRecentTwo === 'function') penConnectRecentTwo();
+        },
         ex:'⚡ 연결2: 도면에서 점 두 개를 차례로 클릭한 뒤 이 버튼 → 그 두 점 사이에 선 1개 생성' },
       { l:'각 A 거리', t:'각 ', ex:'각 45 100 / 각 45 교점 / 각 45 수평 -5 (Y=-5까지) / 수직 10 (X=10까지)' },
       { l:'호', t:'호 ', ex:'호 2 3 시계 각 45 / 호 2 3 시계 교점' },

@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.18.4</title>
+<title>도면 작도기 Rev.18.6</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.18.4</h1>
+  <h1>📐 도면 작도기 Rev.18.6</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -1276,6 +1276,7 @@
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>각 A D / 각 A 교점 / 각 A 수평/수직 V</b></td><td style="padding:4px 8px;">각도 A°(수평0°, 반시계+) D mm. <b>각 45 교점</b>=그 방향 직진하다 첫 교점까지. <b>각 45 수평 -5</b>=원점 기준 Y=-5 수평선까지. <b>각 45 수직 10</b>=X=10 수직선까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 위/아래 D</b></td><td style="padding:4px 8px;">마지막 선을 화면상 위/아래로 D mm 평행복제 (점번호 없이)</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>교점</b></td><td style="padding:4px 8px;">기존 모든 선·원·호의 교차점에 일괄 번호 부여 (선-선, 선-원, 원-원)</td></tr>
+        <tr style="background:#2a1f30;"><td style="padding:4px 8px;"><b>만남 / 만남 N M</b></td><td style="padding:4px 8px;"><b>두 선을 무한 직선으로 연장한 교점</b>에 번호 부여 — <b>두께로 만든 평행선처럼 끝점에 번호 없는 선</b>도 가능. ①두 선 마우스로 선택(Shift+클릭) 후 <b>만남</b> 입력. ②또는 <b>만남 3 5</b>=3번/5번 점이 속한 선 자동 매칭. 평행이면 교점 없음 안내</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>라벨 / 번호</b></td><td style="padding:4px 8px;">라벨이 없는 모든 점·도형 꼭짓점(선 끝점, 사각형 모서리, 원·호 중심 등)에 자동 P번호 부여. 일반 모드에서 그린 도형도 텍스트 명령에서 참조 가능해짐</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 X Y</b></td><td style="padding:4px 8px;">빈 공간 좌표를 기준점(노란 십자)으로. 예: 기준 -50 30</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>기준 상 50 / 기준 좌 지 79.44 85.7</b></td><td style="padding:4px 8px;">현재 기준점에서 방향으로 50mm(또는 지름차 (85.7−79.44)/2 만큼) 떨어진 곳에 새 기준점</td></tr>

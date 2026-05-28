@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.18.4  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.18.6  최신본 — 명령어 (만남[선택두선의무한교점]·두께[penPoints없는번호도복구+진단로그]·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -465,6 +465,60 @@ function tryPenCommand(cmdStr){
     const first = penPoints.length;
     cands.forEach(c => penAddPoint(c.x, c.y));
     penFinish(`🏷 라벨 ${cands.length}개 자동 부여 (P${first}~P${penPoints.length-1})`);
+    return true;
+  }
+
+  // Rev.18.5: 만남 - 두 선의 무한 직선 교점에 번호 부여 (선분 밖이어도 OK)
+  //   ① 만남          → 선택된 두 선 사용 (두께 평행선처럼 번호없는 선도 가능)
+  //   ② 만남 N M      → N번/M번이 끝점인 선분(또는 같은 위치 평행선) 자동 매칭
+  //   주: 평행한 두 직선은 교점 없음 → 안내 메시지
+  if (toks[0] === '만남' || toks[0] === 'MEET'){
+    let L1=null, L2=null;
+    // 인자 2개: 점번호 기반
+    if (toks.length >= 3 && isFinite(evalExpr(toks[1])) && isFinite(evalExpr(toks[2]))){
+      const ia = Math.round(evalExpr(toks[1]));
+      const ib = Math.round(evalExpr(toks[2]));
+      if (!penPoints[ia] || !penPoints[ib]){
+        document.getElementById('statusHint').textContent = `만남: ${ia}/${ib}번 점 없음`; return true;
+      }
+      const pa = penPoints[ia], pb = penPoints[ib];
+      const tolPx = 1/mmPerPixel * 0.05;
+      // 두 점을 끝점으로 갖는 선 찾기
+      const findLine = (p) => shapes.find(s => s.type==='line' && s.p1 && s.p2
+        && (Math.hypot(s.p1.x-p.x, s.p1.y-p.y) < tolPx || Math.hypot(s.p2.x-p.x, s.p2.y-p.y) < tolPx));
+      L1 = findLine(pa); L2 = findLine(pb);
+      if (!L1 || !L2){
+        document.getElementById('statusHint').textContent = `만남: ${ia}/${ib}번 점이 속한 선을 찾지 못함`; return true;
+      }
+      if (L1.id === L2.id){
+        document.getElementById('statusHint').textContent = '만남: 두 점이 같은 선에 속함'; return true;
+      }
+    } else {
+      // 인자 없음: 선택된 도형에서 line 2개
+      const selLines = shapes.filter(s => s.type==='line' && s.p1 && s.p2 && selectedIds && selectedIds.has(s.id));
+      if (selLines.length < 2){
+        document.getElementById('statusHint').textContent = '만남: 선 2개를 먼저 선택하세요 (Shift+클릭으로 추가 선택)'; return true;
+      }
+      if (selLines.length > 2){
+        document.getElementById('statusHint').textContent = `만남: 선이 ${selLines.length}개 선택됨 - 정확히 2개만 선택하세요`; return true;
+      }
+      L1 = selLines[0]; L2 = selLines[1];
+    }
+    // 무한 직선 교점 (선분 밖도 OK)
+    const ix = lineLineIntersection(L1.p1, L1.p2, L2.p1, L2.p2);
+    if (!ix){
+      document.getElementById('statusHint').textContent = '만남: 두 선이 평행하여 교점이 없습니다'; return true;
+    }
+    // 중복 체크
+    const tolPx = 1/mmPerPixel * 0.05;
+    const dup = penPoints.findIndex(p => Math.hypot(p.x-ix.x, p.y-ix.y) < tolPx);
+    if (dup >= 0){
+      penCur = dup;
+      document.getElementById('statusHint').textContent = `만남: 이미 ${dup}번 점이 그 위치에 있음 → 선택됨`;
+      return true;
+    }
+    const idx = penAddPoint(ix.x, ix.y);
+    penFinish(`✕ 만남: 두 선의 교점 = ${idx}번 (선분 밖이어도 무한 직선 기준)`);
     return true;
   }
 
@@ -937,6 +991,7 @@ function tryPenCommand(cmdStr){
 
   // Rev.17.0: 두께 1 5 좌 / 우 / 양 - 1~5번 연결 경로(선·호 포함)를 소재두께만큼 평행복제.
   //   좌/우: 거리두기 칸 두께만큼 한쪽으로. 양: 칸 두께의 절반씩 양쪽으로 (중심선 방식).
+  // Rev.18.6: penPoints 배열에 없는 번호여도 화면상 점/라벨에서 자동 복구 (조용히 return false 제거)
   if (toks[0] === '두께'
       && parsePenIdx(toks[1]) != null && parsePenIdx(toks[2]) != null){
     const startI = parsePenIdx(toks[1]), endI = parsePenIdx(toks[2]);
@@ -944,8 +999,43 @@ function tryPenCommand(cmdStr){
     const isBoth = (lr==='양'||lr==='양쪽'||lr==='BOTH'||lr==='B');
     const tEl = document.getElementById('offsetTwinDistInput');
     const dmm = tEl ? parseFloat(tEl.value) : NaN;
-    if (!penPoints[startI] || !penPoints[endI]) return false;
-    if (!isFinite(dmm) || dmm<=0){ document.getElementById('statusHint').textContent='두께: 거리두기 칸에 소재두께(mm)를 입력하세요'; return true; }
+
+    // Rev.18.6: penPoints[]가 sparse하거나 비어있어도 shapes에서 점/라벨 좌표를 복구
+    const findPointByLabel = (idx) => {
+      if (penPoints[idx]) return penPoints[idx];
+      // shapes에서 penIdx === idx 인 point 도형 검색
+      for (const s of shapes){
+        if (s.type === 'point' && s.penIdx === idx && s.p1) return { x:s.p1.x, y:s.p1.y };
+      }
+      // text 라벨로도 검색 (penLabel)
+      for (const s of shapes){
+        if (s.type === 'text' && s.penLabel === idx && s.pos){
+          // 라벨은 점에서 살짝 오프셋 되어있음. 가까운 point 도형 찾기
+          const tolPx = 1/mmPerPixel * 2;
+          for (const p of shapes){
+            if (p.type === 'point' && p.p1
+                && Math.abs(p.p1.x - s.pos.x) < tolPx
+                && Math.abs(p.p1.y - s.pos.y) < tolPx*2){
+              return { x:p.p1.x, y:p.p1.y };
+            }
+          }
+        }
+      }
+      return null;
+    };
+    const pStart = findPointByLabel(startI);
+    const pEnd   = findPointByLabel(endI);
+    if (!pStart || !pEnd){
+      const miss = !pStart ? startI : endI;
+      document.getElementById('statusHint').textContent = `두께: ${miss}번 점을 찾지 못함 (점 번호 확인 또는 「라벨」 명령으로 라벨 부여)`;
+      cmdLog(`  ✗ 두께: ${miss}번 점 없음 (penPoints길이=${penPoints.length})`, 'system');
+      return true;   // Rev.18.6: 조용한 return false 제거
+    }
+    // penPoints 복구 (이후 코드가 penPoints[startI] 직접 참조)
+    if (!penPoints[startI]) penPoints[startI] = pStart;
+    if (!penPoints[endI])   penPoints[endI]   = pEnd;
+
+    if (!isFinite(dmm) || dmm<=0){ document.getElementById('statusHint').textContent='두께: 거리두기 칸(상단 도구바)에 소재두께(mm)를 입력하세요'; return true; }
     const tol = 1/mmPerPixel*0.15;
     const onPt = (P,Q)=>Math.hypot(P.x-Q.x,P.y-Q.y)<tol;
     const arcEnd = (s,which) => {
@@ -980,7 +1070,19 @@ function tryPenCommand(cmdStr){
       curP = nextP;
       if (onPt(curP, endP)) break;
     }
-    if (path.length===0){ document.getElementById('statusHint').textContent=`두께: ${startI}~${endI} 연결 경로를 찾지 못함`; return true; }
+    // Rev.18.6: 경로 못 찾으면 진단 정보 출력 (어디서 끊겼는지)
+    if (path.length===0){
+      const sm = penPxToMm(pStart.x, pStart.y);
+      const em = penPxToMm(pEnd.x, pEnd.y);
+      document.getElementById('statusHint').textContent =
+        `두께: ${startI}~${endI} 연결 경로를 찾지 못함 — ${startI}번 끝점에 닿은 선이 없음`;
+      cmdLog(`  ✗ 두께 경로 탐색 실패: P${startI}(${sm.x.toFixed(1)},${sm.y.toFixed(1)}) → P${endI}(${em.x.toFixed(1)},${em.y.toFixed(1)}) · ${startI}번 점에 끝점이 닿은 선이 없습니다`, 'system');
+      return true;
+    }
+    // 끝점까지 도달 못 했으면 경고
+    if (!onPt(curP, endP)){
+      cmdLog(`  ⚠ 두께 경로가 ${endI}번까지 닿지 못함 (${path.length}구간 추적 후 중단). 도중에 선 단절이 있을 수 있음 — 그래도 추적된 ${path.length}개 구간에 두께 적용`, 'system');
+    }
 
     // 한쪽 방향으로 평행 복제하는 헬퍼 (isLeft, offPx 받음)
     const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
@@ -1552,6 +1654,7 @@ function tryDimCommand(cmdStr){
       { l:'닫기', t:'닫기', ex:'닫기 → 현재점→0번 선' },
       { l:'백(취소)', t:'백', ex:'백 → 직전 1회 취소' },
       { l:'교점', t:'교점', ex:'교점 → 모든 교차점 번호부여' },
+      { l:'만남', t:'만남', ex:'만남 → 선택한 두 선의 무한직선 교점에 번호 부여 (두께 평행선처럼 번호 없는 선도 OK). 두 선 선택 후 입력 · 또는 "만남 3 5"=3번/5번 점이 속한 선 자동' },
       { l:'🏷 라벨 자동', t:'라벨', ex:'🏷 라벨이 없는 점·도형 꼭짓점에 자동 번호 부여 (이미 라벨 있는 건 제외)' },
     ],
   };

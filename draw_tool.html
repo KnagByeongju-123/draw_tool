@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.20</title>
+<title>도면 작도기 Rev.19.24</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -69,6 +69,10 @@
   .cmd-history .cmd-line.error { color: #e74c3c; }
   .cmd-history .cmd-line.prompt { color: #aac8ff; }
   .cmd-input-row { display: flex; align-items: center; gap: 6px; }
+  #cmdMicBtn { background:#222; border:1px solid #555; border-radius:4px; color:#aaa; font-size:15px; padding:4px 7px; cursor:pointer; line-height:1; transition:background .15s,color .15s; }
+  #cmdMicBtn:hover { background:#333; color:#fff; }
+  #cmdMicBtn.listening { background:#c0392b; border-color:#e74c3c; color:#fff; animation:micPulse .7s infinite alternate; }
+  @keyframes micPulse { from{opacity:1} to{opacity:.5} }
   .cmd-prompt { color: #f39c12; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; font-weight: bold; min-width: 110px; }
   .cmd-input { flex: 1; padding: 4px 8px; background: #000; color: #0f0; border: 1px solid #555; border-radius: 3px; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; outline: none; }
   .cmd-input:focus { border-color: #f39c12; }
@@ -328,7 +332,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.20</h1>
+  <h1>📐 도면 작도기 Rev.19.24</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -759,6 +763,7 @@
   <div class="cmd-input-row" style="display:flex; align-items:center; gap:6px;">
     <span class="cmd-prompt" id="cmdPrompt" style="color:#f39c12; font-weight:bold; font-size:12px;">명령: </span>
     <input type="text" id="cmdInput" class="cmd-input" autocomplete="off" spellcheck="false" style="flex:1; background:#000; color:#fff; border:1px solid #555; border-radius:4px; padding:5px 8px; font-size:13px; font-family:monospace;" placeholder="예: 사각형 40 25  ·  원 20  ·  가로선 100  ·  LINE 0 0 100 0  (Enter 실행)">
+    <button id="cmdMicBtn" title="음성 입력 (클릭 후 말하기)">🎙️</button>
     <!-- Rev.19.20: AI 프롬프트 / .txt 불러오기 버튼 삭제 (JS 호환용 숨김 더미만 유지) -->
     <button id="cmdScriptLoad" style="display:none;">📁</button>
     <button id="cmdAiPrompt" style="display:none;">📋</button>
@@ -1617,6 +1622,195 @@
     </div>
   </div>
 </div>
+
+<script>
+/* ── 음성 입력 (Rev.19.24) ───────────────────────────────────────────────
+   Web Speech API: SpeechRecognition (Chrome/Edge)
+   동작: 마이크 버튼 클릭 → 인식 → 한글숫자 변환 → cmdInput에 채움 (Enter는 사용자가 직접)
+──────────────────────────────────────────────────────────────────────── */
+(function(){
+  const btn = document.getElementById('cmdMicBtn');
+  const inp = document.getElementById('cmdInput');
+  if (!btn || !inp) return;
+
+  // SpeechRecognition 지원 확인
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    btn.title = '이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome/Edge 권장)';
+    btn.style.opacity = '0.35';
+    btn.disabled = true;
+    return;
+  }
+
+  // ── 한글 숫자 변환 ───────────────────────────────────────────────────
+  const KO_NUM = {
+    '영':0,'공':0,'일':1,'이':2,'삼':3,'사':4,'오':5,'육':6,'칠':7,'팔':8,'구':9,
+    '십':10,'백':100,'천':1000,'만':10000,'억':100000000
+  };
+  const UNIT = {'십':10,'백':100,'천':1000,'만':10000,'억':100000000};
+  // 숫자 전용 한글 글자 집합 (명령어 한글과 구분)
+  const NUM_CHARS = new Set([...'영공일이삼사오육칠팔구십백천만억']);
+
+  function parseKorNum(s) {
+    let total = 0, cur = 0;
+    for (const ch of s) {
+      const v = KO_NUM[ch];
+      if (v === undefined) return null;
+      if (UNIT[ch]) {
+        if (UNIT[ch] >= 10000) { total += (cur || 1) * UNIT[ch]; cur = 0; }
+        else { cur = (cur || 1) * UNIT[ch]; total += cur; cur = 0; }
+      } else { cur = cur * 10 + v; }
+    }
+    return total + cur;
+  }
+
+  function postProcess(raw) {
+    let t = raw.trim();
+    // 1) 공백 단위 토큰 변환 → 명령어 한글("사각형","띄우기" 등) 보호
+    //    토큰 전체가 숫자 한글로만 이루어진 경우만 변환
+    t = t.split(' ').map(tok => {
+      if (tok.length > 0 && [...tok].every(c => NUM_CHARS.has(c))) {
+        const n = parseKorNum(tok);
+        if (n !== null && !isNaN(n)) return String(n);
+      }
+      return tok;
+    }).join(' ');
+    // 2) 소수점: 숫자 변환 후 "1 점 5" or "1점5" → "1.5"
+    t = t.replace(/(\d+)\s*점\s*(\d+)/g, '$1.$2');
+    // 3) 마이너스: "마이너스 30" → "-30"
+    t = t.replace(/마이너스\s*(\d+)/g, '-$1');
+    // 4) 발음/유사어 → 정식 명령어 매핑
+    t = mapVoiceTokens(t);
+    t = t.replace(/\s+/g, ' ').trim();
+    return t;
+  }
+
+  function isEnterCommand(t) {
+    return /^(엔터|엔타|실행|확인|입력)$/.test(t.trim());
+  }
+
+  // ── 음성 → 명령어 매핑 (발음 유사어 포함) ──────────────────────────
+  // 숫자·방향은 변환 후 그대로 통과; 여기선 한글 토큰만 매핑
+  const CMD_MAP = {
+    // 그리기
+    '사각형':['사각형','사각','네모','직사각형','박스'],
+    '원':['원','동그라미','서클'],
+    '가로선':['가로선','가로','수평선','수평'],
+    '세로선':['세로선','세로','수직선','수직'],
+    '호':['호','아크'],
+    // 방향
+    '상':['상','위','위쪽','상단'],
+    '하':['하','아래','아래쪽','하단'],
+    '좌':['좌','왼쪽','왼','좌측'],
+    '우':['우','오른쪽','오른','우측'],
+    // 주요 명령
+    '점':['점'],
+    '선':['선'],
+    '기준':['기준'],
+    '두께':['두께','두깨'],
+    '거리두기':['거리두기','거리 두기','오프셋','간격띄우기'],
+    '연장':['연장','늘이기','늘리기'],
+    '줄이기':['줄이기','단축','자르기'],
+    '절교':['절교'],
+    '절각':['절각'],
+    '이동':['이동','옮기기'],
+    '삭제':['삭제','지우기','제거'],
+    '선택':['선택'],
+    '정리':['정리','클린업'],
+    '교점':['교점','교차점'],
+    '만남':['만남','만나기'],
+    '연결':['연결'],
+    '닫기':['닫기','닫아'],
+    '백':['백','되돌리기','취소','언두'],
+    '리셋':['리셋','초기화','점초기화'],
+    '라벨':['라벨','번호','라벨붙이기'],
+    '알':['알','필렛','라운드'],
+    '모따기':['모따기','챔퍼','모따'],
+    '시작':['시작'],
+    '지름':['지름','다이아','dia'],
+    '지':['지','지름'],
+  };
+
+  // 역방향 조회 맵 생성 (발음 → 정식 명령어)
+  const VOICE_TO_CMD = {};
+  for (const [cmd, aliases] of Object.entries(CMD_MAP)) {
+    for (const a of aliases) VOICE_TO_CMD[a] = cmd;
+  }
+
+  function mapVoiceTokens(text) {
+    return text.split(' ').map(tok => {
+      // 숫자, 소수점, 마이너스 → 그대로
+      if (/^-?\d+(\.\d+)?$/.test(tok)) return tok;
+      // 매핑 있으면 정식 명령어로 교체
+      return VOICE_TO_CMD[tok] ?? tok;
+    }).join(' ');
+  }
+
+  // ── SpeechRecognition 설정 ────────────────────────────────────────────
+  const rec = new SR();
+  rec.lang = 'ko-KR';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.continuous = false;
+
+  let active = false;
+
+  btn.addEventListener('click', () => {
+    if (active) {
+      rec.stop();
+      return;
+    }
+    try {
+      rec.start();
+    } catch(e) {
+      // 이미 시작된 경우 무시
+    }
+  });
+
+  rec.onstart = () => {
+    active = true;
+    btn.classList.add('listening');
+    btn.title = '🔴 인식 중… (클릭으로 중지)';
+  };
+
+  rec.onresult = (e) => {
+    const raw = e.results[0][0].transcript;
+    // "엔터" 음성 → 현재 명령창 내용 그대로 Enter 실행
+    if (isEnterCommand(raw)) {
+      inp.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+      return;
+    }
+    const converted = postProcess(raw);
+    inp.value = converted;
+    inp.focus();
+    // cmdHint에 원본 표시 (2초 후 원복)
+    const hint = document.getElementById('cmdHint');
+    if (hint) {
+      const orig = hint.textContent;
+      hint.textContent = `🎙 "${raw}"`;
+      hint.style.color = '#5dade2';
+      setTimeout(() => { hint.textContent = orig; hint.style.color = '#888'; }, 2500);
+    }
+  };
+
+  rec.onerror = (e) => {
+    const msg = { 'not-allowed':'마이크 권한 필요', 'no-speech':'음성 미감지', 'network':'네트워크 오류' };
+    const hint = document.getElementById('cmdHint');
+    if (hint) {
+      const orig = hint.textContent;
+      hint.textContent = '⚠ ' + (msg[e.error] || e.error);
+      hint.style.color = '#e74c3c';
+      setTimeout(() => { hint.textContent = orig; hint.style.color = '#888'; }, 3000);
+    }
+  };
+
+  rec.onend = () => {
+    active = false;
+    btn.classList.remove('listening');
+    btn.title = '음성 입력 (클릭 후 말하기)';
+  };
+})();
+</script>
 
 </body>
 </html>

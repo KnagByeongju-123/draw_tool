@@ -1748,6 +1748,28 @@ function handlePenDrawClick(e){
   const near = penFindNearestPoint({x:p.x,y:p.y});
   let pt = (near>=0 && penPoints[near]) ? { x:penPoints[near].x, y:penPoints[near].y, idx:near } : { x:p.x, y:p.y, idx:-1 };
 
+  // Rev.19.44: 연속선 토글 OFF면 점만 찍고 선 그리기 안 함
+  if (!continuousMode){
+    // 진행 중인 선 미리보기가 있으면 정리
+    if (penDrawFirst){ penDrawFirst=null; penDrawFirstIdx=-1; penDrawCurPt=null; preCtx.clearRect(0,0,baseW,baseH); }
+    if (pt.idx >= 0){
+      // 기존 점 클릭 → 현재점 선택만
+      penCur = pt.idx; penPickFirst = pt.idx;
+      redrawDraw();
+      const m = penPxToMm(penPoints[pt.idx].x, penPoints[pt.idx].y);
+      document.getElementById('statusHint').textContent =
+        `▸ P${pt.idx} 선택됨 (${m.x.toFixed(2)}, ${m.y.toFixed(2)})mm · ⛓연속선 ON 시 선 그리기`;
+    } else {
+      // 빈 곳 클릭 → 점만 추가
+      const idx = penAddPoint(pt.x, pt.y);
+      penCur = idx; penPickFirst = idx;
+      redoStack=[]; pushHistory(); redrawDraw(); updateCount();
+      document.getElementById('statusHint').textContent =
+        `● 점 P${idx} 추가 · ⛓연속선 ON 시 선 그리기 모드`;
+    }
+    return true;
+  }
+
   if (!penDrawFirst){
     // 첫 점 지정 — 점번호 부여(기존 점이면 재사용)
     const idx = (pt.idx>=0) ? pt.idx : penAddPoint(pt.x, pt.y);
@@ -2170,7 +2192,6 @@ function penToggleThicknessMode(){
   }
   // 다른 진행 중 작업 정리
   if (typeof cancelPenDraw === 'function') cancelPenDraw();
-  if (penMoveMode){ penMoveMode=false; penMoveTarget=-1; const bm=document.getElementById('penBtnMove'); if(bm)bm.classList.remove('active'); }
   // 텍스트모드에 있어야 의미
   if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
   penThicknessMode = 'box';
@@ -2375,8 +2396,6 @@ function applyPenCoordEdit(){
 // ===== Rev.19.31: 직경좌표 / 마우스좌표 라벨 / 점좌표 라벨 / 클릭이동 =====
 let penOriginUserCoord = null;  // {x,y} - 직경 모드 ON 시 원점에 부여된 사용자 좌표 (mm)
 let penShowCoordLabel = false;  // 점 옆에 좌표 라벨 표시 여부
-let penMoveMode = false;        // 클릭이동 모드
-let penMoveTarget = -1;         // 이동 선택된 점 index
 
 // 현재 좌표를 사용자 좌표로 포맷 (px → mm). 직경 모드면 (이동/2 + Cx, 이동/2 + Cy)
 function penFormatUserCoord(px, py){
@@ -2442,26 +2461,6 @@ function penDrawMouseCoordLabel(p){
 }
 
 // 클릭이동: 1번째 클릭=점 선택, 2번째 클릭=새 위치로 이동. true 반환 시 가로채기.
-function handlePenMoveClick(e){
-  if (!penMoveMode) return false;
-  const p = getCanvasPoint(e);
-  if (penMoveTarget < 0){
-    const near = (typeof penFindNearestPoint === 'function') ? penFindNearestPoint(p) : -1;
-    if (near < 0){
-      document.getElementById('statusHint').textContent = '🖐 클릭이동: 점 위를 정확히 클릭하세요 (ESC=취소)';
-      return true;
-    }
-    penMoveTarget = near;
-    document.getElementById('statusHint').textContent = `🖐 P${near} 선택됨 → 새 위치 클릭 (ESC=취소)`;
-    redrawDraw();
-    return true;
-  }
-  // 두 번째 클릭: 이동 적용
-  penMovePoint(penMoveTarget, p.x, p.y);
-  penMoveTarget = -1;
-  document.getElementById('statusHint').textContent = '🖐 클릭이동: 다음 이동할 점 클릭 (ESC=종료)';
-  return true;
-}
 
 // 점 idx를 (newX,newY)로 이동 — 연결된 선/마커/라벨 모두 동기화
 function penMovePoint(idx, newX, newY){
@@ -2524,24 +2523,6 @@ function penToggleCoordLabel(){
 }
 
 // 클릭이동 모드 토글
-function penToggleMoveMode(){
-  // Rev.19.40: 텍스트 모드 자동 진입 (점 작업이므로)
-  if (!penMoveMode && typeof penPickMode !== 'undefined' && !penPickMode
-      && typeof startTextMode === 'function') startTextMode();
-  penMoveMode = !penMoveMode;
-  penMoveTarget = -1;
-  const b = document.getElementById('penBtnMove');
-  if (b) b.classList.toggle('active', penMoveMode);
-  if (penMoveMode){
-    // 진행 중 선 그리기 취소
-    if (typeof cancelPenDraw === 'function') cancelPenDraw();
-    document.getElementById('statusHint').textContent = '🖐 클릭이동: 이동할 점 클릭 → 새 위치 클릭 (ESC=종료)';
-    cmdLog('🖐 클릭이동 모드 ON', 'system');
-  } else {
-    document.getElementById('statusHint').textContent = '⌨ 텍스트 모드 (클릭이동 종료)';
-    cmdLog('🖐 클릭이동 모드 OFF', 'system');
-  }
-}
 
 
 
@@ -2578,11 +2559,6 @@ function startTextMode(){
 }
 // Rev.16.82: 일반 모드로 전환 (텍스트모드 해제 + 선택 도구)
 function startNormalMode(){
-  // Rev.19.31: 클릭이동 모드 진행 중이면 먼저 종료
-  if (typeof penMoveMode !== 'undefined' && penMoveMode){
-    penMoveMode = false; penMoveTarget = -1;
-    const b = document.getElementById('penBtnMove'); if (b) b.classList.remove('active');
-  }
   // Rev.19.40: simple-mode 가드 제거 — 두 모드 자유롭게 전환
   if (typeof cancelPenDraw === 'function') cancelPenDraw();
   penPickMode = false; penPickFirst = -1; penAwaitOrigin = false;
@@ -2617,8 +2593,6 @@ function startNormalMode(){
     }
   });
   // Rev.19.31: 텍스트모드 보조 UI 바인딩
-  const bMove  = document.getElementById('penBtnMove');
-  if (bMove)  bMove.addEventListener('click',  penToggleMoveMode);
   const bLbl   = document.getElementById('penBtnCoordLabel');
   if (bLbl)   bLbl.addEventListener('click',   penToggleCoordLabel);
   const bDia   = document.getElementById('penBtnDiameter');

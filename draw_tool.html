@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.43</title>
+<title>도면 작도기 Rev.19.45</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -366,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.43</h1>
+  <h1>📐 도면 작도기 Rev.19.45</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -602,7 +602,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
     <button id="simpleModeToggle" class="ts-btn" title="단순화 모드: 일반 작도 도구를 숨기고 텍스트 작업만 표시 (다시 누르면 전체 도구 표시)"><span class="ico">✨</span><span class="lbl">단순화</span></button>
     <span style="width:6px;"></span>
     <!-- Rev.19.31: 텍스트모드 보조 UI -->
-    <button id="penBtnMove" class="ts-btn" title="클릭이동: 점을 클릭해 선택 → 새 위치 클릭으로 이동 (연결된 선도 함께 이동)"><span class="ico">🖐</span><span class="lbl">클릭이동</span></button>
     <button id="penBtnCoordLabel" class="ts-btn" title="점 옆에 좌표 표시 ON/OFF"><span class="ico">📍</span><span class="lbl">점좌표</span></button>
     <button id="penBtnDiameter" class="ts-btn" title="직경 좌표 모드: 원점에 사용자 좌표(Cx,Cy)를 부여하고 표시 = 절대이동/2 + Cx (회전체 단면도용)"><span class="ico">⌀</span><span class="lbl">직경좌표</span></button>
     <input type="number" id="penOriginCx" value="0" step="0.01" title="직경좌표 원점 X (mm)" style="width:54px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #7d4296; border-radius:4px; font-size:11px;">

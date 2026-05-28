@@ -1210,11 +1210,11 @@ function initThree(){
   scene.add(gridMain);
   gridHelper.userData.subGrid = gridMain; // 같이 토글되도록 참조 저장
   axesHelper = new THREE.AxesHelper(60);
-  // v6.4: 축 색상 커스텀 — X=빨강, Y=파랑, Z=흰색
+  // v7.1.4c: 축 색상 커스텀 — X=빨강, Y=연두, Z=흰색
   //   AxesHelper 정점 색상 순서: X(2점), Y(2점), Z(2점)
   {
     const cX = new THREE.Color(0xff3333); // X 빨강
-    const cY = new THREE.Color(0x3366ff); // Y 파랑
+    const cY = new THREE.Color(0x88ff44); // Y 연두
     const cZ = new THREE.Color(0xffffff); // Z 흰색
     const colors = new Float32Array([
       cX.r, cX.g, cX.b,  cX.r, cX.g, cX.b,   // X축 두 점

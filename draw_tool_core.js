@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.19.0  최신본 (선택판정tol을zoom보정[줌아웃에서도선선택가능]·거리두기연속모드·배경맞춤·점앵커십자·점선보조선·아크렌더) #####
+// ##### draw_tool_core.js  Rev.19.1  최신본 (선택tol을텍스트모드수준상향+미선택시거리진단표시·거리두기연속·배경맞춤·점앵커십자·점선보조선) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -1788,6 +1788,23 @@ drawCanvas.addEventListener('mousedown', e => {
   }
   
   const hit = hitTest(p);
+  // Rev.19.1: 선택 진단 - hit 실패 시 가장 가까운 line까지 실제 거리·tol을 상태바에 표시
+  if (!hit) {
+    let nearD = Infinity, nearType = '';
+    for (const s of shapes){
+      let d = Infinity;
+      if (s.type === 'line' && s.p1 && s.p2) d = pointToSegmentDist(p, s.p1, s.p2);
+      else if (s.type === 'point' && s.p1) d = Math.hypot(p.x-s.p1.x, p.y-s.p1.y);
+      if (d < nearD){ nearD = d; nearType = s.type; }
+    }
+    const Zd = (typeof zoom === 'number' && zoom > 0) ? zoom : 1;
+    const mppd = (typeof mmPerPixel === 'number' && mmPerPixel > 0) ? mmPerPixel : (1/300);
+    const tolNow = Math.max(14/Zd, (1/mppd)*0.3) + 1;
+    if (isFinite(nearD)){
+      document.getElementById('statusHint').textContent =
+        `🔍 미선택: 클릭(${Math.round(p.x)},${Math.round(p.y)}) · 가장가까운 ${nearType}까지 ${Math.round(nearD)} · tol=${Math.round(tolNow)} (zoom=${Zd.toFixed(3)})`;
+    }
+  }
   // Rev.11.12: 단일 선택 도형의 끝점 그립을 잡으면 끝점 드래그(연장/이동) 시작
   const grip = hitGrip(p);
   if (grip) {
@@ -7196,12 +7213,12 @@ function pointInPolygon(p, vertices) {
 }
 
 function isPointOnShape(p, s) {
-  // Rev.19.0: tol을 화면 기준 일정 픽셀로 보정. 기존엔 월드좌표 고정 5px이라
-  //   줌 아웃(zoom=0.06 등) 상태에서 화면상 0.3px밖에 안 돼 선 선택이 거의 불가능했음.
-  //   화면상 약 9px에 해당하는 월드 거리 = 9 / zoom. 선 두께도 더해 굵은 선은 더 넉넉히.
+  // Rev.19.1: tol을 텍스트모드(penFindNearestPoint)와 동일 수준으로 상향.
+  //   화면상 14px + mmPerPixel 기반 하한(약 0.3mm). 줌 어떤 값이든 넉넉히 잡히게.
   const Z = (typeof zoom === 'number' && zoom > 0) ? zoom : 1;
-  const screenTolPx = 9;                        // 화면상 허용 반경(px)
-  const tol = (screenTolPx / Z) + (s.strokeWidth || 1);
+  const mpp = (typeof mmPerPixel === 'number' && mmPerPixel > 0) ? mmPerPixel : (1/300);
+  const tolBase = Math.max(14 / Z, (1/mpp) * 0.3);   // 화면14px or 0.3mm 중 큰 값
+  const tol = tolBase + (s.strokeWidth || 1);
   if (s.type === 'point') return Math.hypot(p.x - s.p1.x, p.y - s.p1.y) <= Math.max(tol, 7/Z);
   if (s.type === 'line') return pointToSegmentDist(p, s.p1, s.p2) <= tol;
   if (s.type === 'rect') {

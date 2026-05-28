@@ -1687,13 +1687,40 @@ function penDrawPreview(p2){
   preCtx.beginPath(); preCtx.arc(p1.x,p1.y,3/Z,0,Math.PI*2); preCtx.fill();
   preCtx.beginPath(); preCtx.arc(_p2.x,_p2.y,3/Z,0,Math.PI*2); preCtx.fill();
   preCtx.restore();
-  // 길이/각도 텍스트
+  // 길이/각도 계산
   const m1 = penPxToMm(p1.x,p1.y), m2 = penPxToMm(_p2.x,_p2.y);
   const dxmm = m2.x-m1.x, dymm = m2.y-m1.y;
   const len = Math.hypot(dxmm,dymm);
   let ang = Math.atan2(dymm,dxmm)*180/Math.PI; if (ang<0) ang+=360;
+  // Rev.19.27: 마우스(끝점) 옆에 따라다니는 요약 치수 라벨 — 길이·각도만
+  const lblLen = `${len.toFixed(2)}mm`;
+  const lblAng = `∠${ang.toFixed(1)}°`;
+  preCtx.save();
+  preCtx.font = `${13/Z}px monospace`;
+  const padX = 6/Z, padY = 4/Z, lh = 15/Z;
+  const w1 = preCtx.measureText(lblLen).width, w2 = preCtx.measureText(lblAng).width;
+  const boxW = Math.max(w1, w2) + padX*2;
+  const boxH = lh*2 + padY*2;
+  // 끝점 우상단에 배치 (커서 가리지 않게 살짝 띄움). 가장자리면 반대편으로 보정
+  let bx = _p2.x + 14/Z, by = _p2.y - boxH - 10/Z;
+  if (bx + boxW > baseW) bx = _p2.x - boxW - 14/Z;   // 오른쪽 넘침 → 왼쪽
+  if (by < 0)            by = _p2.y + 14/Z;            // 위쪽 넘침 → 아래
+  if (bx < 0)            bx = 4/Z;
+  preCtx.fillStyle = 'rgba(20,28,30,0.88)';
+  preCtx.strokeStyle = '#16e0b0';
+  preCtx.lineWidth = 1/Z;
+  if (preCtx.roundRect){ preCtx.beginPath(); preCtx.roundRect(bx, by, boxW, boxH, 4/Z); preCtx.fill(); preCtx.stroke(); }
+  else { preCtx.fillRect(bx, by, boxW, boxH); preCtx.strokeRect(bx, by, boxW, boxH); }
+  preCtx.fillStyle = '#16e0b0';
+  preCtx.textBaseline = 'top';
+  preCtx.fillText(lblLen, bx + padX, by + padY);
+  preCtx.fillText(lblAng, bx + padX, by + padY + lh);
+  preCtx.restore();
+  // Rev.19.28: 연장/수선/평행/접점 등 정밀스냅 마커·라벨 표기 (일반모드와 동일)
+  if (!p2.slow && typeof drawSnapIndicator === 'function') drawSnapIndicator();
+  // 하단 상태바는 보조 안내만
   document.getElementById('statusHint').textContent =
-    `／ 텍스트선: ${len.toFixed(2)}mm · ${ang.toFixed(1)}°`
+    `／ 텍스트선: ${lblLen} · ${ang.toFixed(1)}°`
     + (p2.slow ? ' [Shift 슬로우]' : ' · Shift=미세이동')
     + (continuousMode ? ' · ⛓연속' : '') + ' · 좌클릭=확정';
 }

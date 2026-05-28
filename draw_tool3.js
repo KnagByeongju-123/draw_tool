@@ -4404,10 +4404,9 @@ function openPosSizeModal(){
   // v7.1.5: Z-up — 사용자 Z=높이(내부 Y), 사용자 Y=내부 Z
   document.getElementById('psPosY').value = target.mesh.position.z.toFixed(1);
   document.getElementById('psPosZ').value = target.mesh.position.y.toFixed(1);
-  // 크기: 현재 바운딩박스 실제 치수(mm)
+  // 크기: 로컬 치수(mm) — v7.1.7 회전 무관
   target.mesh.updateMatrixWorld(true);
-  const bb = new THREE.Box3().setFromObject(target.mesh);
-  const sz = bb.getSize(new THREE.Vector3());
+  const sz = getLocalSize(target.mesh);
   document.getElementById('psSizeX').value = sz.x.toFixed(1);
   // v7.1.5: Z-up — 사용자 Y 크기=내부 Z, 사용자 Z 크기=내부 Y
   document.getElementById('psSizeY').value = sz.z.toFixed(1);
@@ -4451,6 +4450,30 @@ function openPosSizeModal(){
   document.getElementById('posSizeModal').classList.add('show');
 }
 
+// v7.1.7: 부품의 "로컬" 치수(mm) — 회전과 무관. 지오메트리 BB × |scale|.
+//   회전된 부품도 각 로컬축 치수를 독립적으로 정확히 반환 (월드 AABB 사용 안 함).
+function getLocalSize(mesh){
+  const v = new THREE.Vector3();
+  // 메시(또는 자식 메시들)의 지오메트리 로컬 BB 합산
+  const box = new THREE.Box3();
+  let has = false;
+  mesh.traverse(o => {
+    if(o.isMesh && o.geometry){
+      if(!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const gb = o.geometry.boundingBox;
+      // 자식 메시의 로컬 변환(회전/위치 제외, 부모 기준 위치만)은 보통 단순하므로 직접 합산
+      box.union(gb);
+      has = true;
+    }
+  });
+  if(!has){ return v.set(1,1,1); }
+  box.getSize(v);
+  v.x *= Math.abs(mesh.scale.x);
+  v.y *= Math.abs(mesh.scale.y);
+  v.z *= Math.abs(mesh.scale.z);
+  return v;
+}
+
 // v7.1.6: 사용자 입력 각도(RX,RY,RZ, 도) → 월드 고정축 기준 절대 자세 쿼터니언
 //   Z=월드 up(=내부 Y), Y=내부 Z, X=내부 X. 합성 순서 Z→Y→X (각자 월드축).
 function worldEulerToQuat(uRXdeg, uRYdeg, uRZdeg){
@@ -4481,25 +4504,26 @@ function applyPosSize(){
     parseFloat(document.getElementById('psRotY').value) || 0,
     parseFloat(document.getElementById('psRotZ').value) || 0
   );
-  target.mesh.rotation.set(0,0,0);
-  target.mesh.updateMatrixWorld(true);
-
-  // 크기(mm) → scale 역산: 목표치수 ÷ (현재BB ÷ 현재scale)
+  // 크기(mm) → scale 역산 (v7.1.7: 로컬 지오메트리 BB 기준 — 회전 무관)
   // v7.1.5 Z-up: 사용자 Y 크기 → 내부 Z, 사용자 Z 크기 → 내부 Y
   const wantX = Math.max(0.5, parseFloat(document.getElementById('psSizeX').value) || 30);
   const wantY = Math.max(0.5, parseFloat(document.getElementById('psSizeZ').value) || 30);  // 내부 Y ← 사용자 Z
   const wantZ = Math.max(0.5, parseFloat(document.getElementById('psSizeY').value) || 30);  // 내부 Z ← 사용자 Y
-  const bb = new THREE.Box3().setFromObject(target.mesh);
-  const cur = bb.getSize(new THREE.Vector3());
-  const sc = target.mesh.scale.clone();
-  // 기본 기하 치수 = 현재BB ÷ 현재scale
-  const baseX = cur.x / (sc.x || 1);
-  const baseY = cur.y / (sc.y || 1);
-  const baseZ = cur.z / (sc.z || 1);
+  // 로컬 지오메트리 기본 치수(스케일 1 기준) 측정
+  const gbox = new THREE.Box3();
+  let gh = false;
+  target.mesh.traverse(o => {
+    if(o.isMesh && o.geometry){
+      if(!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      gbox.union(o.geometry.boundingBox); gh = true;
+    }
+  });
+  const gsz = gh ? gbox.getSize(new THREE.Vector3()) : new THREE.Vector3(1,1,1);
+  const baseX = gsz.x || 1, baseY = gsz.y || 1, baseZ = gsz.z || 1;
   target.mesh.scale.set(
-    baseX > 0.0001 ? wantX / baseX : sc.x,
-    baseY > 0.0001 ? wantY / baseY : sc.y,
-    baseZ > 0.0001 ? wantZ / baseZ : sc.z
+    baseX > 0.0001 ? wantX / baseX : target.mesh.scale.x,
+    baseY > 0.0001 ? wantY / baseY : target.mesh.scale.y,
+    baseZ > 0.0001 ? wantZ / baseZ : target.mesh.scale.z
   );
   // 회전 적용 (v7.1.6: 월드 고정축 자세)
   target.mesh.quaternion.copy(wantQuat);
@@ -6356,10 +6380,9 @@ function refreshPropPanelTransform(part){
   if(px) px.value = pos.x.toFixed(1);
   if(py) py.value = pos.z.toFixed(1);  // 사용자 Y ← 내부 Z
   if(pz) pz.value = pos.y.toFixed(1);  // 사용자 Z ← 내부 Y
-  // 크기 (월드 바운딩박스) — v7.1.5 Z-up
+  // 크기 (v7.1.7: 로컬 치수 — 회전 무관)
   part.mesh.updateMatrixWorld(true);
-  const bb = new THREE.Box3().setFromObject(part.mesh);
-  const sz = bb.getSize(new THREE.Vector3());
+  const sz = getLocalSize(part.mesh);
   const sx = document.getElementById('propSizeX');
   const sy = document.getElementById('propSizeY');
   const sz2 = document.getElementById('propSizeZ');
@@ -6401,29 +6424,25 @@ function applyPropSize(axisChar){
   // v7.1.5 Z-up: 사용자 축 → 내부 축 (Y↔Z 스왑). 이하 로직은 내부 축 기준.
   const uAxis = axisChar.toLowerCase();
   axisChar = (uAxis === 'y') ? 'z' : (uAxis === 'z') ? 'y' : 'x';
-  // 현재 BB의 그 축 크기를 측정해서 factor 계산
+  // v7.1.7: 로컬 치수 기준 factor (회전 무관 — 해당 축만 정확히 변경)
+  // 바닥 안착 유지를 위해 변경 전 월드 AABB 최저점 기록
   part.mesh.updateMatrixWorld(true);
-  const bb = new THREE.Box3().setFromObject(part.mesh);
-  const sz = bb.getSize(new THREE.Vector3());
-  const cur = sz[axisChar];
+  const worldMinYBefore = new THREE.Box3().setFromObject(part.mesh).min.y;
+  const localSz = getLocalSize(part.mesh);
+  const cur = localSz[axisChar];
   if(cur < 0.001){ toast('현재 크기를 측정할 수 없습니다'); return; }
   const factor = newSize / cur;
-  // 부품 mesh.scale에 해당 축 factor 곱하기
+  // 부품 mesh.scale에 해당 (로컬)축 factor 곱하기
   part.mesh.scale[axisChar] *= factor;
-  // 바닥(또는 워크플레인) 안착 유지: Y 크기를 키울 때 부품이 바닥을 뚫지 않도록
-  //   간단 처리: 부품의 BB 최저점이 원래 바닥에 머물도록 보정 (Y축 변경 시에만)
-  if(axisChar === 'y'){
-    const oldMin = bb.min.y;
-    part.mesh.updateMatrixWorld(true);
-    const newBB = new THREE.Box3().setFromObject(part.mesh);
-    const newMin = newBB.min.y;
-    part.mesh.position.y += oldMin - newMin;
-  }
+  // 바닥 안착 유지: 변경 후 월드 최저점이 원래 위치에 머물도록 Y 보정 (회전 여부 무관)
+  part.mesh.updateMatrixWorld(true);
+  const worldMinYAfter = new THREE.Box3().setFromObject(part.mesh).min.y;
+  part.mesh.position.y += worldMinYBefore - worldMinYAfter;
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   refreshPropPanelTransform(part);
-  toast('📐 ' + axisChar.toUpperCase() + ' 크기 = ' + newSize.toFixed(1) + ' mm');
-  setStat('크기 변경: ' + axisChar.toUpperCase() + '축 ' + newSize.toFixed(1) + ' mm');
+  toast('📐 ' + uAxis.toUpperCase() + ' 크기 = ' + newSize.toFixed(1) + ' mm');
+  setStat('크기 변경: ' + uAxis.toUpperCase() + '축 ' + newSize.toFixed(1) + ' mm');
 }
 
 // v3.3: 입력된 회전값을 부품에 적용 (절대값으로 설정)

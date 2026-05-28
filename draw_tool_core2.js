@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.18.0  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.18.4  최신본 — 명령어 (마우스원점지정·절교/절각[수평/수직]·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -419,6 +419,55 @@ function tryPenCommand(cmdStr){
   }
 
   // Rev.16.31: 교점 번호 - 현재 모든 선의 교차점을 찾아 번호 부여
+  // Rev.18.4: 라벨 명령 - 라벨이 없는 모든 점/도형 꼭짓점에 자동 번호 부여
+  if (toks[0] === '라벨' || toks[0] === '번호' || toks[0] === 'LABEL'){
+    const tolPx = 1/mmPerPixel*0.05;
+    const isDup = (x,y) => penPoints.some(p => Math.hypot(p.x-x, p.y-y) < tolPx);
+    const cands = [];   // {x,y} 후보 좌표 (중복 제거 후)
+    const addCand = (x,y) => {
+      if (!isFinite(x) || !isFinite(y)) return;
+      if (isDup(x,y)) return;
+      if (cands.some(c => Math.hypot(c.x-x, c.y-y) < tolPx)) return;
+      cands.push({x,y});
+    };
+    // (i) shapes의 type='point' 도형 중 penIdx 없는 것 (이미 라벨이 있는 점은 제외)
+    for (const s of shapes){
+      if (s.type === 'point' && s.p1 && s.penIdx == null){
+        addCand(s.p1.x, s.p1.y);
+      }
+    }
+    // (ii) 도형 꼭짓점: 선·사각형·원·호 끝점
+    for (const s of shapes){
+      if (s.type === 'line' && s.p1 && s.p2){
+        addCand(s.p1.x, s.p1.y); addCand(s.p2.x, s.p2.y);
+      } else if (s.type === 'rect' && s.p1 && s.p2){
+        const x1=Math.min(s.p1.x,s.p2.x), x2=Math.max(s.p1.x,s.p2.x);
+        const y1=Math.min(s.p1.y,s.p2.y), y2=Math.max(s.p1.y,s.p2.y);
+        addCand(x1,y1); addCand(x2,y1); addCand(x2,y2); addCand(x1,y2);
+      } else if (s.type === 'circle' && s.p1 && s.p2){
+        addCand(s.p1.x, s.p1.y);   // 중심
+      } else if (s.type === 'arc' && typeof s.cx === 'number'){
+        addCand(s.cx, s.cy);   // 중심
+        if (s.startAngle != null && s.r != null){
+          addCand(s.cx + Math.cos(s.startAngle)*s.r, s.cy + Math.sin(s.startAngle)*s.r);
+        }
+        if (s.endAngle != null && s.r != null){
+          addCand(s.cx + Math.cos(s.endAngle)*s.r, s.cy + Math.sin(s.endAngle)*s.r);
+        }
+      } else if (s.type === 'polyline' && Array.isArray(s.points)){
+        s.points.forEach(p => addCand(p.x, p.y));
+      }
+    }
+    if (cands.length === 0){
+      document.getElementById('statusHint').textContent = '🏷 라벨: 새로 부여할 곳이 없습니다 (모든 점·꼭짓점에 이미 라벨)';
+      return true;
+    }
+    const first = penPoints.length;
+    cands.forEach(c => penAddPoint(c.x, c.y));
+    penFinish(`🏷 라벨 ${cands.length}개 자동 부여 (P${first}~P${penPoints.length-1})`);
+    return true;
+  }
+
   if (toks[0] === '교점' || toks[0] === 'INTERSECT' || toks[0] === 'IX'){
     const lines = shapes.filter(s => s.type === 'line' && s.p1 && s.p2);
     // Rev.16.93: 원/호도 교점 대상에 포함. 중심/반지름 추출
@@ -1344,16 +1393,18 @@ function penChamferAtPoint(pt, cMm){
 
 // Rev.16.46/51/82: 텍스트입력(한붓그리기) 시작 — 함수화하여 여러 버튼에서 호출
 function startTextMode(){
-  // Rev.16.85: 이미 텍스트 모드이거나 점이 있으면 초기화 여부 확인 (중복 시작으로 0번 중복/작업소실 방지)
+  // Rev.18.3: 기존 점이 있으면 자동으로 이어가기 (다이얼로그 없이). 새로 시작하려면 "새 파일" 사용.
   if (penPickMode || (typeof penPoints !== 'undefined' && penPoints.length)){
     const hasPts = (typeof penPoints !== 'undefined' && penPoints.length);
-    if (hasPts && !confirm(`이미 한붓그리기 점 ${penPoints.length}개가 있습니다.\n새로 시작하면 기존 점이 모두 사라집니다.\n\n확인=새로 시작 / 취소=기존 작업 이어서`)){
-      // 기존 작업 유지: 모드만 보장하고 종료
+    if (hasPts){
+      // 기존 작업 유지: 모드만 보장하고 종료 (일반 모드 갔다 왔을 때 점·번호 그대로 유지)
       penPickMode = true; penAwaitOrigin = false;
       const _t = document.getElementById('headerBtnTextMode'); if (_t) _t.classList.add('active');
+      const _p = document.getElementById('headerBtnPenInput'); if (_p) _p.classList.add('active');
       const _n = document.getElementById('headerBtnNormalMode'); if (_n) _n.classList.remove('active');
       const _ci = document.getElementById('cmdInput'); if (_ci) _ci.focus();
-      document.getElementById('statusHint').textContent = `⌨ 텍스트 모드 (기존 작업 이어서) · 점 ${penPoints.length}개`;
+      document.getElementById('statusHint').textContent = `⌨ 텍스트 모드 (점 ${penPoints.length}개 이어서) · 새로 시작은 [파일→새 파일]`;
+      if (typeof redrawDraw === 'function') redrawDraw();
       return;
     }
   }
@@ -1501,6 +1552,7 @@ function tryDimCommand(cmdStr){
       { l:'닫기', t:'닫기', ex:'닫기 → 현재점→0번 선' },
       { l:'백(취소)', t:'백', ex:'백 → 직전 1회 취소' },
       { l:'교점', t:'교점', ex:'교점 → 모든 교차점 번호부여' },
+      { l:'🏷 라벨 자동', t:'라벨', ex:'🏷 라벨이 없는 점·도형 꼭짓점에 자동 번호 부여 (이미 라벨 있는 건 제외)' },
     ],
   };
   const panel = document.getElementById('cmdPanel');

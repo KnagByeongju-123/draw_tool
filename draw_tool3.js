@@ -1209,12 +1209,13 @@ function initThree(){
   gridMain.userData.isMainGrid = true;
   scene.add(gridMain);
   gridHelper.userData.subGrid = gridMain; // 같이 토글되도록 참조 저장
-  // v7.1.4f: 흰색↔녹색만 교환 — 세로(위)=흰색, 가로축B=녹색, 가로축A=빨강
+  // v7.1.4g: 사용자 관점 축 — 바닥평면=X(빨강)/Y(녹색), 높이(위)=Z(흰색). 끝에 글자 라벨 표시.
+  //   (내부 three.js는 Y-up이라 위로 뻗은 축이 기하적으론 Y지만, 화면 표기는 Z로 라벨링)
   {
     const AX = 70; // 축 길이(mm)
-    const cHorizA = new THREE.Color(0xff2222); // 가로축 A 빨강 (유지)
-    const cVert   = new THREE.Color(0xffffff); // 세로(위) 흰색
-    const cHorizB = new THREE.Color(0x33dd33); // 가로축 B 녹색
+    const cHorizA = new THREE.Color(0xff2222); // 바닥 X 빨강
+    const cVert   = new THREE.Color(0xffffff); // 높이 Z 흰색
+    const cHorizB = new THREE.Color(0x33dd33); // 바닥 Y 녹색
     // 각 축: 원점 → 양의 방향 끝
     const positions = new Float32Array([
       0,0,0,  AX,0,0,    // 가로축 A
@@ -1232,6 +1233,22 @@ function initThree(){
     const mat = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 2, depthTest: false, transparent: true, opacity: 1.0 });
     axesHelper = new THREE.LineSegments(geo, mat);
     axesHelper.renderOrder = 999; // 그리드 위에 항상 보이게
+    // v7.1.4g: 축 끝 글자 라벨 — 바닥=X(빨강)/Y(녹색), 높이(위)=Z(흰색)
+    const mkAxisLabel = (txt, color, pos) => {
+      const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+      const x = c.getContext('2d');
+      x.font = 'bold 48px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.fillStyle = color; x.fillText(txt, 32, 34);
+      const t = new THREE.CanvasTexture(c);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
+      sp.position.set(pos[0], pos[1], pos[2]);
+      sp.scale.set(8, 8, 1);
+      sp.renderOrder = 1000;
+      axesHelper.add(sp);
+    };
+    mkAxisLabel('X', '#ff3333', [AX + 6, 0, 0]);   // 가로축 A(빨강) → X
+    mkAxisLabel('Y', '#33dd33', [0, 0, AX + 6]);   // 가로축 B(녹색) → Y
+    mkAxisLabel('Z', '#ffffff', [0, AX + 6, 0]);   // 세로축(흰색, 위) → Z
   }
   scene.add(axesHelper);
   
@@ -4374,15 +4391,17 @@ function openPosSizeModal(){
   if(!target){toast('단일 부품을 선택하세요'); return}
   document.getElementById('posSizePartName').textContent = target.name;
   document.getElementById('psPosX').value = target.mesh.position.x.toFixed(1);
-  document.getElementById('psPosY').value = target.mesh.position.y.toFixed(1);
-  document.getElementById('psPosZ').value = target.mesh.position.z.toFixed(1);
+  // v7.1.5: Z-up — 사용자 Z=높이(내부 Y), 사용자 Y=내부 Z
+  document.getElementById('psPosY').value = target.mesh.position.z.toFixed(1);
+  document.getElementById('psPosZ').value = target.mesh.position.y.toFixed(1);
   // 크기: 현재 바운딩박스 실제 치수(mm)
   target.mesh.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(target.mesh);
   const sz = bb.getSize(new THREE.Vector3());
   document.getElementById('psSizeX').value = sz.x.toFixed(1);
-  document.getElementById('psSizeY').value = sz.y.toFixed(1);
-  document.getElementById('psSizeZ').value = sz.z.toFixed(1);
+  // v7.1.5: Z-up — 사용자 Y 크기=내부 Z, 사용자 Z 크기=내부 Y
+  document.getElementById('psSizeY').value = sz.z.toFixed(1);
+  document.getElementById('psSizeZ').value = sz.y.toFixed(1);
   // v7.1.4: 타입별 치수 요약 (구→⌀, 원통→⌀×높이)
   const summary = document.getElementById('posSizeSummary');
   if(summary){
@@ -4413,8 +4432,9 @@ function openPosSizeModal(){
     summary.textContent = '📐 ' + txt;
   }
   document.getElementById('psRotX').value = (target.mesh.rotation.x * 180/Math.PI).toFixed(1);
-  document.getElementById('psRotY').value = (target.mesh.rotation.y * 180/Math.PI).toFixed(1);
-  document.getElementById('psRotZ').value = (target.mesh.rotation.z * 180/Math.PI).toFixed(1);
+  // v7.1.5: Z-up — 사용자 Y축 회전=내부 Z축, 사용자 Z축 회전=내부 Y축
+  document.getElementById('psRotY').value = (target.mesh.rotation.z * 180/Math.PI).toFixed(1);
+  document.getElementById('psRotZ').value = (target.mesh.rotation.y * 180/Math.PI).toFixed(1);
   document.getElementById('posSizeModal').classList.add('show');
 }
 
@@ -4423,26 +4443,26 @@ function applyPosSize(){
   const target = sel.length === 1 ? sel[0] : null;
   if(!target){toast('단일 부품을 선택하세요'); return}
 
-  // 위치
+  // 위치 (v7.1.5 Z-up: 사용자 X,Y,Z → 내부 X,Z,Y)
   target.mesh.position.set(
     parseFloat(document.getElementById('psPosX').value) || 0,
-    parseFloat(document.getElementById('psPosY').value) || 0,
-    parseFloat(document.getElementById('psPosZ').value) || 0
+    parseFloat(document.getElementById('psPosZ').value) || 0,   // 내부 Y ← 사용자 Z
+    parseFloat(document.getElementById('psPosY').value) || 0    // 내부 Z ← 사용자 Y
   );
-  // 회전 (크기 역산 전에 회전을 0으로 맞춰 BB 측정 — 회전된 BB는 부정확하므로)
-  //   먼저 회전을 적용하기 전, scale=1 기준 기하 치수를 구하기 위해 회전을 잠시 0으로
+  // 회전 (v7.1.5 Z-up: 사용자 RX,RY,RZ → 내부 RX,RZ,RY)
   const wantRot = new THREE.Euler(
     (parseFloat(document.getElementById('psRotX').value) || 0) * Math.PI/180,
-    (parseFloat(document.getElementById('psRotY').value) || 0) * Math.PI/180,
-    (parseFloat(document.getElementById('psRotZ').value) || 0) * Math.PI/180
+    (parseFloat(document.getElementById('psRotZ').value) || 0) * Math.PI/180,  // 내부 Y ← 사용자 Z
+    (parseFloat(document.getElementById('psRotY').value) || 0) * Math.PI/180   // 내부 Z ← 사용자 Y
   );
   target.mesh.rotation.set(0,0,0);
   target.mesh.updateMatrixWorld(true);
 
   // 크기(mm) → scale 역산: 목표치수 ÷ (현재BB ÷ 현재scale)
+  // v7.1.5 Z-up: 사용자 Y 크기 → 내부 Z, 사용자 Z 크기 → 내부 Y
   const wantX = Math.max(0.5, parseFloat(document.getElementById('psSizeX').value) || 30);
-  const wantY = Math.max(0.5, parseFloat(document.getElementById('psSizeY').value) || 30);
-  const wantZ = Math.max(0.5, parseFloat(document.getElementById('psSizeZ').value) || 30);
+  const wantY = Math.max(0.5, parseFloat(document.getElementById('psSizeZ').value) || 30);  // 내부 Y ← 사용자 Z
+  const wantZ = Math.max(0.5, parseFloat(document.getElementById('psSizeY').value) || 30);  // 내부 Z ← 사용자 Y
   const bb = new THREE.Box3().setFromObject(target.mesh);
   const cur = bb.getSize(new THREE.Vector3());
   const sc = target.mesh.scale.clone();
@@ -6053,15 +6073,18 @@ function exportSTL(){
   const st = cleaned.stats;
 
   let stl = 'solid Catia3D\n';
+  // v7.1.5 Z-up: 내부(Y-up) → 파일(Z-up). 정점 Y↔Z 스왑 + 와인딩 반전(법선 유지).
+  const toZup = (v) => ({ x: v.x, y: v.z, z: v.y });
   useTris.forEach(t=>{
+    const a = toZup(t[0]), b = toZup(t[2]), c = toZup(t[1]); // 와인딩 반전: 0,2,1
     const n = new THREE.Vector3().crossVectors(
-      new THREE.Vector3().subVectors(t[1], t[0]),
-      new THREE.Vector3().subVectors(t[2], t[0])
+      new THREE.Vector3(b.x-a.x, b.y-a.y, b.z-a.z),
+      new THREE.Vector3(c.x-a.x, c.y-a.y, c.z-a.z)
     ).normalize();
     stl += `facet normal ${n.x} ${n.y} ${n.z}\n  outer loop\n`;
-    stl += `    vertex ${t[0].x} ${t[0].y} ${t[0].z}\n`;
-    stl += `    vertex ${t[1].x} ${t[1].y} ${t[1].z}\n`;
-    stl += `    vertex ${t[2].x} ${t[2].y} ${t[2].z}\n`;
+    stl += `    vertex ${a.x} ${a.y} ${a.z}\n`;
+    stl += `    vertex ${b.x} ${b.y} ${b.z}\n`;
+    stl += `    vertex ${c.x} ${c.y} ${c.z}\n`;
     stl += '  endloop\nendfacet\n';
   });
   stl += 'endsolid Catia3D\n';
@@ -6278,22 +6301,22 @@ function syncRotPropPanel(part){
 function refreshPropPanelTransform(part){
   if(!part || !part.mesh) return;
   if(state.selectedPartId !== part.id) return;
-  // 회전 (라디안 → 도)
+  // 회전 (라디안 → 도) — v7.1.5 Z-up: 표시 Y↔Z 스왑 (사용자 Z=내부 Y)
   const rx = document.getElementById('psRotX');
   const ry = document.getElementById('psRotY');
   const rz = document.getElementById('psRotZ');
   if(rx) rx.value = (part.mesh.rotation.x * 180/Math.PI).toFixed(1);
-  if(ry) ry.value = (part.mesh.rotation.y * 180/Math.PI).toFixed(1);
-  if(rz) rz.value = (part.mesh.rotation.z * 180/Math.PI).toFixed(1);
-  // 위치
+  if(ry) ry.value = (part.mesh.rotation.z * 180/Math.PI).toFixed(1);  // 사용자 Y ← 내부 Z
+  if(rz) rz.value = (part.mesh.rotation.y * 180/Math.PI).toFixed(1);  // 사용자 Z ← 내부 Y
+  // 위치 — v7.1.5 Z-up
   const pos = part.mesh.position;
   const px = document.getElementById('propPosX');
   const py = document.getElementById('propPosY');
   const pz = document.getElementById('propPosZ');
   if(px) px.value = pos.x.toFixed(1);
-  if(py) py.value = pos.y.toFixed(1);
-  if(pz) pz.value = pos.z.toFixed(1);
-  // 크기 (월드 바운딩박스)
+  if(py) py.value = pos.z.toFixed(1);  // 사용자 Y ← 내부 Z
+  if(pz) pz.value = pos.y.toFixed(1);  // 사용자 Z ← 내부 Y
+  // 크기 (월드 바운딩박스) — v7.1.5 Z-up
   part.mesh.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(part.mesh);
   const sz = bb.getSize(new THREE.Vector3());
@@ -6301,8 +6324,8 @@ function refreshPropPanelTransform(part){
   const sy = document.getElementById('propSizeY');
   const sz2 = document.getElementById('propSizeZ');
   if(sx) sx.value = sz.x.toFixed(1);
-  if(sy) sy.value = sz.y.toFixed(1);
-  if(sz2) sz2.value = sz.z.toFixed(1);
+  if(sy) sy.value = sz.z.toFixed(1);  // 사용자 Y ← 내부 Z
+  if(sz2) sz2.value = sz.y.toFixed(1); // 사용자 Z ← 내부 Y
 }
 
 // v3.3: 입력된 위치값을 부품에 적용
@@ -6314,9 +6337,10 @@ function applyPropPosition(){
   const x = parseFloat(document.getElementById('propPosX').value);
   const y = parseFloat(document.getElementById('propPosY').value);
   const z = parseFloat(document.getElementById('propPosZ').value);
+  // v7.1.5 Z-up: 사용자 Y→내부 Z, 사용자 Z→내부 Y
   if(!isNaN(x)) part.mesh.position.x = x;
-  if(!isNaN(y)) part.mesh.position.y = y;
-  if(!isNaN(z)) part.mesh.position.z = z;
+  if(!isNaN(z)) part.mesh.position.y = z;   // 내부 Y ← 사용자 Z
+  if(!isNaN(y)) part.mesh.position.z = y;   // 내부 Z ← 사용자 Y
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   setStat('📍 위치 변경: X=' + x.toFixed(1) + ' Y=' + y.toFixed(1) + ' Z=' + z.toFixed(1));
@@ -6334,6 +6358,9 @@ function applyPropSize(axisChar){
     refreshPropPanelTransform(part);
     return;
   }
+  // v7.1.5 Z-up: 사용자 축 → 내부 축 (Y↔Z 스왑). 이하 로직은 내부 축 기준.
+  const uAxis = axisChar.toLowerCase();
+  axisChar = (uAxis === 'y') ? 'z' : (uAxis === 'z') ? 'y' : 'x';
   // 현재 BB의 그 축 크기를 측정해서 factor 계산
   part.mesh.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(part.mesh);
@@ -6368,9 +6395,10 @@ function applyPropRotation(){
   const rx = parseFloat(document.getElementById('psRotX').value);
   const ry = parseFloat(document.getElementById('psRotY').value);
   const rz = parseFloat(document.getElementById('psRotZ').value);
+  // v7.1.5 Z-up: 사용자 RY→내부 Z, 사용자 RZ→내부 Y
   if(!isNaN(rx)) part.mesh.rotation.x = rx * Math.PI / 180;
-  if(!isNaN(ry)) part.mesh.rotation.y = ry * Math.PI / 180;
-  if(!isNaN(rz)) part.mesh.rotation.z = rz * Math.PI / 180;
+  if(!isNaN(rz)) part.mesh.rotation.y = rz * Math.PI / 180;  // 내부 Y ← 사용자 RZ
+  if(!isNaN(ry)) part.mesh.rotation.z = ry * Math.PI / 180;  // 내부 Z ← 사용자 RY
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   // 크기는 회전으로 인해 월드 BB가 바뀌므로 갱신
@@ -7507,6 +7535,17 @@ function importMeshFile(event){
         toast('지원하지 않는 형식입니다 (STL/OBJ만 가능)'); return;
       }
       if(!geom){ toast('파일을 읽지 못했습니다'); return; }
+      // v7.1.5 Z-up: 파일(Z-up) → 내부(Y-up). 정점 Y↔Z 스왑 (export의 역변환)
+      if(ext === 'stl' || ext === 'obj'){
+        const pa = geom.attributes.position;
+        if(pa){
+          for(let i=0; i<pa.count; i++){
+            const y = pa.getY(i), z = pa.getZ(i);
+            pa.setY(i, z); pa.setZ(i, y);
+          }
+          pa.needsUpdate = true;
+        }
+      }
       geom.computeVertexNormals();
       geom.computeBoundingBox();
       // 바닥(Y=0)에 안착 + XZ 중심 정렬

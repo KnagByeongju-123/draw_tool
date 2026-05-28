@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.18.4  최신본 (배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신[한붓그리기 명령 포함]) #####
+// ##### draw_tool_core.js  Rev.18.9  최신본 (거리두기연속모드[생성후다음선선택]·배경맞춤·점앵커십자·점선보조선·아크렌더·도움말갱신) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -2385,7 +2385,7 @@ function startOffsetTwinPick(){
   selectTool('select');
   drawCanvas.style.cursor = 'crosshair';
   document.getElementById('statusHint').textContent =
-    `⫴ 거리두기(${offsetTwinDist}mm): 기준이 될 선을 클릭하세요`;
+    `⫴ 거리두기(${offsetTwinDist}mm) 연속: 기준 선을 클릭하세요 (생성 후 계속 다른 선 선택 가능 · Esc=종료)`;
   updateOffsetTwinButton();
 }
 
@@ -2407,7 +2407,7 @@ function handleOffsetTwinPickClick(p){
     if (s && s.type === 'line'){
       offsetTwinTarget = s;
       document.getElementById('statusHint').textContent =
-        `⫴ 거리두기(${offsetTwinDist}mm): 마우스를 선의 왼쪽/오른쪽으로 옮긴 뒤 클릭 (Esc=취소)`;
+        `⫴ 거리두기(${offsetTwinDist}mm): 마우스를 선의 왼쪽/오른쪽으로 옮긴 뒤 클릭 (생성 후 다음 선 선택 계속 · Esc=종료)`;
     } else {
       document.getElementById('statusHint').textContent =
         '⫴ 거리두기: 선(line)을 클릭하세요. (사각형/원 불가)';
@@ -2418,9 +2418,12 @@ function handleOffsetTwinPickClick(p){
   const sign = offsetTwinSideSign(offsetTwinTarget, p);
   const newId = makeOffsetTwinOneSide(offsetTwinTarget, sign);
   preCtx.clearRect(0, 0, baseW, baseH);
+  // Rev.18.8: 연속 모드 — 생성 후 대상 리셋. 다음 클릭은 새 선 선택부터 (Esc로 종료할 때까지 계속)
+  offsetTwinTarget = null;
   document.getElementById('statusHint').textContent =
-    newId ? `✓ 거리두기 완료: ${offsetTwinDist}mm 평행선 1개 생성` : '거리두기 실패';
-  // 한 번 더 만들 수 있도록 대상은 유지(다른 쪽도 클릭 가능). 모드는 계속.
+    newId
+      ? `✓ 거리두기 ${offsetTwinDist}mm 생성 · 계속: 다음 기준 선을 클릭하세요 (Esc=종료)`
+      : '거리두기 실패 · 다음 기준 선을 클릭하세요 (Esc=종료)';
   return true;
 }
 

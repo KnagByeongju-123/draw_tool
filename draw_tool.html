@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.18.7</title>
+<title>도면 작도기 Rev.18.9</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -309,7 +309,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.18.7</h1>
+  <h1>📐 도면 작도기 Rev.18.9</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -600,7 +600,7 @@
     <!-- Rev.18.2: 텍스트입력·명령판은 상단 헤더로 이동 -->
     <button id="headerBtnConnect" class="ts-btn" title="연결(F) - 두 점을 클릭하면 선 1개 생성" style="display:none"><span class="ico">🔗</span><span class="lbl">연결</span><span class="sc">F</span></button>
     <button id="headerBtnExtrude" class="ts-btn" title="연장(Extrude/E) - 선택한 점/선을 드래그해서 선/면 만들기" style="display:none"><span class="ico">⬄</span><span class="lbl">연장</span></button>
-    <button id="headerBtnOffsetTwin" class="ts-btn" title="거리두기 - 클릭 후 기준 선을 클릭하고, 마우스를 좌/우로 옮겨 그 쪽에 평행선 1개 생성 (Esc=취소)"><span class="ico">⫴</span><span class="lbl">거리두기</span></button>
+    <button id="headerBtnOffsetTwin" class="ts-btn" title="거리두기 - 기준 선을 클릭하고 마우스를 좌/우로 옮겨 클릭하면 그 쪽에 평행선 1개 생성. 연속: 계속 다른 선을 클릭 가능 (Esc=종료)"><span class="ico">⫴</span><span class="lbl">거리두기</span></button>
     <input type="number" id="offsetTwinDistInput" value="0.6" step="0.01" min="0" style="width:48px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #d35400; border-radius:4px; font-size:11px;" title="거리두기 간격(mm)">
   </div>
   <!-- 편집 그룹: 대상 선택 후 버튼 클릭 -->
@@ -1271,7 +1271,7 @@
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>삭제 1 2 / 삭제 3</b></td><td style="padding:4px 8px;">1-2 선 삭제 / 3번 점 삭제</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>이동 1 우 10</b></td><td style="padding:4px 8px;">1번 점을 우 10mm 이동 (연결된 선도 함께). 번호 생략 시 현재점: <b>이동 상 3</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 2 3 좌 0.6</b></td><td style="padding:4px 8px;">2→3 진행방향 기준 좌/우로 0.6mm 평행복제 (방향 생략 시 좌). 새 선 끝점 번호 부여</td></tr>
-        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>두께 1 5 좌/우/양</b></td><td style="padding:4px 8px;">1~5 연결경로(꺾임·호R 포함)를 <b>소재두께</b>(거리두기 칸)만큼 평행. <b>좌/우</b>=한쪽, <b>양</b>=중심선 기준 좌우 절반씩(양쪽 윤곽)</td></tr>
+        <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>두께 1 5 좌/우</b></td><td style="padding:4px 8px;">1~5 연결경로(꺾임·호R 포함)를 <b>소재두께</b>(거리두기 칸)만큼 <b>좌/우 한쪽</b>으로 평행. <b>또는 명령판 [두께(소재)] 버튼</b>=선 클릭 후 마우스를 좌/우로 옮겨 클릭하면 그쪽에 두께선 생성</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px; width:120px;" colspan="2"><b style="color:#5bc8e8;">━ 한붓그리기 (점번호 0,1,2... 자동) ━</b></td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>각 A D / 각 A 교점 / 각 A 수평/수직 V</b></td><td style="padding:4px 8px;">각도 A°(수평0°, 반시계+) D mm. <b>각 45 교점</b>=그 방향 직진하다 첫 교점까지. <b>각 45 수평 -5</b>=원점 기준 Y=-5 수평선까지. <b>각 45 수직 10</b>=X=10 수직선까지</td></tr>
         <tr style="background:#1f2a30;"><td style="padding:4px 8px;"><b>거리두기 위/아래 D</b></td><td style="padding:4px 8px;">마지막 선을 화면상 위/아래로 D mm 평행복제 (점번호 없이)</td></tr>

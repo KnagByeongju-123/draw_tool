@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.19.2  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
+// ##### draw_tool_core2.js  Rev.19.3  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -423,13 +423,16 @@ function tryPenCommand(cmdStr){
   // Rev.16.31: 교점 번호 - 현재 모든 선의 교차점을 찾아 번호 부여
   // Rev.18.4: 라벨 명령 - 라벨이 없는 모든 점/도형 꼭짓점에 자동 번호 부여
   if (toks[0] === '라벨' || toks[0] === '번호' || toks[0] === 'LABEL'){
+    // Rev.19.3: 일반 모드에서 그린 후 라벨하는 경우 대비 - 기존 라벨점 먼저 동기화
+    if (typeof penSyncFromShapes === 'function') penSyncFromShapes();
     const tolPx = 1/mmPerPixel*0.05;
     const isDup = (x,y) => penPoints.some(p => p && Math.hypot(p.x-x, p.y-y) < tolPx);
     const cands = [];   // {x,y} 후보 좌표 (중복 제거 후)
+    let skipDup = 0, skipNear = 0;   // Rev.19.3: 진단 카운터
     const addCand = (x,y) => {
       if (!isFinite(x) || !isFinite(y)) return;
-      if (isDup(x,y)) return;
-      if (cands.some(c => Math.hypot(c.x-x, c.y-y) < tolPx)) return;
+      if (isDup(x,y)) { skipDup++; return; }
+      if (cands.some(c => Math.hypot(c.x-x, c.y-y) < tolPx)) { skipNear++; return; }
       cands.push({x,y});
     };
     // (i) shapes의 type='point' 도형 중 penIdx 없는 것 (이미 라벨이 있는 점은 제외)
@@ -439,9 +442,17 @@ function tryPenCommand(cmdStr){
       }
     }
     // (ii) 도형 꼭짓점: 선·사각형·원·호 끝점
+    // Rev.19.3: aux(보조선)도 포함. layer 숨김 여부와 무관하게 끝점 후보로
+    let lineCnt = 0;
+    const lineDiag = [];   // Rev.19.3: 각 선 끝점 진단
     for (const s of shapes){
       if (s.type === 'line' && s.p1 && s.p2){
+        lineCnt++;
+        const before = cands.length;
         addCand(s.p1.x, s.p1.y); addCand(s.p2.x, s.p2.y);
+        const added = cands.length - before;
+        const m1 = penPxToMm(s.p1.x, s.p1.y), m2 = penPxToMm(s.p2.x, s.p2.y);
+        lineDiag.push(`L(${m1.x.toFixed(0)},${m1.y.toFixed(0)})-(${m2.x.toFixed(0)},${m2.y.toFixed(0)})+${added}`);
       } else if (s.type === 'rect' && s.p1 && s.p2){
         const x1=Math.min(s.p1.x,s.p2.x), x2=Math.max(s.p1.x,s.p2.x);
         const y1=Math.min(s.p1.y,s.p2.y), y2=Math.max(s.p1.y,s.p2.y);
@@ -460,6 +471,9 @@ function tryPenCommand(cmdStr){
         s.points.forEach(p => addCand(p.x, p.y));
       }
     }
+    // Rev.19.3: 진단 - 후보 수집 결과를 명령 로그에 출력
+    cmdLog(`  🏷 라벨 진단: 도형${shapes.length}개(선${lineCnt}) · 새 후보 ${cands.length}개 · 기존점중복제외 ${skipDup} · 인접중복 ${skipNear}`, 'system');
+    if (lineDiag.length) cmdLog(`  선끝점: ${lineDiag.join(' / ')}`, 'system');
     if (cands.length === 0){
       document.getElementById('statusHint').textContent = '🏷 라벨: 새로 부여할 곳이 없습니다 (모든 점·꼭짓점에 이미 라벨)';
       return true;

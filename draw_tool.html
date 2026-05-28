@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.19</title>
+<title>도면 작도기 Rev.19.20</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -328,7 +328,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.19</h1>
+  <h1>📐 도면 작도기 Rev.19.20</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -759,11 +759,11 @@
   <div class="cmd-input-row" style="display:flex; align-items:center; gap:6px;">
     <span class="cmd-prompt" id="cmdPrompt" style="color:#f39c12; font-weight:bold; font-size:12px;">명령: </span>
     <input type="text" id="cmdInput" class="cmd-input" autocomplete="off" spellcheck="false" style="flex:1; background:#000; color:#fff; border:1px solid #555; border-radius:4px; padding:5px 8px; font-size:13px; font-family:monospace;" placeholder="예: 사각형 40 25  ·  원 20  ·  가로선 100  ·  LINE 0 0 100 0  (Enter 실행)">
-    <!-- Rev.17.5: 명령창에서 .txt 스크립트 한 줄씩 불러와 실행 -->
-    <button id="cmdScriptLoad" title=".txt 스크립트 불러오기 (한 줄씩 자동 채움)" style="background:#2d3a45; color:#cfe; border:1px solid #456; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">📁 .txt</button>
-    <button id="cmdAiPrompt" title="다른 AI에게 도면→.txt 작도 스크립트 생성을 요청할 프롬프트(클립보드 복사)" style="background:#3a2d45; color:#fce; border:1px solid #654; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px;">📋 AI 프롬프트</button>
-    <button id="cmdScriptNext" title="다음 줄 가져오기 (이전 줄 건너뛰기)" style="background:#2a4a6e; color:#fff; border:1px solid #456; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:11px; display:none;">⏭ 다음</button>
-    <span id="cmdScriptProg" style="font-size:11px; color:#9fd; min-width:50px; display:none;">0/0</span>
+    <!-- Rev.19.20: AI 프롬프트 / .txt 불러오기 버튼 삭제 (JS 호환용 숨김 더미만 유지) -->
+    <button id="cmdScriptLoad" style="display:none;">📁</button>
+    <button id="cmdAiPrompt" style="display:none;">📋</button>
+    <button id="cmdScriptNext" style="display:none;">⏭</button>
+    <span id="cmdScriptProg" style="display:none;">0/0</span>
     <span class="cmd-hint" id="cmdHint" style="font-size:10px; color:#888;">↑↓ 이력</span>
   </div>
 </div>
@@ -1217,19 +1217,13 @@
 </style>
 
 
-<!-- Rev.17.6: AI 프롬프트 모달 (도면→.txt 작도 스크립트 생성용 안내문) -->
-<div class="modal-overlay" id="aiPromptModal">
-  <div class="modal" style="max-width:820px; max-height:88vh; overflow:hidden; display:flex; flex-direction:column;">
-    <h3 style="flex:0 0 auto;">📋 AI에게 줄 프롬프트 (도면 → 작도 .txt 생성)</h3>
-    <div style="font-size:12px; color:#bbb; margin-bottom:8px; flex:0 0 auto;">
-      아래 텍스트를 복사해 다른 AI 채팅창에 붙여넣고, 도면 이미지를 함께 올리세요. AI가 작도 명령 .txt를 만들어줍니다. 받은 .txt는 명령창의 <b>📁 .txt</b> 버튼으로 불러와 한 줄씩 실행하면 됩니다.
-    </div>
-    <textarea id="aiPromptText" readonly style="flex:1 1 auto; min-height:380px; background:#000; color:#dfe; border:1px solid #555; border-radius:4px; padding:10px; font-family:monospace; font-size:11px; line-height:1.5; resize:vertical;"></textarea>
-    <div style="display:flex; gap:8px; margin-top:10px; flex:0 0 auto;">
-      <button id="aiPromptCopy" style="flex:1; background:#2a6e2a; color:#fff; border:none; border-radius:4px; padding:10px; cursor:pointer; font-weight:bold;">📋 클립보드로 복사</button>
-      <button id="aiPromptClose" style="flex:0 0 100px; background:#555; color:#fff; border:none; border-radius:4px; padding:10px; cursor:pointer;">닫기</button>
-    </div>
-    <div id="aiPromptStatus" style="margin-top:6px; font-size:11px; color:#9fd; min-height:16px; flex:0 0 auto;"></div>
+<!-- Rev.19.20: AI 프롬프트 모달 삭제됨. JS 호환용 빈 더미만 유지 -->
+<div class="modal-overlay" id="aiPromptModal" style="display:none;">
+  <div class="modal" style="display:none;">
+    <textarea id="aiPromptText" readonly style="display:none;"></textarea>
+    <button id="aiPromptCopy" style="display:none;"></button>
+    <button id="aiPromptClose" style="display:none;"></button>
+    <div id="aiPromptStatus" style="display:none;"></div>
   </div>
 </div>
 

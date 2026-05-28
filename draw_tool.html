@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.37</title>
+<title>도면 작도기 Rev.19.38</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -365,7 +365,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.37</h1>
+  <h1>📐 도면 작도기 Rev.19.38</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -1304,7 +1304,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
   <div style="padding:8px; overflow-y:auto; flex:1; min-height:0;">
     <!-- Rev.19.17: 클릭연결 토글 - 점과 점을 클릭하면 자동 선 연결 -->
     <div style="margin-bottom:6px;">
-      <button id="penConnectToggle" style="width:100%; background:#2d3a45; color:#cfe; border:1px solid #456; border-radius:4px; padding:7px; cursor:pointer; font-size:12px; font-weight:bold;">🔗 클릭연결 OFF — 켜면 점→점 클릭 시 선 자동 연결</button>
+      <button id="penConnectToggle" style="display:none;">🔗 클릭연결 OFF</button> <!-- Rev.19.38: 명령키보드에서 숨김. 연속선 토글로 대체 -->
     </div>
     <!-- 탭 -->
     <div id="cmdPanelTabs" style="display:flex; flex-wrap:wrap; gap:3px; margin-bottom:6px;"></div>

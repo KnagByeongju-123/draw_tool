@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.37 (라이브 단일본)</title>
+<title>도면 작도기 Rev.19.38 (라이브 단일본)</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -365,7 +365,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.37</h1>
+  <h1>📐 도면 작도기 Rev.19.38</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -1304,7 +1304,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
   <div style="padding:8px; overflow-y:auto; flex:1; min-height:0;">
     <!-- Rev.19.17: 클릭연결 토글 - 점과 점을 클릭하면 자동 선 연결 -->
     <div style="margin-bottom:6px;">
-      <button id="penConnectToggle" style="width:100%; background:#2d3a45; color:#cfe; border:1px solid #456; border-radius:4px; padding:7px; cursor:pointer; font-size:12px; font-weight:bold;">🔗 클릭연결 OFF — 켜면 점→점 클릭 시 선 자동 연결</button>
+      <button id="penConnectToggle" style="display:none;">🔗 클릭연결 OFF</button> <!-- Rev.19.38: 명령키보드에서 숨김. 연속선 토글로 대체 -->
     </div>
     <!-- 탭 -->
     <div id="cmdPanelTabs" style="display:flex; flex-wrap:wrap; gap:3px; margin-bottom:6px;"></div>
@@ -13525,6 +13525,7 @@ function handlePenPickClick(p){
   }
   // Rev.16.92: 마우스 클릭은 항상 그 점을 현재 기준점으로 선택만 (자동 선긋기 안 함, 연결은 「연결 1 4」 명령)
   penCur = idx; penPickFirst = idx;
+  if (typeof penTrackRecentPoint === 'function') penTrackRecentPoint(idx); // Rev.19.38
   const m = penPxToMm(penPoints[idx].x, penPoints[idx].y);
   document.getElementById('statusHint').textContent = `▸ ${idx}번 점 선택됨 (${Math.round(m.x*10)/10}, ${Math.round(m.y*10)/10})mm · 여기서 우/좌/상/하·각 명령으로 작도`;
   redrawDraw();
@@ -15068,6 +15069,48 @@ function penChamferAtPoint(pt, cMm){
   return applyChamferToTwoLines(near[0].line, near[1].line, near[0].click, near[1].click, cMm);
 }
 
+// ===== Rev.19.38: 최근 클릭한 두 점 추적 — "연결2" 버튼용 =====
+let penRecentTwoIdx = []; // [최근, 그전]
+function penTrackRecentPoint(idx){
+  if (typeof idx !== 'number' || idx < 0) return;
+  if (penRecentTwoIdx[0] === idx) return; // 같은 점 중복 클릭은 무시
+  penRecentTwoIdx.unshift(idx);
+  if (penRecentTwoIdx.length > 2) penRecentTwoIdx.length = 2;
+}
+// 연결2: 최근 두 점이 있으면 즉시 연결 (없으면 안내)
+function penConnectRecentTwo(){
+  const arr = penRecentTwoIdx.filter(i => penPoints[i]);
+  if (arr.length < 2){
+    document.getElementById('statusHint').textContent =
+      '⚠ 연결2: 먼저 도면에서 점 두 개를 차례로 클릭한 뒤 [연결2]를 누르세요';
+    return false;
+  }
+  const i1 = arr[0], i2 = arr[1];
+  const a = penPoints[i1], b = penPoints[i2];
+  // 같은 위치(거의 0 길이)면 무시
+  if (Math.hypot(a.x-b.x, a.y-b.y) < 1e-6){
+    document.getElementById('statusHint').textContent = '⚠ 연결2: 두 점이 같은 위치입니다';
+    return false;
+  }
+  // 중복선 방지
+  const tol = 1/mmPerPixel * 0.05;
+  const exists = shapes.some(s => s.type==='line' && s.p1 && s.p2 &&
+    ((Math.hypot(s.p1.x-a.x,s.p1.y-a.y)<tol && Math.hypot(s.p2.x-b.x,s.p2.y-b.y)<tol) ||
+     (Math.hypot(s.p1.x-b.x,s.p1.y-b.y)<tol && Math.hypot(s.p2.x-a.x,s.p2.y-a.y)<tol)));
+  if (exists){
+    document.getElementById('statusHint').textContent = `▸ 연결2: P${i1}-P${i2}는 이미 연결됨`;
+    return false;
+  }
+  const sw = parseInt((document.getElementById('strokeWidth')||{}).value) || 1;
+  const stroke = (document.getElementById('strokeColor')||{}).value || '#ffffff';
+  shapes.push({ id:++shapeIdSeq, type:'line', p1:{x:a.x,y:a.y}, p2:{x:b.x,y:b.y},
+                stroke, strokeWidth:sw, layer:(currentLayer||'default') });
+  redoStack = []; pushHistory(); redrawDraw(); updateCount();
+  cmdLog(`／ 연결2: P${i1}-P${i2} 선 생성`, 'user');
+  document.getElementById('statusHint').textContent = `／ 연결2: P${i1}-P${i2} 선 생성됨`;
+  return true;
+}
+
 // ===== Rev.19.26: 텍스트 모드 마우스 드로잉 (일반모드처럼 선긋기 + 점번호 + 치수수정) =====
 //   - 빈 곳 클릭 → 첫 점 시작, 두 번째 클릭 → 선 생성
 //   - 연속선 토글(continuousMode) 적용: ON이면 끝점이 다음 시작점으로 이어짐
@@ -15946,6 +15989,9 @@ function tryDimCommand(cmdStr){
       { l:'선 좌 지름', t:'선 좌 지름 ', ex:'선 좌 지름 110 130 → 지름차/2 좌측 선 (지=지름)' },
       // Rev.18.7: '선 상 거리' 삭제 — '우/좌/상/하' 버튼 + 숫자키로 동일 결과 가능 (중복 제거)
       { l:'연결', t:'연결 ', ex:'연결 1 4 → 1번·4번 직선 연결' },
+      // Rev.19.38: 연결2 — 최근 클릭한 두 점을 즉시 선으로 연결 (점 번호 입력 없이)
+      { l:'⚡ 연결2', action: () => { if (typeof penConnectRecentTwo === 'function') penConnectRecentTwo(); },
+        ex:'⚡ 연결2: 도면에서 점 두 개를 차례로 클릭한 뒤 이 버튼 → 그 두 점 사이에 선 1개 생성' },
       { l:'각 A 거리', t:'각 ', ex:'각 45 100 / 각 45 교점 / 각 45 수평 -5 (Y=-5까지) / 수직 10 (X=10까지)' },
       { l:'호', t:'호 ', ex:'호 2 3 시계 각 45 / 호 2 3 시계 교점' },
     ],

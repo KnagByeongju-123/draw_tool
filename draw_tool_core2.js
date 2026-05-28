@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.19.15  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
+// ##### draw_tool_core2.js  Rev.19.16  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1713,6 +1713,13 @@ function tryDimCommand(cmdStr){
       { l:'교점', t:'교점', ex:'교점 → 모든 교차점 번호부여' },
       { l:'만남', t:'만남', ex:'만남 → 선택한 두 선의 무한직선 교점에 번호 부여 (두께 평행선처럼 번호 없는 선도 OK). 두 선 선택 후 입력 · 또는 "만남 3 5"=3번/5번 점이 속한 선 자동' },
       { l:'🏷 라벨 자동', t:'라벨', ex:'🏷 라벨이 없는 점·도형 꼭짓점에 자동 번호 부여 (이미 라벨 있는 건 제외)' },
+      // Rev.19.16: 정리·외곽선·채움을 텍스트도구에서도 직접 호출
+      { l:'🧹 정리', action: () => { document.getElementById('headerBtnCleanup')?.click(); },
+        ex:'🧹 정리: 점과 짧은 선(옆 정리 칸 mm 이하)을 한 번에 삭제. 선택된 도형 있으면 그 안에서만' },
+      { l:'🖊 외곽선', action: () => { document.getElementById('headerBtnOutline')?.click(); },
+        ex:'🖊 외곽선: 닫힌 영역을 클릭하면 경계를 닫힌 폴리라인(외곽선)으로 추출. 픽셀 계단 자동 정리. Esc=종료' },
+      { l:'🎨 채움', action: () => { document.querySelector('.tool-strip-btn[data-tool=fill]')?.click(); },
+        ex:'🎨 채움: 닫힌 영역 안을 클릭하면 색으로 채움 (영역 확정용). 채움 후 외곽선 추출 가능' },
     ],
   };
   const panel = document.getElementById('cmdPanel');

@@ -4532,6 +4532,15 @@ function applyPosSize(){
     y: parseFloat(document.getElementById('psRotY').value) || 0,
     z: parseFloat(document.getElementById('psRotZ').value) || 0
   };
+  // v7.1.8: 입력 위치 = 부품 중심이 되도록 보정 (개별 오리진=중심 기준)
+  const wantPos = new THREE.Vector3(
+    parseFloat(document.getElementById('psPosX').value) || 0,
+    parseFloat(document.getElementById('psPosZ').value) || 0,
+    parseFloat(document.getElementById('psPosY').value) || 0
+  );
+  target.mesh.updateMatrixWorld(true);
+  const c = new THREE.Box3().setFromObject(target.mesh).getCenter(new THREE.Vector3());
+  target.mesh.position.add(wantPos.clone().sub(c));
 
   closeModal('posSizeModal');
   if(transformState.activePart === target) showTransformHandles(target);
@@ -6424,24 +6433,23 @@ function applyPropSize(axisChar){
   // v7.1.5 Z-up: 사용자 축 → 내부 축 (Y↔Z 스왑). 이하 로직은 내부 축 기준.
   const uAxis = axisChar.toLowerCase();
   axisChar = (uAxis === 'y') ? 'z' : (uAxis === 'z') ? 'y' : 'x';
-  // v7.1.7: 로컬 치수 기준 factor (회전 무관 — 해당 축만 정확히 변경)
-  // 바닥 안착 유지를 위해 변경 전 월드 AABB 최저점 기록
+  // v7.1.8: 부품 자기 중심 기준으로 커지도록 — 변경 전 월드 BB 중심 기록
   part.mesh.updateMatrixWorld(true);
-  const worldMinYBefore = new THREE.Box3().setFromObject(part.mesh).min.y;
+  const centerBefore = new THREE.Box3().setFromObject(part.mesh).getCenter(new THREE.Vector3());
   const localSz = getLocalSize(part.mesh);
   const cur = localSz[axisChar];
   if(cur < 0.001){ toast('현재 크기를 측정할 수 없습니다'); return; }
   const factor = newSize / cur;
   // 부품 mesh.scale에 해당 (로컬)축 factor 곱하기
   part.mesh.scale[axisChar] *= factor;
-  // 바닥 안착 유지: 변경 후 월드 최저점이 원래 위치에 머물도록 Y 보정 (회전 여부 무관)
+  // 중심 고정: 변경 후 중심이 원래 중심과 같도록 위치 보정 (개별 오리진=중심 기준)
   part.mesh.updateMatrixWorld(true);
-  const worldMinYAfter = new THREE.Box3().setFromObject(part.mesh).min.y;
-  part.mesh.position.y += worldMinYBefore - worldMinYAfter;
+  const centerAfter = new THREE.Box3().setFromObject(part.mesh).getCenter(new THREE.Vector3());
+  part.mesh.position.add(centerBefore.clone().sub(centerAfter));
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   refreshPropPanelTransform(part);
-  toast('📐 ' + uAxis.toUpperCase() + ' 크기 = ' + newSize.toFixed(1) + ' mm');
+  toast('📐 ' + uAxis.toUpperCase() + ' 크기 = ' + newSize.toFixed(1) + ' mm (중심 고정)');
   setStat('크기 변경: ' + uAxis.toUpperCase() + '축 ' + newSize.toFixed(1) + ' mm');
 }
 

@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.19.2  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
+// ##### draw_tool_core2.js  Rev.19.14  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -48,7 +48,44 @@ function handlePenPickClick(p){
   const idx = penFindNearestPoint(p);
   if (idx < 0){
     // 빈 곳 클릭은 점을 만들지 않음
+    if (penConnectMode2){
+      penConnectPrev = -1;   // Rev.19.14: 클릭연결 중 빈 곳 클릭 = 연결 끊고 새 시작 대기
+      document.getElementById('statusHint').textContent='🔗 클릭연결: 빈 곳 클릭 — 연결 끊김. 점을 클릭해 새로 시작';
+      return true;
+    }
     document.getElementById('statusHint').textContent='빈 곳: 점 없음 (기준점은 「기준 X Y」 명령 사용)';
+    return true;
+  }
+  // Rev.19.14: 클릭연결 모드 - 직전 클릭 점과 이번 클릭 점을 선으로 연결
+  if (penConnectMode2){
+    if (penConnectPrev >= 0 && penConnectPrev !== idx
+        && penPoints[penConnectPrev] && penPoints[idx]){
+      const a = penPoints[penConnectPrev], b = penPoints[idx];
+      // 같은 선이 이미 있으면 중복 생성 안 함
+      const tol = 1/mmPerPixel*0.05;
+      const exists = shapes.some(s => s.type==='line' && s.p1 && s.p2 &&
+        ((Math.hypot(s.p1.x-a.x,s.p1.y-a.y)<tol && Math.hypot(s.p2.x-b.x,s.p2.y-b.y)<tol) ||
+         (Math.hypot(s.p1.x-b.x,s.p1.y-b.y)<tol && Math.hypot(s.p2.x-a.x,s.p2.y-a.y)<tol)));
+      if (!exists){
+        const sw = parseInt(document.getElementById('strokeWidth').value) || 1;
+        const stroke = document.getElementById('strokeColor').value || '#ffffff';
+        shapes.push({ id:++shapeIdSeq, type:'line', p1:{x:a.x,y:a.y}, p2:{x:b.x,y:b.y},
+          stroke, strokeWidth:sw, layer:(currentLayer||'default') });
+        redoStack=[]; pushHistory();
+        document.getElementById('statusHint').textContent = `🔗 클릭연결: P${penConnectPrev} → P${idx} 선 생성 · 계속 다음 점 클릭`;
+        cmdLog(`  🔗 클릭연결: P${penConnectPrev}–P${idx}`, 'system');
+      } else {
+        document.getElementById('statusHint').textContent = `🔗 P${penConnectPrev}–P${idx}는 이미 연결됨 · 다음 점 클릭`;
+      }
+      // 연결 후 이번 점을 다음 연결의 시작점으로 (연속 연결)
+      penConnectPrev = idx; penCur = idx; penPickFirst = idx;
+      redrawDraw(); updateCount();
+      return true;
+    }
+    // 첫 점 선택 (연결 시작점)
+    penConnectPrev = idx; penCur = idx; penPickFirst = idx;
+    document.getElementById('statusHint').textContent = `🔗 클릭연결 시작점 P${idx} · 다음 점을 클릭하면 선 연결`;
+    redrawDraw();
     return true;
   }
   // Rev.16.92: 마우스 클릭은 항상 그 점을 현재 기준점으로 선택만 (자동 선긋기 안 함, 연결은 「연결 1 4」 명령)
@@ -1756,6 +1793,30 @@ function tryDimCommand(cmdStr){
     panel.style.display = (panel.style.display==='none') ? 'flex' : 'none';
   });
   document.getElementById('cmdPanelClose').addEventListener('click', () => { panel.style.display='none'; });
+
+  // Rev.19.14: 클릭연결 토글
+  const pcToggle = document.getElementById('penConnectToggle');
+  if (pcToggle){
+    pcToggle.addEventListener('click', () => {
+      penConnectMode2 = !penConnectMode2;
+      penConnectPrev = -1;   // 토글 시 시작점 초기화
+      if (penConnectMode2){
+        pcToggle.textContent = '🔗 클릭연결 ON — 점→점 클릭으로 선 연결 (다시 누르면 OFF)';
+        pcToggle.style.background = '#2a6e2a';
+        pcToggle.style.color = '#fff';
+        // 클릭연결은 텍스트 모드에서만 의미. 텍스트모드 아니면 켜줌
+        if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function'){
+          startTextMode();
+        }
+        document.getElementById('statusHint').textContent = '🔗 클릭연결 ON: 점을 클릭한 뒤 다른 점을 클릭하면 선이 연결됩니다';
+      } else {
+        pcToggle.textContent = '🔗 클릭연결 OFF — 켜면 점→점 클릭 시 선 자동 연결';
+        pcToggle.style.background = '#2d3a45';
+        pcToggle.style.color = '#cfe';
+        document.getElementById('statusHint').textContent = '🔗 클릭연결 OFF';
+      }
+    });
+  }
 
   // 드래그 이동
   const head = document.getElementById('cmdPanelHead');

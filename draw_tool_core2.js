@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.19.14  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
+// ##### draw_tool_core2.js  Rev.19.15  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -744,22 +744,41 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
-  // Rev.16.48: 점 상 2.5 - 현재 선택점에서 방향으로 거리만큼 떨어진 곳에 점만 찍기(선 포함 안 함)
+  // Rev.19.15: 점 [방향 거리]... - 현재 선택점에서 방향+거리 쌍을 여러 개 누적 이동한 곳에 점 찍기
+  //   점 상 2.5        → 위 2.5mm
+  //   점 우 3 좌 3      → 우 3 + 좌 3 누적 (= 제자리 X, 실은 우3후 좌3) ※ X/Y 분리 입력
+  //   점 우 3 하 5      → 우 3, 아래 5 (대각 위치)
+  //   ※ '지'(지름) 명령과 충돌 방지: toks[2]가 '지'면 이 블록은 건너뜀(아래 지름 블록에서 처리)
   if (toks[0] === '점' && toks.length >= 3
-      && ['상','하','좌','우','U','D','L','R'].includes(toks[1])){
+      && ['상','하','좌','우','U','D','L','R'].includes(toks[1])
+      && toks[2] !== '지'){
     if (penCur < 0 || !penPoints[penCur]){
       document.getElementById('statusHint').textContent = '⚠ 먼저 점을 선택하세요 (점 5 또는 점 클릭)'; return true;
     }
-    const pdir = toks[1]; const pdist = evalExpr(toks[2]);
-    if (!isFinite(pdist)) return false;
-    const base = penPoints[penCur]; const dpx = pdist/mmPerPixel;
-    let nx=base.x, ny=base.y;
-    if (pdir==='우'||pdir==='R') nx+=dpx;
-    else if (pdir==='좌'||pdir==='L') nx-=dpx;
-    else if (pdir==='상'||pdir==='U') ny-=dpx;
-    else if (pdir==='하'||pdir==='D') ny+=dpx;
-    penAddPoint(nx, ny);
-    penFinish(`• ${penCur}번 점 = 이전점에서 ${pdir} ${pdist}mm (독립 점)`);
+    const base = penPoints[penCur];
+    let nx = base.x, ny = base.y;
+    const applied = [];   // 적용된 (방향, 거리) 기록
+    // toks[1]부터 [방향, 거리] 쌍을 순서대로 처리
+    let i = 1;
+    while (i < toks.length){
+      const dir = toks[i];
+      if (!['상','하','좌','우','U','D','L','R'].includes(dir)){
+        document.getElementById('statusHint').textContent = `⚠ 점: '${dir}'는 방향이 아닙니다 (상/하/좌/우)`; return true;
+      }
+      const dist = evalExpr(toks[i+1]);
+      if (!isFinite(dist)){
+        document.getElementById('statusHint').textContent = `⚠ 점: '${dir}' 다음에 거리(mm)가 필요합니다`; return true;
+      }
+      const dpx = dist / mmPerPixel;
+      if (dir==='우'||dir==='R') nx += dpx;
+      else if (dir==='좌'||dir==='L') nx -= dpx;
+      else if (dir==='상'||dir==='U') ny -= dpx;
+      else if (dir==='하'||dir==='D') ny += dpx;
+      applied.push(`${dir}${dist}`);
+      i += 2;
+    }
+    const newIdx = penAddPoint(nx, ny);
+    penFinish(`• P${newIdx} = 이전점에서 ${applied.join(' ')} 이동 (독립 점)`);
     return true;
   }
 
@@ -1655,7 +1674,7 @@ function tryDimCommand(cmdStr){
     '점': [
       { l:'점 X,Y', t:'점 ', ex:'점 -100,100 → 좌표(mm)에 점' },
       { l:'점 N', t:'점 ', ex:'점 5 → 5번 점 선택' },
-      { l:'점 상', t:'점 상 ', ex:'점 상 2.5 → 현재점서 위 2.5mm 독립점 (상/하/좌/우)' },
+      { l:'점', t:'점 ', ex:'점 우 3 → 현재점서 우 3mm 독립점 · 점 우 3 하 5 → 우3+아래5 대각 · 점 우 3 좌 3 등 방향+거리 여러 쌍 가능 (상/하/좌/우)' },
       { l:'점 좌 지', t:'점 좌 지 ', ex:'점 좌 지 110 130 → 지름차/2 만큼 좌측 독립점' },
     ],
     '선': [

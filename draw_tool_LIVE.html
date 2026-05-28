@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.30 (라이브 단일본)</title>
+<title>도면 작도기 Rev.19.31 (라이브 단일본)</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -365,7 +365,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.30</h1>
+  <h1>📐 도면 작도기 Rev.19.31</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -599,6 +599,13 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
     <button id="headerBtnCmdPanel" class="ts-btn" title="텍스트도구: 명령 버튼+숫자판을 클릭으로 입력·실행" style="padding:3px 8px;"><span class="ico">🎹</span><span class="lbl">텍스트도구</span></button>
     <span style="width:6px;"></span>
     <button id="simpleModeToggle" class="ts-btn" title="단순화 모드: 일반 작도 도구를 숨기고 텍스트 작업만 표시 (다시 누르면 전체 도구 표시)"><span class="ico">✨</span><span class="lbl">단순화</span></button>
+    <span style="width:6px;"></span>
+    <!-- Rev.19.31: 텍스트모드 보조 UI -->
+    <button id="penBtnMove" class="ts-btn" title="클릭이동: 점을 클릭해 선택 → 새 위치 클릭으로 이동 (연결된 선도 함께 이동)"><span class="ico">🖐</span><span class="lbl">클릭이동</span></button>
+    <button id="penBtnCoordLabel" class="ts-btn" title="점 옆에 좌표 표시 ON/OFF"><span class="ico">📍</span><span class="lbl">점좌표</span></button>
+    <button id="penBtnDiameter" class="ts-btn" title="직경 좌표 모드: 원점에 사용자 좌표(Cx,Cy)를 부여하고 표시 = 절대이동/2 + Cx (회전체 단면도용)"><span class="ico">⌀</span><span class="lbl">직경좌표</span></button>
+    <input type="number" id="penOriginCx" value="0" step="0.01" title="직경좌표 원점 X (mm)" style="width:54px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #7d4296; border-radius:4px; font-size:11px;">
+    <input type="number" id="penOriginCy" value="0" step="0.01" title="직경좌표 원점 Y (mm)" style="width:54px; padding:3px 5px; background:#1f1f1f; color:#fff; border:1px solid #7d4296; border-radius:4px; font-size:11px;">
     <!-- Rev.19.17: 「텍스트입력」 버튼 제거 — 「텍스트」와 동일 동작(중복), 입력란은 하단에 상시 표시 -->
     <button id="headerBtnPenInput" class="ts-btn" title="텍스트입력(숨김 호환용)" style="display:none; padding:3px 8px;"><span class="ico">⌨</span><span class="lbl">텍스트입력</span></button>
   </div>
@@ -3664,6 +3671,10 @@ drawCanvas.addEventListener('click', e => {
   }
   // Rev.16.46: 점 마우스 선택 모드
   if (penPickMode) {
+    // Rev.19.31: 클릭이동 모드가 켜져 있으면 최우선 처리
+    if (typeof penMoveMode !== 'undefined' && penMoveMode){
+      if (typeof handlePenMoveClick === 'function' && handlePenMoveClick(e)) return;
+    }
     // Rev.19.26: 텍스트모드 마우스 드로잉(선긋기) 우선 처리
     if (typeof penDrawActive === 'function' && penDrawActive()) {
       if (typeof handlePenDrawClick === 'function' && handlePenDrawClick(e)) return;
@@ -3832,6 +3843,11 @@ window.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Escape') {
+    // Rev.19.31: 클릭이동 모드면 우선 종료
+    if (typeof penMoveMode !== 'undefined' && penMoveMode){
+      penToggleMoveMode();
+      return;
+    }
     // Rev.19.26: 텍스트모드 드로잉 진행 중이면 그 선만 취소 (모드는 유지)
     if (typeof penDrawFirst !== 'undefined' && penDrawFirst){
       cancelPenDraw();
@@ -13469,9 +13485,11 @@ function penAddPoint(px, py){
   penCur = idx;
   // 점 마커
   shapes.push({ id:++shapeIdSeq, type:'point', p1:{x:px,y:py}, stroke:'#16e0b0', strokeWidth:1, penIdx:idx });
-  // 라벨 Pn
+  // 라벨 Pn (+좌표 옵션) — Rev.19.31
   const lbId = ++shapeIdSeq;
-  shapes.push({ id:lbId, type:'text', pos:{x:px + 8/(zoom||1), y:py - 22/(zoom||1)}, text:''+idx, sizePx: 16/(zoom||1), stroke:'#16e0b0', layer:(currentLayer||'default'), penLabel:idx });
+  const _lblTxt = (typeof penShowCoordLabel !== 'undefined' && penShowCoordLabel && typeof penFormatUserCoord === 'function')
+                  ? `P${idx} ${penFormatUserCoord(px, py)}` : ('P'+idx);
+  shapes.push({ id:lbId, type:'text', pos:{x:px + 8/(zoom||1), y:py - 22/(zoom||1)}, text:_lblTxt, sizePx: 16/(zoom||1), stroke:'#16e0b0', layer:(currentLayer||'default'), penLabel:idx });
   penLabelIds[idx] = lbId;
   return idx;
 }
@@ -13490,7 +13508,9 @@ function penAddAnchor(px, py){
   shapes.push({ id:++shapeIdSeq, type:'point', p1:{x:px,y:py}, stroke:'#ffcc00', strokeWidth:1, penIdx:idx, anchor:true });
   // 라벨 Pn
   const lbId = ++shapeIdSeq;
-  shapes.push({ id:lbId, type:'text', pos:{x:px + 8/(zoom||1), y:py - 22/(zoom||1)}, text:''+idx, sizePx: 16/(zoom||1), stroke:'#ffcc00', layer:(currentLayer||'default'), penLabel:idx });
+  const _lblTxt = (typeof penShowCoordLabel !== 'undefined' && penShowCoordLabel && typeof penFormatUserCoord === 'function')
+                  ? `P${idx} ${penFormatUserCoord(px, py)}` : ('P'+idx);
+  shapes.push({ id:lbId, type:'text', pos:{x:px + 8/(zoom||1), y:py - 22/(zoom||1)}, text:_lblTxt, sizePx: 16/(zoom||1), stroke:'#ffcc00', layer:(currentLayer||'default'), penLabel:idx });
   penLabelIds[idx] = lbId;
   return idx;
 }
@@ -15028,7 +15048,11 @@ function penDrawResolvePoint(e){
 function penDrawPreview(p2){
   const Z = zoom || 1;
   preCtx.clearRect(0,0,baseW,baseH);
-  if (!penDrawFirst){ if (typeof drawSnapIndicator==='function') drawSnapIndicator(); return; }
+  if (!penDrawFirst){
+    if (typeof drawSnapIndicator==='function') drawSnapIndicator();
+    if (typeof penDrawMouseCoordLabel === 'function') penDrawMouseCoordLabel(p2);  // Rev.19.31
+    return;
+  }
   const p1 = penDrawFirst;
   let _p2 = { x:p2.x, y:p2.y };
   // Shift 슬로우가 아닐 때만 직각 잠금 (Shift는 슬로우로 사용하므로 직각잠금은 미적용)
@@ -15074,6 +15098,8 @@ function penDrawPreview(p2){
   preCtx.restore();
   // Rev.19.28: 연장/수선/평행/접점 등 정밀스냅 마커·라벨 표기 (일반모드와 동일)
   if (!p2.lock && typeof drawSnapIndicator === 'function') drawSnapIndicator();
+  // Rev.19.31: 마우스 옆 좌표 라벨
+  if (typeof penDrawMouseCoordLabel === 'function') penDrawMouseCoordLabel(_p2);
   // 하단 상태바는 보조 안내만
   document.getElementById('statusHint').textContent =
     `／ 텍스트선: ${lblLen} · ${ang.toFixed(1)}°`
@@ -15148,6 +15174,155 @@ function cancelPenDraw(){
   if (typeof preCtx !== 'undefined') preCtx.clearRect(0,0,baseW,baseH);
 }
 
+// ===== Rev.19.31: 직경좌표 / 마우스좌표 라벨 / 점좌표 라벨 / 클릭이동 =====
+let penOriginUserCoord = null;  // {x,y} - 직경 모드 ON 시 원점에 부여된 사용자 좌표 (mm)
+let penShowCoordLabel = false;  // 점 옆에 좌표 라벨 표시 여부
+let penMoveMode = false;        // 클릭이동 모드
+let penMoveTarget = -1;         // 이동 선택된 점 index
+
+// 현재 좌표를 사용자 좌표로 포맷 (px → mm). 직경 모드면 (이동/2 + Cx, 이동/2 + Cy)
+function penFormatUserCoord(px, py){
+  if (!penOriginPx) return '(?, ?)';
+  const dxMm = (px - penOriginPx.x) * mmPerPixel;
+  const dyMm = -(py - penOriginPx.y) * mmPerPixel;  // Y는 위쪽이 +
+  if (penOriginUserCoord){
+    const Cx = penOriginUserCoord.x || 0;
+    const Cy = penOriginUserCoord.y || 0;
+    return `(${(dxMm/2 + Cx).toFixed(2)}, ${(dyMm/2 + Cy).toFixed(2)})⌀`;
+  }
+  return `(${dxMm.toFixed(2)}, ${dyMm.toFixed(2)})`;
+}
+
+// 점 라벨(번호+좌표) 텍스트 재구성
+function penRefreshLabels(){
+  if (typeof shapes === 'undefined') return;
+  shapes.forEach(s => {
+    if (s.type === 'text' && s.penLabel !== undefined && s.penLabel >= 0){
+      const idx = s.penLabel;
+      const pt = penPoints[idx]; if (!pt) return;
+      const num = 'P' + idx;
+      s.text = penShowCoordLabel ? `${num} ${penFormatUserCoord(pt.x, pt.y)}` : num;
+    }
+  });
+  if (typeof redrawDraw === 'function') redrawDraw();
+}
+
+// 마우스 옆에 따라다니는 좌표 박스 (텍스트모드 mousemove에서 호출)
+function penDrawMouseCoordLabel(p){
+  if (!penOriginPx) return;
+  const Z = zoom || 1;
+  const lbl = penFormatUserCoord(p.x, p.y);
+  preCtx.save();
+  preCtx.font = `${12/Z}px monospace`;
+  const padX = 5/Z, padY = 3/Z, lh = 14/Z;
+  const w = preCtx.measureText(lbl).width;
+  const boxW = w + padX*2, boxH = lh + padY*2;
+  // 마우스 우하단에 (커서와 살짝 간격)
+  let bx = p.x + 14/Z, by = p.y + 14/Z;
+  if (bx + boxW > baseW) bx = p.x - boxW - 14/Z;
+  if (by + boxH > baseH) by = p.y - boxH - 14/Z;
+  if (bx < 0) bx = 4/Z;
+  if (by < 0) by = 4/Z;
+  preCtx.fillStyle = 'rgba(20,28,30,0.82)';
+  preCtx.strokeStyle = '#7fb3d5';
+  preCtx.lineWidth = 1/Z;
+  if (preCtx.roundRect){ preCtx.beginPath(); preCtx.roundRect(bx, by, boxW, boxH, 3/Z); preCtx.fill(); preCtx.stroke(); }
+  else { preCtx.fillRect(bx, by, boxW, boxH); preCtx.strokeRect(bx, by, boxW, boxH); }
+  preCtx.fillStyle = '#7fb3d5';
+  preCtx.textBaseline = 'top';
+  preCtx.fillText(lbl, bx + padX, by + padY);
+  preCtx.restore();
+}
+
+// 클릭이동: 1번째 클릭=점 선택, 2번째 클릭=새 위치로 이동. true 반환 시 가로채기.
+function handlePenMoveClick(e){
+  if (!penMoveMode) return false;
+  const p = getCanvasPoint(e);
+  if (penMoveTarget < 0){
+    const near = (typeof penFindNearestPoint === 'function') ? penFindNearestPoint(p) : -1;
+    if (near < 0){
+      document.getElementById('statusHint').textContent = '🖐 클릭이동: 점 위를 정확히 클릭하세요 (ESC=취소)';
+      return true;
+    }
+    penMoveTarget = near;
+    document.getElementById('statusHint').textContent = `🖐 P${near} 선택됨 → 새 위치 클릭 (ESC=취소)`;
+    redrawDraw();
+    return true;
+  }
+  // 두 번째 클릭: 이동 적용
+  penMovePoint(penMoveTarget, p.x, p.y);
+  penMoveTarget = -1;
+  document.getElementById('statusHint').textContent = '🖐 클릭이동: 다음 이동할 점 클릭 (ESC=종료)';
+  return true;
+}
+
+// 점 idx를 (newX,newY)로 이동 — 연결된 선/마커/라벨 모두 동기화
+function penMovePoint(idx, newX, newY){
+  const oldPt = penPoints[idx]; if (!oldPt) return;
+  const dx = newX - oldPt.x, dy = newY - oldPt.y;
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return;
+  const ox = oldPt.x, oy = oldPt.y;
+  penPoints[idx] = { x: newX, y: newY };
+  shapes.forEach(s => {
+    if (s.type === 'point' && s.penIdx === idx && s.p1){ s.p1.x = newX; s.p1.y = newY; }
+    if (s.type === 'text' && s.penLabel === idx && s.pos){ s.pos.x += dx; s.pos.y += dy; }
+    // 연결된 선 끝점 동기화 (같은 좌표인 line.p1/p2)
+    if (s.type === 'line'){
+      if (s.p1 && Math.abs(s.p1.x - ox) < 1e-6 && Math.abs(s.p1.y - oy) < 1e-6){ s.p1.x = newX; s.p1.y = newY; }
+      if (s.p2 && Math.abs(s.p2.x - ox) < 1e-6 && Math.abs(s.p2.y - oy) < 1e-6){ s.p2.x = newX; s.p2.y = newY; }
+    }
+  });
+  if (penShowCoordLabel) penRefreshLabels();
+  redoStack = []; pushHistory(); redrawDraw(); updateCount();
+  cmdLog(`🖐 P${idx} 이동 → ${penFormatUserCoord(newX, newY)}`, 'user');
+}
+
+// 직경좌표 모드 토글
+function penToggleDiameterMode(){
+  if (penOriginUserCoord){
+    penOriginUserCoord = null;
+    cmdLog('⌀ 직경좌표 모드 OFF (절대좌표)', 'system');
+  } else {
+    const cxEl = document.getElementById('penOriginCx');
+    const cyEl = document.getElementById('penOriginCy');
+    const Cx = parseFloat(cxEl ? cxEl.value : '0') || 0;
+    const Cy = parseFloat(cyEl ? cyEl.value : '0') || 0;
+    penOriginUserCoord = { x: Cx, y: Cy };
+    cmdLog(`⌀ 직경좌표 모드 ON: 원점=(${Cx}, ${Cy}) · 표시 = 절대이동/2 + 원점값`, 'system');
+  }
+  if (penShowCoordLabel) penRefreshLabels();
+  // 토글 버튼 active 표시
+  const b = document.getElementById('penBtnDiameter');
+  if (b) b.classList.toggle('active', !!penOriginUserCoord);
+}
+
+// 점 좌표 라벨 토글
+function penToggleCoordLabel(){
+  penShowCoordLabel = !penShowCoordLabel;
+  penRefreshLabels();
+  const b = document.getElementById('penBtnCoordLabel');
+  if (b) b.classList.toggle('active', penShowCoordLabel);
+  cmdLog(`📍 점 좌표라벨 ${penShowCoordLabel?'ON':'OFF'}`, 'system');
+}
+
+// 클릭이동 모드 토글
+function penToggleMoveMode(){
+  penMoveMode = !penMoveMode;
+  penMoveTarget = -1;
+  const b = document.getElementById('penBtnMove');
+  if (b) b.classList.toggle('active', penMoveMode);
+  if (penMoveMode){
+    // 진행 중 선 그리기 취소
+    if (typeof cancelPenDraw === 'function') cancelPenDraw();
+    document.getElementById('statusHint').textContent = '🖐 클릭이동: 이동할 점 클릭 → 새 위치 클릭 (ESC=종료)';
+    cmdLog('🖐 클릭이동 모드 ON', 'system');
+  } else {
+    document.getElementById('statusHint').textContent = '⌨ 텍스트 모드 (클릭이동 종료)';
+    cmdLog('🖐 클릭이동 모드 OFF', 'system');
+  }
+}
+
+
 
 // Rev.16.46/51/82: 텍스트입력(한붓그리기) 시작 — 함수화하여 여러 버튼에서 호출
 function startTextMode(){
@@ -15182,6 +15357,11 @@ function startTextMode(){
 }
 // Rev.16.82: 일반 모드로 전환 (텍스트모드 해제 + 선택 도구)
 function startNormalMode(){
+  // Rev.19.31: 클릭이동 모드 진행 중이면 먼저 종료
+  if (typeof penMoveMode !== 'undefined' && penMoveMode){
+    penMoveMode = false; penMoveTarget = -1;
+    const b = document.getElementById('penBtnMove'); if (b) b.classList.remove('active');
+  }
   // Rev.19.30: 단순화 모드에서는 일반모드로 빠지지 않고 텍스트모드 유지 (빈 화면 방지)
   if (document.body.classList.contains('simple-mode')){
     if (typeof cancelPenDraw === 'function') cancelPenDraw();
@@ -15218,6 +15398,28 @@ function startNormalMode(){
       document.getElementById('statusHint').textContent = '🧰 전체 도구 표시 — 일반 작도 도구 복귀';
     }
   });
+  // Rev.19.31: 텍스트모드 보조 UI 바인딩
+  const bMove  = document.getElementById('penBtnMove');
+  if (bMove)  bMove.addEventListener('click',  penToggleMoveMode);
+  const bLbl   = document.getElementById('penBtnCoordLabel');
+  if (bLbl)   bLbl.addEventListener('click',   penToggleCoordLabel);
+  const bDia   = document.getElementById('penBtnDiameter');
+  if (bDia)   bDia.addEventListener('click',   penToggleDiameterMode);
+  // 원점값 입력란 변경: 직경모드 ON이면 실시간 반영
+  ['penOriginCx','penOriginCy'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      if (penOriginUserCoord){
+        penOriginUserCoord = {
+          x: parseFloat(document.getElementById('penOriginCx').value)||0,
+          y: parseFloat(document.getElementById('penOriginCy').value)||0
+        };
+        if (penShowCoordLabel) penRefreshLabels();
+      }
+    });
+  });
+
   // 저장된 단순화 설정 복원 (기본: OFF)
   try {
     if (localStorage.getItem('drawSimpleMode') === '1'){

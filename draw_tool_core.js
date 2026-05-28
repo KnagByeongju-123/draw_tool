@@ -2034,6 +2034,10 @@ drawCanvas.addEventListener('click', e => {
   }
   // Rev.16.46: 점 마우스 선택 모드
   if (penPickMode) {
+    // Rev.19.31: 클릭이동 모드가 켜져 있으면 최우선 처리
+    if (typeof penMoveMode !== 'undefined' && penMoveMode){
+      if (typeof handlePenMoveClick === 'function' && handlePenMoveClick(e)) return;
+    }
     // Rev.19.26: 텍스트모드 마우스 드로잉(선긋기) 우선 처리
     if (typeof penDrawActive === 'function' && penDrawActive()) {
       if (typeof handlePenDrawClick === 'function' && handlePenDrawClick(e)) return;
@@ -2202,6 +2206,11 @@ window.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Escape') {
+    // Rev.19.31: 클릭이동 모드면 우선 종료
+    if (typeof penMoveMode !== 'undefined' && penMoveMode){
+      penToggleMoveMode();
+      return;
+    }
     // Rev.19.26: 텍스트모드 드로잉 진행 중이면 그 선만 취소 (모드는 유지)
     if (typeof penDrawFirst !== 'undefined' && penDrawFirst){
       cancelPenDraw();

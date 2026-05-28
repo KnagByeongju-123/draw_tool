@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.19.1  최신본 — 두께(소재)버튼삭제[거리두기와동일]·명령키보드방향순환·만남·두께명령좌/우만·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
+// ##### draw_tool_core2.js  Rev.19.2  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -63,6 +63,7 @@ function penAddPoint(px, py){
   // Rev.16.34: 이미 같은 위치에 번호 점이 있으면 그 번호를 현재점으로 (중복 생성 방지)
   const tolPx = 1/mmPerPixel * 0.05;
   for (let i=0;i<penPoints.length;i++){
+    if (!penPoints[i]) continue;   // Rev.19.2: 삭제된 점(undefined) 건너뛰기 — 크래시 방지
     if (Math.hypot(penPoints[i].x-px, penPoints[i].y-py) < tolPx){ penCur = i; return i; }
   }
   const idx = penPoints.length;
@@ -81,6 +82,7 @@ function penAddPoint(px, py){
 function penAddAnchor(px, py){
   const tolPx = 1/mmPerPixel * 0.05;
   for (let i=0;i<penPoints.length;i++){
+    if (!penPoints[i]) continue;   // Rev.19.2: 삭제된 점 건너뛰기
     if (Math.hypot(penPoints[i].x-px, penPoints[i].y-py) < tolPx){ penCur = i; return i; }
   }
   const idx = penPoints.length;
@@ -143,7 +145,7 @@ function penAddLine(x1,y1,x2,y2,noMerge){
 // Rev.16.34: 주어진 선과 기존 다른 선들의 교차점을 찾아 자동으로 번호 점 추가
 function penAutoIntersect(newLine){
   const tolPx = 1/mmPerPixel * 0.05;  // 0.05mm 이내 중복 무시
-  const dup = (x,y) => penPoints.some(p => Math.hypot(p.x-x, p.y-y) < tolPx);
+  const dup = (x,y) => penPoints.some(p => p && Math.hypot(p.x-x, p.y-y) < tolPx);
   for (const s of shapes){
     if (s === newLine || s.type !== 'line' || !s.p1 || !s.p2) continue;
     const ix = lineSegmentIntersection(newLine.p1, newLine.p2, s.p1, s.p2);
@@ -422,7 +424,7 @@ function tryPenCommand(cmdStr){
   // Rev.18.4: 라벨 명령 - 라벨이 없는 모든 점/도형 꼭짓점에 자동 번호 부여
   if (toks[0] === '라벨' || toks[0] === '번호' || toks[0] === 'LABEL'){
     const tolPx = 1/mmPerPixel*0.05;
-    const isDup = (x,y) => penPoints.some(p => Math.hypot(p.x-x, p.y-y) < tolPx);
+    const isDup = (x,y) => penPoints.some(p => p && Math.hypot(p.x-x, p.y-y) < tolPx);
     const cands = [];   // {x,y} 후보 좌표 (중복 제거 후)
     const addCand = (x,y) => {
       if (!isFinite(x) || !isFinite(y)) return;
@@ -511,7 +513,7 @@ function tryPenCommand(cmdStr){
     }
     // 중복 체크
     const tolPx = 1/mmPerPixel * 0.05;
-    const dup = penPoints.findIndex(p => Math.hypot(p.x-ix.x, p.y-ix.y) < tolPx);
+    const dup = penPoints.findIndex(p => p && Math.hypot(p.x-ix.x, p.y-ix.y) < tolPx);
     if (dup >= 0){
       penCur = dup;
       document.getElementById('statusHint').textContent = `만남: 이미 ${dup}번 점이 그 위치에 있음 → 선택됨`;
@@ -539,7 +541,7 @@ function tryPenCommand(cmdStr){
     }
     const found = [];
     const isDup = (x,y) => found.some(p => Math.hypot(p.x-x, p.y-y) < 1/mmPerPixel*0.05)
-                        || penPoints.some(p => Math.hypot(p.x-x, p.y-y) < 1/mmPerPixel*0.05);
+                        || penPoints.some(p => p && Math.hypot(p.x-x, p.y-y) < 1/mmPerPixel*0.05);
     // 선분이 원 호 범위 안인지 (arc면 각도 체크, circle이면 항상 true)
     const onArc = (c, x, y) => {
       if (!c.arc) return true;

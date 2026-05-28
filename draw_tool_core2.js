@@ -72,15 +72,23 @@ function handlePenPickClick(p){
         shapes.push({ id:++shapeIdSeq, type:'line', p1:{x:a.x,y:a.y}, p2:{x:b.x,y:b.y},
           stroke, strokeWidth:sw, layer:(currentLayer||'default') });
         redoStack=[]; pushHistory();
-        document.getElementById('statusHint').textContent = `🔗 클릭연결: P${penConnectPrev} → P${idx} 선 생성 · 계속 다음 점 클릭`;
         cmdLog(`  🔗 클릭연결: P${penConnectPrev}–P${idx}`, 'system');
+        // Rev.19.36: 선 1개 생성 후 자동 OFF (1회용)
+        const _msg = `🔗 클릭연결: P${penConnectPrev} → P${idx} 선 1개 생성 후 자동 OFF`;
+        penCur = idx; penPickFirst = idx;
+        if (typeof window.penConnectSetOff === 'function') window.penConnectSetOff(_msg);
+        else { penConnectMode2 = false; penConnectPrev = -1; }
+        redrawDraw(); updateCount();
+        return true;
       } else {
-        document.getElementById('statusHint').textContent = `🔗 P${penConnectPrev}–P${idx}는 이미 연결됨 · 다음 점 클릭`;
+        // 이미 같은 선 존재 — 자동 OFF (1회 시도가 끝났다고 본다)
+        const _msg = `🔗 P${penConnectPrev}–P${idx}는 이미 연결됨 · 자동 OFF`;
+        penCur = idx; penPickFirst = idx;
+        if (typeof window.penConnectSetOff === 'function') window.penConnectSetOff(_msg);
+        else { penConnectMode2 = false; penConnectPrev = -1; }
+        redrawDraw(); updateCount();
+        return true;
       }
-      // 연결 후 이번 점을 다음 연결의 시작점으로 (연속 연결)
-      penConnectPrev = idx; penCur = idx; penPickFirst = idx;
-      redrawDraw(); updateCount();
-      return true;
     }
     // 첫 점 선택 (연결 시작점)
     penConnectPrev = idx; penCur = idx; penPickFirst = idx;
@@ -2412,27 +2420,36 @@ function tryDimCommand(cmdStr){
   });
   document.getElementById('cmdPanelClose').addEventListener('click', () => { panel.style.display='none'; });
 
-  // Rev.19.14: 클릭연결 토글
+  // Rev.19.14: 클릭연결 토글 / Rev.19.36: 1회용 — 선 1개 생성 후 자동 OFF
   const pcToggle = document.getElementById('penConnectToggle');
+  // OFF 처리 (재사용용) — 자동 OFF에서도 호출
+  window.penConnectSetOff = function(reason){
+    penConnectMode2 = false;
+    penConnectPrev = -1;
+    if (pcToggle){
+      pcToggle.textContent = '🔗 클릭연결 OFF — 켜면 점→점 클릭 시 선 자동 연결 (1회용)';
+      pcToggle.style.background = '#2d3a45';
+      pcToggle.style.color = '#cfe';
+    }
+    const sh = document.getElementById('statusHint');
+    if (sh) sh.textContent = reason || '🔗 클릭연결 OFF';
+  };
   if (pcToggle){
     pcToggle.addEventListener('click', () => {
-      penConnectMode2 = !penConnectMode2;
-      penConnectPrev = -1;   // 토글 시 시작점 초기화
       if (penConnectMode2){
-        pcToggle.textContent = '🔗 클릭연결 ON — 점→점 클릭으로 선 연결 (다시 누르면 OFF)';
-        pcToggle.style.background = '#2a6e2a';
-        pcToggle.style.color = '#fff';
-        // 클릭연결은 텍스트 모드에서만 의미. 텍스트모드 아니면 켜줌
-        if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function'){
-          startTextMode();
-        }
-        document.getElementById('statusHint').textContent = '🔗 클릭연결 ON: 점을 클릭한 뒤 다른 점을 클릭하면 선이 연결됩니다';
-      } else {
-        pcToggle.textContent = '🔗 클릭연결 OFF — 켜면 점→점 클릭 시 선 자동 연결';
-        pcToggle.style.background = '#2d3a45';
-        pcToggle.style.color = '#cfe';
-        document.getElementById('statusHint').textContent = '🔗 클릭연결 OFF';
+        // ON 상태에서 누르면 OFF
+        window.penConnectSetOff('🔗 클릭연결 OFF (수동)');
+        return;
       }
+      penConnectMode2 = true;
+      penConnectPrev = -1;
+      pcToggle.textContent = '🔗 클릭연결 ON (1회용) — 점→점 클릭 1회 연결 후 자동 OFF';
+      pcToggle.style.background = '#2a6e2a';
+      pcToggle.style.color = '#fff';
+      if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function'){
+        startTextMode();
+      }
+      document.getElementById('statusHint').textContent = '🔗 클릭연결 ON (1회용): 점→점 클릭으로 선 1개 연결 후 자동 OFF';
     });
   }
 

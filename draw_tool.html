@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.9</title>
+<title>도면 작도기 Rev.19.10</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -82,7 +82,7 @@
   
   .toolbar { background: #3a3a3a; padding: 6px 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid #555; }
   /* Rev.11.51: 상단 도구 버튼 바 (그리기 / 편집 구분) */
-  /* Rev.19.9: 도구 모음을 팝업 패널로 (명령 키보드처럼 떠 있고 드래그 이동·닫기 가능) */
+  /* Rev.19.10: 도구 모음을 팝업 패널로 (명령 키보드처럼 떠 있고 드래그 이동·닫기 가능) */
   .toolstrip {
     position: fixed; top: 96px; left: 50%; transform: translateX(-50%);
     z-index: 2600; background:#262626; border:1px solid #555; border-radius:8px;
@@ -93,14 +93,15 @@
   .toolstrip.collapsed { display:none; }
   /* 팝업 헤더(드래그 핸들 + 닫기) */
   #toolStripPopHead {
-    position: sticky; top: -8px; margin:-8px -10px 4px; padding:6px 10px;
+    position: sticky; top: -8px; margin:-8px -10px 4px; padding:8px 12px;
     background:#2a2a2a; border-bottom:1px solid #444; border-radius:8px 8px 0 0;
     display:flex; justify-content:space-between; align-items:center;
-    cursor:move; user-select:none; width:calc(100% + 20px); box-sizing:border-box;
+    cursor:move; user-select:none;
+    flex:0 0 100%; width:calc(100% + 20px); box-sizing:border-box; z-index:5;
   }
-  #toolStripPopHead .tt { font-size:12px; color:#f39c12; font-weight:bold; }
-  #toolStripPopClose { cursor:pointer; color:#999; font-size:16px; line-height:1; padding:0 4px; }
-  #toolStripPopClose:hover { color:#fff; }
+  #toolStripPopHead .tt { font-size:13px; color:#f39c12; font-weight:bold; pointer-events:none; }
+  #toolStripPopClose { cursor:pointer; color:#bbb; font-size:18px; line-height:1; padding:2px 10px; border-radius:4px; }
+  #toolStripPopClose:hover { color:#fff; background:#933; }
   .ts-group { display:flex; align-items:center; gap:3px; padding:3px 8px; border-radius:6px; flex-wrap:wrap; }
   .ts-group.draw { background:rgba(74,111,165,0.12); border:1px solid rgba(74,111,165,0.4); }
   .ts-group.edit { background:rgba(230,126,34,0.12); border:1px solid rgba(230,126,34,0.4); }
@@ -326,7 +327,7 @@
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.9</h1>
+  <h1>📐 도면 작도기 Rev.19.10</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -390,7 +391,7 @@
     </div>
   </div>
   
-  <!-- 2D 메뉴 (Rev.19.9: 4개 섹션으로 정리 - 그리기 / 편집·정리 / 치수 / 마우스보조) -->
+  <!-- 2D 메뉴 (Rev.19.10: 4개 섹션으로 정리 - 그리기 / 편집·정리 / 치수 / 마우스보조) -->
   <div class="menu" data-menu="2d">
     <div class="menu-title">📐 2D <span class="arrow">▼</span></div>
     <div class="menu-dropdown">
@@ -561,7 +562,7 @@
     <span style="width:6px;"></span>
     <button id="headerBtnTextMode" class="ts-btn" title="텍스트 모드: 명령어로 한붓그리기 (입력란은 하단)" style="padding:3px 8px;"><span class="ico">⌨</span><span class="lbl">텍스트</span></button>
     <button id="headerBtnCmdPanel" class="ts-btn" title="텍스트도구: 명령 버튼+숫자판을 클릭으로 입력·실행" style="padding:3px 8px;"><span class="ico">🎹</span><span class="lbl">텍스트도구</span></button>
-    <!-- Rev.19.9: 「텍스트입력」 버튼 제거 — 「텍스트」와 동일 동작(중복), 입력란은 하단에 상시 표시 -->
+    <!-- Rev.19.10: 「텍스트입력」 버튼 제거 — 「텍스트」와 동일 동작(중복), 입력란은 하단에 상시 표시 -->
     <button id="headerBtnPenInput" class="ts-btn" title="텍스트입력(숨김 호환용)" style="display:none; padding:3px 8px;"><span class="ico">⌨</span><span class="lbl">텍스트입력</span></button>
   </div>
 
@@ -587,9 +588,9 @@
   </div>
 </div>
 
-<!-- Rev.19.9: 도구 모음 토글 버튼은 상단 헤더(일반/텍스트 사이)로 이동됨 -->
+<!-- Rev.19.10: 도구 모음 토글 버튼은 상단 헤더(일반/텍스트 사이)로 이동됨 -->
 
-<!-- Rev.11.51: 상단 도구 버튼 바 (그리기 / 편집 구분) — Rev.19.9: 팝업 패널화 -->
+<!-- Rev.11.51: 상단 도구 버튼 바 (그리기 / 편집 구분) — Rev.19.10: 팝업 패널화 -->
 <div class="toolstrip collapsed" id="toolStrip">
   <div id="toolStripPopHead">
     <span class="tt">🧰 도구 모음</span>

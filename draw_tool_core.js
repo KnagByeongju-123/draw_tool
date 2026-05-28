@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.19.7  최신본 (도구모음팝업화·마우스호도구단축키제거[호는텍스트명령전용]·선택tol상향·거리두기연속·배경맞춤·점앵커십자) #####
+// ##### draw_tool_core.js  Rev.19.10  최신본 (도구모음팝업화·마우스호도구단축키제거[호는텍스트명령전용]·선택tol상향·거리두기연속·배경맞춤·점앵커십자) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -3344,34 +3344,37 @@ function applyUnitScale(newPxPerMm){
 document.getElementById('unitScaleSel').addEventListener('change', e => {
   applyUnitScale(e.target.value);
 });
-// Rev.16.40 → Rev.19.6: 도구 모음 팝업 토글 + 닫기 + 드래그 이동
-(function(){
+// Rev.16.40 → Rev.19.10: 도구 모음 팝업 토글 + 닫기 + 드래그 (명령판과 동일 패턴)
+function initToolStripPopup(){
   const tg = document.getElementById('toolStripToggle');
   const ts = document.getElementById('toolStrip');
   const ic = document.getElementById('toolStripToggleIcon');
+  const head = document.getElementById('toolStripPopHead');
+  const closeBtn = document.getElementById('toolStripPopClose');
   if (!tg || !ts) return;
+  if (tg.dataset.bound === '1') return;   // 중복 바인딩 방지
+  tg.dataset.bound = '1';
+
+  // 토글 (열기/닫기)
   tg.addEventListener('click', () => {
     const collapsed = ts.classList.toggle('collapsed');
-    if (ic) ic.textContent = '🧰';
-    tg.classList.toggle('active', !collapsed);   // Rev.19.7: 열림 시 버튼 강조
+    tg.classList.toggle('active', !collapsed);
   });
   // 닫기 버튼
-  const closeBtn = document.getElementById('toolStripPopClose');
   if (closeBtn) closeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     ts.classList.add('collapsed');
     tg.classList.remove('active');
   });
-  // 헤더 드래그 이동
-  const head = document.getElementById('toolStripPopHead');
+  // 헤더 드래그 이동 (명령판과 동일: right:auto + left/top px)
   if (head){
     let dragging=false, ox=0, oy=0;
     head.addEventListener('mousedown', (e) => {
-      if (e.target.id === 'toolStripPopClose') return;
+      if (e.target && e.target.id === 'toolStripPopClose') return;
       dragging = true;
       const r = ts.getBoundingClientRect();
-      // transform 해제하고 절대좌표로 고정
       ts.style.transform = 'none';
+      ts.style.right = 'auto';
       ts.style.left = r.left + 'px';
       ts.style.top = r.top + 'px';
       ox = e.clientX - r.left;
@@ -3385,7 +3388,13 @@ document.getElementById('unitScaleSel').addEventListener('change', e => {
     });
     window.addEventListener('mouseup', () => { dragging = false; });
   }
-})();
+}
+// DOM 준비 시점 보장 (스크립트가 먼저 실행돼도 안전)
+if (document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', initToolStripPopup);
+} else {
+  initToolStripPopup();
+}
 // 현재 mmPerPixel에 맞춰 드롭다운 표시 동기화 (로드/파일열기 후 호출)
 function syncUnitScaleSel(){
   const sel = document.getElementById('unitScaleSel');

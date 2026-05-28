@@ -1,4 +1,4 @@
-// ##### draw_tool_core.js  Rev.19.2  최신본 (선택tol을텍스트모드수준상향+미선택시거리진단표시·거리두기연속·배경맞춤·점앵커십자·점선보조선) #####
+// ##### draw_tool_core.js  Rev.19.7  최신본 (도구모음팝업화·마우스호도구단축키제거[호는텍스트명령전용]·선택tol상향·거리두기연속·배경맞춤·점앵커십자) #####
 // ===========================================================
 //  draw_tool_core.js  —  [1/2]
 //  전역상태 · 캔버스/렌더링 · 마우스/키보드 이벤트 · 기본 도구
@@ -3344,7 +3344,7 @@ function applyUnitScale(newPxPerMm){
 document.getElementById('unitScaleSel').addEventListener('change', e => {
   applyUnitScale(e.target.value);
 });
-// Rev.16.40: 도구바 접기/펼치기 토글
+// Rev.16.40 → Rev.19.6: 도구 모음 팝업 토글 + 닫기 + 드래그 이동
 (function(){
   const tg = document.getElementById('toolStripToggle');
   const ts = document.getElementById('toolStrip');
@@ -3352,10 +3352,39 @@ document.getElementById('unitScaleSel').addEventListener('change', e => {
   if (!tg || !ts) return;
   tg.addEventListener('click', () => {
     const collapsed = ts.classList.toggle('collapsed');
-    if (ic) ic.textContent = collapsed ? '▶' : '▼';
-    // 캔버스 크기 재계산 (영역 변동 반영)
-    if (typeof setCanvasSize === 'function') setCanvasSize(baseW, baseH);
+    if (ic) ic.textContent = '🧰';
+    tg.classList.toggle('active', !collapsed);   // Rev.19.7: 열림 시 버튼 강조
   });
+  // 닫기 버튼
+  const closeBtn = document.getElementById('toolStripPopClose');
+  if (closeBtn) closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    ts.classList.add('collapsed');
+    tg.classList.remove('active');
+  });
+  // 헤더 드래그 이동
+  const head = document.getElementById('toolStripPopHead');
+  if (head){
+    let dragging=false, ox=0, oy=0;
+    head.addEventListener('mousedown', (e) => {
+      if (e.target.id === 'toolStripPopClose') return;
+      dragging = true;
+      const r = ts.getBoundingClientRect();
+      // transform 해제하고 절대좌표로 고정
+      ts.style.transform = 'none';
+      ts.style.left = r.left + 'px';
+      ts.style.top = r.top + 'px';
+      ox = e.clientX - r.left;
+      oy = e.clientY - r.top;
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      ts.style.left = (e.clientX - ox) + 'px';
+      ts.style.top = (e.clientY - oy) + 'px';
+    });
+    window.addEventListener('mouseup', () => { dragging = false; });
+  }
 })();
 // 현재 mmPerPixel에 맞춰 드롭다운 표시 동기화 (로드/파일열기 후 호출)
 function syncUnitScaleSel(){
@@ -11030,8 +11059,9 @@ const CMD_DICT = {
   'RECTANGLE': { tool: 'rect',   name: 'RECTANG (사각형)' },
   'C':         { tool: 'circle', name: 'CIRCLE (원)' },
   'CIRCLE':    { tool: 'circle', name: 'CIRCLE (원)' },
-  'A':         { tool: 'arc',    name: 'ARC (호)' },
-  'ARC':       { tool: 'arc',    name: 'ARC (호)' },
+  // Rev.19.5: 마우스 호(arc) 도구 단축키 제거 - 호는 텍스트 명령 「호 N R 시계 각 45」로만 사용
+  // 'A':         { tool: 'arc',    name: 'ARC (호)' },
+  // 'ARC':       { tool: 'arc',    name: 'ARC (호)' },
   
   // 선택/측정/채움
   'S':         { tool: 'select', name: 'SELECT (선택)' },

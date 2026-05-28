@@ -637,10 +637,24 @@ function handleTextClick(p) {
 
 function drawText(ctx, s, selected) {
   ctx.save();
-  ctx.fillStyle = selected ? '#3498db' : (s.stroke || '#000');
-  ctx.font = `${s.sizePx || 14}px sans-serif`;
+  const _fontSize = s.sizePx || 14;
+  ctx.font = `${_fontSize}px sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
+  // Rev.19.35: 펜 라벨(penLabel)은 가독성 위해 반투명 배경 박스 먼저 그림
+  if (s.penLabel != null && s.text){
+    const _Z = (typeof zoom !== 'undefined' ? zoom : 1) || 1;
+    const _m = ctx.measureText(s.text);
+    const _pad = 3 / _Z;
+    ctx.fillStyle = 'rgba(15,22,24,0.72)';
+    ctx.strokeStyle = 'rgba(22,224,176,0.35)';
+    ctx.lineWidth = 1 / _Z;
+    const _bx = s.pos.x - _pad, _by = s.pos.y - _pad;
+    const _bw = _m.width + _pad*2, _bh = _fontSize + _pad*2;
+    if (ctx.roundRect){ ctx.beginPath(); ctx.roundRect(_bx, _by, _bw, _bh, 3/_Z); ctx.fill(); ctx.stroke(); }
+    else { ctx.fillRect(_bx, _by, _bw, _bh); ctx.strokeRect(_bx, _by, _bw, _bh); }
+  }
+  ctx.fillStyle = selected ? '#3498db' : (s.stroke || '#000');
   ctx.fillText(s.text || '', s.pos.x, s.pos.y);
   if (selected) {
     const m = ctx.measureText(s.text || '');

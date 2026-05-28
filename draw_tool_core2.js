@@ -108,11 +108,12 @@ function penAddPoint(px, py){
   penCur = idx;
   // 점 마커
   shapes.push({ id:++shapeIdSeq, type:'point', p1:{x:px,y:py}, stroke:'#16e0b0', strokeWidth:1, penIdx:idx });
-  // 라벨 Pn (+좌표 옵션) — Rev.19.31
+  // 라벨 Pn (+좌표 옵션) — Rev.19.31 / Rev.19.35: 4방향 분산
   const lbId = ++shapeIdSeq;
   const _lblTxt = (typeof penShowCoordLabel !== 'undefined' && penShowCoordLabel && typeof penFormatUserCoord === 'function')
                   ? `P${idx} ${penFormatUserCoord(px, py)}` : ('P'+idx);
-  shapes.push({ id:lbId, type:'text', pos:{x:px + 8/(zoom||1), y:py - 22/(zoom||1)}, text:_lblTxt, sizePx: 16/(zoom||1), stroke:'#16e0b0', layer:(currentLayer||'default'), penLabel:idx });
+  const _off = (typeof penLabelOffset === 'function') ? penLabelOffset(idx, _lblTxt.length * 9 / (zoom||1)) : {x:8/(zoom||1), y:-22/(zoom||1)};
+  shapes.push({ id:lbId, type:'text', pos:{x:px + _off.x, y:py + _off.y}, text:_lblTxt, sizePx: 16/(zoom||1), stroke:'#16e0b0', layer:(currentLayer||'default'), penLabel:idx });
   penLabelIds[idx] = lbId;
   return idx;
 }
@@ -133,7 +134,8 @@ function penAddAnchor(px, py){
   const lbId = ++shapeIdSeq;
   const _lblTxt = (typeof penShowCoordLabel !== 'undefined' && penShowCoordLabel && typeof penFormatUserCoord === 'function')
                   ? `P${idx} ${penFormatUserCoord(px, py)}` : ('P'+idx);
-  shapes.push({ id:lbId, type:'text', pos:{x:px + 8/(zoom||1), y:py - 22/(zoom||1)}, text:_lblTxt, sizePx: 16/(zoom||1), stroke:'#ffcc00', layer:(currentLayer||'default'), penLabel:idx });
+  const _off = (typeof penLabelOffset === 'function') ? penLabelOffset(idx, _lblTxt.length * 9 / (zoom||1)) : {x:8/(zoom||1), y:-22/(zoom||1)};
+  shapes.push({ id:lbId, type:'text', pos:{x:px + _off.x, y:py + _off.y}, text:_lblTxt, sizePx: 16/(zoom||1), stroke:'#ffcc00', layer:(currentLayer||'default'), penLabel:idx });
   penLabelIds[idx] = lbId;
   return idx;
 }
@@ -1797,6 +1799,20 @@ function cancelPenDraw(){
   if (typeof preCtx !== 'undefined') preCtx.clearRect(0,0,baseW,baseH);
 }
 
+// Rev.19.35: 점 idx에 따라 라벨 위치를 4방향 분산 (겹침 완화)
+//   0,4,8,..  → 우상  / 1,5,9,..  → 우하  / 2,6,10,.. → 좌상  / 3,7,11,.. → 좌하
+function penLabelOffset(idx, textW){
+  const Z = (typeof zoom !== 'undefined' ? zoom : 1) || 1;
+  const gap = 10/Z, lh = 16/Z;
+  const w = (textW || 80);
+  switch (idx % 4){
+    case 0: return {x: gap,           y: -lh - gap};   // 우상
+    case 1: return {x: gap,           y: gap};          // 우하
+    case 2: return {x: -gap - w,      y: -lh - gap};   // 좌상
+    case 3: return {x: -gap - w,      y: gap};          // 좌하
+  }
+}
+
 // Rev.19.32: 사용자좌표 → 픽셀 좌표 역변환 (더블클릭 좌표수정에서 사용)
 function penUserCoordToPx(ux, uy){
   if (!penOriginPx) return null;
@@ -1906,6 +1922,11 @@ function penRefreshLabels(){
       const pt = penPoints[idx]; if (!pt) return;
       const num = 'P' + idx;
       s.text = penShowCoordLabel ? `${num} ${penFormatUserCoord(pt.x, pt.y)}` : num;
+      // Rev.19.35: 위치도 재계산 (텍스트 길이 변동 반영)
+      if (typeof penLabelOffset === 'function'){
+        const off = penLabelOffset(idx, s.text.length * 9 / (zoom||1));
+        s.pos = { x: pt.x + off.x, y: pt.y + off.y };
+      }
     }
   });
   if (typeof redrawDraw === 'function') redrawDraw();
@@ -1969,7 +1990,15 @@ function penMovePoint(idx, newX, newY){
   penPoints[idx] = { x: newX, y: newY };
   shapes.forEach(s => {
     if (s.type === 'point' && s.penIdx === idx && s.p1){ s.p1.x = newX; s.p1.y = newY; }
-    if (s.type === 'text' && s.penLabel === idx && s.pos){ s.pos.x += dx; s.pos.y += dy; }
+    if (s.type === 'text' && s.penLabel === idx && s.pos){
+      // Rev.19.35: 평행이동 대신 4방향 분산 위치로 재배치
+      if (typeof penLabelOffset === 'function'){
+        const _off = penLabelOffset(idx, (s.text||'').length * 9 / (zoom||1));
+        s.pos.x = newX + _off.x; s.pos.y = newY + _off.y;
+      } else {
+        s.pos.x += dx; s.pos.y += dy;
+      }
+    }
     // 연결된 선 끝점 동기화 (같은 좌표인 line.p1/p2)
     if (s.type === 'line'){
       if (s.p1 && Math.abs(s.p1.x - ox) < 1e-6 && Math.abs(s.p1.y - oy) < 1e-6){ s.p1.x = newX; s.p1.y = newY; }

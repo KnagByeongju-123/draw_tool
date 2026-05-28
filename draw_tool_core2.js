@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.18.6  최신본 — 명령어 (만남[선택두선의무한교점]·두께[penPoints없는번호도복구+진단로그]·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동) #####
+// ##### draw_tool_core2.js  Rev.18.7  최신본 — 명령키보드[방향순환버튼·선상거리삭제]·만남·두께복구·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1622,10 +1622,11 @@ function tryDimCommand(cmdStr){
       { l:'점 좌 지', t:'점 좌 지 ', ex:'점 좌 지 110 130 → 지름차/2 만큼 좌측 독립점' },
     ],
     '선': [
-      { l:'우/좌/상/하', t:'우 ', ex:'우 50 → 오른쪽 50mm 선 (우/좌/상/하)' },
+      // Rev.18.7: 클릭할 때마다 방향 순환 (우 → 좌 → 상 → 하 → 우). action 콜백 사용
+      { l:'우/좌/상/하', cycle:['우','좌','상','하'], ex:'우 50 → 그 방향 50mm 선. 버튼 클릭마다 방향 순환' },
       { l:'선 방향 교점', t:'선 좌 교점', ex:'선 좌 교점 → 좌로 첫 교점까지 선' },
       { l:'선 좌 지', t:'선 좌 지 ', ex:'선 좌 지 110 130 → 지름차/2 좌측 선' },
-      { l:'선 상 거리', t:'선 상 ', ex:'선 상 3.7 → 위 3.7mm 선' },
+      // Rev.18.7: '선 상 거리' 삭제 — '우/좌/상/하' 버튼 + 숫자키로 동일 결과 가능 (중복 제거)
       { l:'연결', t:'연결 ', ex:'연결 1 4 → 1번·4번 직선 연결' },
       { l:'각 A 거리', t:'각 ', ex:'각 45 100 / 각 45 교점 / 각 45 수평 -5 (Y=-5까지) / 수직 10 (X=10까지)' },
       { l:'호', t:'호 ', ex:'호 2 3 시계 각 45 / 호 2 3 시계 교점' },
@@ -1674,8 +1675,33 @@ function tryDimCommand(cmdStr){
     (CMD_CATS[cat]||[]).forEach(c => {
       const b = document.createElement('button');
       b.className = 'cmd-pbtn'; b.textContent = c.l;
+      // Rev.18.7: cycle 속성 - 클릭마다 다음 방향으로 순환하며 입력 (현재 입력의 첫 토큰 자리에)
+      if (Array.isArray(c.cycle)){
+        b.dataset.cycleIdx = '0';
+        b.style.background = '#3a5545';  // 순환 버튼은 녹색 톤
+        b.addEventListener('click', () => {
+          const idx = parseInt(b.dataset.cycleIdx||'0', 10);
+          const dir = c.cycle[idx];
+          // 현재 버퍼 첫 토큰이 cycle 안에 있으면 교체, 아니면 새로 시작
+          const cur = pInput.value;
+          const firstTok = cur.trim().split(/\s+/)[0];
+          let newBuf;
+          if (c.cycle.includes(firstTok)){
+            // 기존 방향 토큰만 교체 (뒤에 입력한 숫자는 유지)
+            newBuf = cur.replace(/^\s*\S+/, dir);
+          } else {
+            // 새로 입력
+            newBuf = dir + ' ';
+          }
+          setBuf(newBuf);
+          b.textContent = `${dir} (다음: ${c.cycle[(idx+1)%c.cycle.length]})`;
+          b.dataset.cycleIdx = String((idx+1) % c.cycle.length);
+          hintEl.textContent = '🔁 ' + c.ex;
+          ci.focus();
+        });
+      }
       // Rev.17.7: action 콜백이 있으면 직접 호출(도구 기능 링크), 없으면 기존처럼 명령 텍스트 채움
-      if (typeof c.action === 'function'){
+      else if (typeof c.action === 'function'){
         b.style.background = '#3a4a55';   // 함수형 버튼은 살짝 강조
         b.addEventListener('click', () => {
           hintEl.textContent = '▶ ' + c.ex;

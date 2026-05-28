@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v7.4.1 - 중복 툴바 정리</title>
+<title>tool3 v7.4.2 - 툴바 추가정리(undo 상단이동)</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v7.4.1</h1>
+  <h1>📐 tool3 v7.4.2</h1>
   <span class="ver">v7.1.10 - 회전축 Y/Z 매핑·색 일치(Z-up)</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -296,6 +296,11 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <div class="menu-item" onclick="alert('tool3 v1.3\n3D 모델러\n돌출 · 회전 · 볼트/너트/스프링\n\n태진다이텍 ESG Smart Factory')"><span class="ico">ℹ️</span>정보</div>
     </div>
   </div>
+  <!-- v7.4.2: 취소/되돌리기를 상단 메뉴바 우측으로 이동 -->
+  <div class="topbar-undo" style="margin-left:auto;display:flex;gap:6px;align-items:center;padding-right:10px;">
+    <button onclick="undo()" title="실행 취소 (Ctrl+Z)" style="background:#3a3a3a;color:#eee;border:1px solid #555;border-radius:5px;padding:4px 12px;font-size:16px;cursor:pointer;">↶</button>
+    <button onclick="redo()" title="다시 실행 (Ctrl+Y)" style="background:#3a3a3a;color:#eee;border:1px solid #555;border-radius:5px;padding:4px 12px;font-size:16px;cursor:pointer;">↷</button>
+  </div>
 </div>
 
 <div class="toolbar">
@@ -323,14 +328,12 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
   <!-- v7.4.1: 돌출/회전체/SVG/바닥 툴스트립 그룹 삭제 (상단 '스케치 3D' 메뉴에 동일 기능 존재) -->
 
   <!-- 모드 전환 (작게) -->
-  <div class="group">
+  <!-- v7.4.2: 모드전환 버튼은 화면에서 숨김(메뉴로 전환). JS가 ID를 참조하므로 요소는 유지. 취소/되돌리기는 상단바로 이동. -->
+  <div class="group" style="display:none;">
     <button onclick="switchMode('sketch')" id="btnSketchMode" title="스케치 모드">📐</button>
     <button onclick="switchMode('model')" id="btnModelMode" class="active" title="3D 뷰">🎲</button>
   </div>
-  <div class="group">
-    <button class="warn" onclick="undo()" title="실행 취소 (Ctrl+Z)">↶</button>
-    <button class="warn" onclick="redo()" title="다시 실행 (Ctrl+Y)">↷</button>
-  </div>
+
   <!-- 3D 모드 전용 빠른 도구 -->
   <div class="group model-only">
     <button onclick="dropToGround()" title="바닥에 떨어뜨리기 (D)">⬇️ D</button>

@@ -1479,6 +1479,7 @@ function setupRaycastClick(dom){
         transformState.dragStart = {x: e.clientX, y: e.clientY};
         transformState._rotStart = null; // 회전 시작 각도 재계산용
         transformState._rotInitial = null;
+        transformState._quatInitial = null; // v7.1.6
         // v2.5: scale 시작 BB 캐시 초기화 (handleDrag 첫 호출 시 캡처)
         transformState._scaleStartBB = null;
         transformState._scaleStartPos = null;
@@ -1750,16 +1751,18 @@ function setupRaycastClick(dom){
       transformState.draggingHandle = null;
       transformState._rotStart = null;
       transformState._rotInitial = null;
+      transformState._quatInitial = null; // v7.1.6
       // v2.0: 회전 종료 시 - v3.9: HUD를 5초간 유지하여 직접 입력 가능
       if(wasRotate){
         if(p && p.mesh){
-          const deg = (p.mesh.rotation[h.axis] * 180 / Math.PI);
-          const axisName = h.axis.toUpperCase();
-          toast('↻ ' + axisName + '축 회전 = ' + deg.toFixed(1) + '°  (HUD 클릭 = 직접 입력)');
-          setStat('회전 완료: ' + axisName + '축 ' + deg.toFixed(1) + '°');
+          // v7.1.6: 월드축 회전이므로 로컬 Euler 대신 축 이름만 안내
+          const axisName = (h.axis === 'z') ? 'Z(높이/월드 up)' : (h.axis === 'y') ? 'Y' : 'X';
+          toast('↻ ' + axisName + '축(월드 고정) 회전 완료  (HUD 클릭 = 직접 입력)');
+          setStat('회전 완료: ' + axisName + '축 (월드 고정축 기준)');
           syncRotPropPanel(p);
-          // HUD에 마지막 정보 유지 + 클릭 가능 표시
-          rotHudPersist(h.axis, p.mesh.rotation[h.axis]);
+          // HUD 유지 + 클릭 가능 표시 (직접 입력은 월드축 절대각으로 적용)
+          rotHudPersist(h.axis, 0);
+          p._worldRot = null; // v7.1.6: 핸들 드래그는 상대회전 → 절대각 표시 초기화
         }
       }
       // v2.5: 크기 변경 종료 시 HUD 숨김 + 최종 크기 알림
@@ -2374,6 +2377,8 @@ function handleDrag(e){
     if(transformState._rotStart === null || transformState._rotStart === undefined){
       transformState._rotStart = Math.atan2(transformState.dragStart.y - cy, transformState.dragStart.x - cx);
       transformState._rotInitial = {x: p.mesh.rotation.x, y: p.mesh.rotation.y, z: p.mesh.rotation.z};
+      // v7.1.6: 회전 시작 시점의 자세를 쿼터니언으로 보관 (월드축 회전 기준)
+      transformState._quatInitial = p.mesh.quaternion.clone();
     }
     const angleNow = Math.atan2(e.clientY - cy, e.clientX - cx);
     let delta = angleNow - transformState._rotStart;
@@ -2388,11 +2393,16 @@ function handleDrag(e){
       const step = snapDeg * Math.PI / 180;
       deltaSigned = Math.round(deltaSigned / step) * step;
     }
-    if(h.axis === 'y') p.mesh.rotation.y = transformState._rotInitial.y + deltaSigned;
-    else if(h.axis === 'x') p.mesh.rotation.x = transformState._rotInitial.x + deltaSigned;
-    else if(h.axis === 'z') p.mesh.rotation.z = transformState._rotInitial.z + deltaSigned;
-    // v2.0: 실시간 각도 HUD 표시
-    showRotHud(h.axis, p.mesh.rotation[h.axis], deltaSigned, snapDeg > 0);
+    // v7.1.6: 핸들 축을 "월드 고정축"으로 해석해 회전 (부품이 기울어도 Z핸들=월드 up)
+    //   내부 Y-up 기준: 사용자 Z(up)=내부 Y, 사용자 Y=내부 Z, X=X
+    const worldAxis = (h.axis === 'z') ? new THREE.Vector3(0,1,0)   // 사용자 Z = 월드 up = 내부 Y
+                    : (h.axis === 'y') ? new THREE.Vector3(0,0,1)   // 사용자 Y = 내부 Z
+                    :                    new THREE.Vector3(1,0,0);  // X = 내부 X
+    const qDelta = new THREE.Quaternion().setFromAxisAngle(worldAxis, deltaSigned);
+    // 시작 자세에 월드축 회전을 "앞에서" 곱함 → 월드 고정축 기준
+    p.mesh.quaternion.copy(qDelta.multiply(transformState._quatInitial));
+    // v2.0: 실시간 각도 HUD 표시 (월드축 기준 누적 각)
+    showRotHud(h.axis, deltaSigned, deltaSigned, snapDeg > 0);
     // 속성 패널 회전값도 즉시 갱신 (선택된 부품이 동일하면)
     syncRotPropPanel(p);
   }
@@ -4431,11 +4441,27 @@ function openPosSizeModal(){
     }
     summary.textContent = '📐 ' + txt;
   }
-  document.getElementById('psRotX').value = (target.mesh.rotation.x * 180/Math.PI).toFixed(1);
-  // v7.1.5: Z-up — 사용자 Y축 회전=내부 Z축, 사용자 Z축 회전=내부 Y축
-  document.getElementById('psRotY').value = (target.mesh.rotation.z * 180/Math.PI).toFixed(1);
-  document.getElementById('psRotZ').value = (target.mesh.rotation.y * 180/Math.PI).toFixed(1);
+  // v7.1.6: 회전은 월드 고정축 각도(_worldRot) 표시
+  {
+    const wr = target._worldRot || {x:0,y:0,z:0};
+    document.getElementById('psRotX').value = (wr.x||0).toFixed(1);
+    document.getElementById('psRotY').value = (wr.y||0).toFixed(1);
+    document.getElementById('psRotZ').value = (wr.z||0).toFixed(1);
+  }
   document.getElementById('posSizeModal').classList.add('show');
+}
+
+// v7.1.6: 사용자 입력 각도(RX,RY,RZ, 도) → 월드 고정축 기준 절대 자세 쿼터니언
+//   Z=월드 up(=내부 Y), Y=내부 Z, X=내부 X. 합성 순서 Z→Y→X (각자 월드축).
+function worldEulerToQuat(uRXdeg, uRYdeg, uRZdeg){
+  const rx = (uRXdeg||0) * Math.PI/180;
+  const ry = (uRYdeg||0) * Math.PI/180;
+  const rz = (uRZdeg||0) * Math.PI/180;
+  const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rx); // 내부 X
+  const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), ry); // 사용자 Y = 내부 Z
+  const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), rz); // 사용자 Z(up) = 내부 Y
+  // 월드축 순차 적용: 먼저 X, 그 위에 Y, 그 위에 Z (앞에서 곱함)
+  return qz.multiply(qy).multiply(qx);
 }
 
 function applyPosSize(){
@@ -4449,11 +4475,11 @@ function applyPosSize(){
     parseFloat(document.getElementById('psPosZ').value) || 0,   // 내부 Y ← 사용자 Z
     parseFloat(document.getElementById('psPosY').value) || 0    // 내부 Z ← 사용자 Y
   );
-  // 회전 (v7.1.5 Z-up: 사용자 RX,RY,RZ → 내부 RX,RZ,RY)
-  const wantRot = new THREE.Euler(
-    (parseFloat(document.getElementById('psRotX').value) || 0) * Math.PI/180,
-    (parseFloat(document.getElementById('psRotZ').value) || 0) * Math.PI/180,  // 내부 Y ← 사용자 Z
-    (parseFloat(document.getElementById('psRotY').value) || 0) * Math.PI/180   // 내부 Z ← 사용자 Y
+  // 회전 (v7.1.6: 월드 고정축 기준 — Z박스는 항상 월드 up 둘레)
+  const wantQuat = worldEulerToQuat(
+    parseFloat(document.getElementById('psRotX').value) || 0,
+    parseFloat(document.getElementById('psRotY').value) || 0,
+    parseFloat(document.getElementById('psRotZ').value) || 0
   );
   target.mesh.rotation.set(0,0,0);
   target.mesh.updateMatrixWorld(true);
@@ -4475,8 +4501,13 @@ function applyPosSize(){
     baseY > 0.0001 ? wantY / baseY : sc.y,
     baseZ > 0.0001 ? wantZ / baseZ : sc.z
   );
-  // 회전 적용
-  target.mesh.rotation.copy(wantRot);
+  // 회전 적용 (v7.1.6: 월드 고정축 자세)
+  target.mesh.quaternion.copy(wantQuat);
+  target._worldRot = { // v7.1.6: 표시용 월드축 각도 보관
+    x: parseFloat(document.getElementById('psRotX').value) || 0,
+    y: parseFloat(document.getElementById('psRotY').value) || 0,
+    z: parseFloat(document.getElementById('psRotZ').value) || 0
+  };
 
   closeModal('posSizeModal');
   if(transformState.activePart === target) showTransformHandles(target);
@@ -4573,20 +4604,21 @@ function rotate90(axis){
   const sel = getSelectedParts();
   const target = sel.length > 0 ? sel : (state.parts.length > 0 ? [state.parts[state.parts.length-1]] : []);
   if(target.length === 0){toast('부품을 선택하세요'); return}
+  // v7.1.6: 월드 고정축 기준 90° (axis 드롭다운: x/y/z → 월드축 매핑, z=월드 up)
+  const wAxis = (axis === 'z') ? new THREE.Vector3(0,1,0)
+              : (axis === 'y') ? new THREE.Vector3(0,0,1)
+              :                  new THREE.Vector3(1,0,0);
+  const q = new THREE.Quaternion().setFromAxisAngle(wAxis, Math.PI/2);
   target.forEach(p => {
-    p.mesh.rotation[axis] += Math.PI/2;
+    p.mesh.quaternion.premultiply(q);
+    p._worldRot = null;
     syncRotPropPanel(p);
   });
   if(transformState.activePart) showTransformHandles(transformState.activePart);
   updateDimLabels();
-  // v2.0: 누적 각도 표시
-  if(target.length === 1){
-    const deg = target[0].mesh.rotation[axis] * 180 / Math.PI;
-    toast('↻ ' + axis.toUpperCase() + '축 +90° → 누적 ' + deg.toFixed(1) + '°');
-    setStat(axis.toUpperCase() + '축 회전 누적: ' + deg.toFixed(1) + '°');
-  } else {
-    toast('↻ ' + target.length + '개 부품 ' + axis.toUpperCase() + '축 90° 회전');
-  }
+  const axLbl = (axis==='z')?'Z(월드 up)':(axis==='y')?'Y':'X';
+  toast('↻ ' + (target.length>1?target.length+'개 ':'') + axLbl + '축(월드) +90°');
+  setStat(axLbl + '축(월드 고정) 90° 회전');
 }
 
 // v3.2: 각도 조절 모달 (XYZ 축 임의 각도 회전)
@@ -4617,12 +4649,19 @@ function doRotateCustom(){
   const sel = getSelectedParts();
   const target = sel.length > 0 ? sel : (state.parts.length > 0 ? [state.parts[state.parts.length-1]] : []);
   if(target.length === 0){toast('부품을 선택하세요'); return}
+  // v7.1.6: 월드 고정축 기준 회전 (z=월드 up)
+  const wAxis = (axis === 'z') ? new THREE.Vector3(0,1,0)
+              : (axis === 'y') ? new THREE.Vector3(0,0,1)
+              :                  new THREE.Vector3(1,0,0);
   target.forEach(p => {
     if(mode === 'set'){
-      p.mesh.rotation[axis] = rad;
+      // 절대 설정: 현재 자세를 지우고 해당 월드축으로만 rad 회전
+      p.mesh.quaternion.copy(new THREE.Quaternion().setFromAxisAngle(wAxis, rad));
     } else {
-      p.mesh.rotation[axis] += rad;
+      const q = new THREE.Quaternion().setFromAxisAngle(wAxis, rad);
+      p.mesh.quaternion.premultiply(q);
     }
+    p._worldRot = null;
     syncRotPropPanel(p);
   });
   if(transformState.activePart) showTransformHandles(transformState.activePart);
@@ -6204,14 +6243,8 @@ function onRotHudClick(event){
   const angSpan = document.getElementById('rotHudAngle');
   const inp = document.getElementById('rotHudInput');
   if(!angSpan || !inp) return;
-  // 현재 부품의 해당 축 각도를 가져와 입력창에 채움
-  const id = state.selectedPartId;
-  const p = state.parts.find(x => x.id === id);
-  let curDeg = 0;
-  if(p && p.mesh){
-    curDeg = p.mesh.rotation[_rotHudActiveAxis] * 180 / Math.PI;
-  }
-  inp.value = curDeg.toFixed(1);
+  // v7.1.6: 월드축 증분 회전 → 시작값 0으로 채움
+  inp.value = '0';
   angSpan.style.display = 'none';
   inp.style.display = '';
   setTimeout(() => { inp.focus(); inp.select(); }, 0);
@@ -6245,15 +6278,21 @@ function applyRotHudInput(){
   const id = state.selectedPartId;
   const p = state.parts.find(x => x.id === id);
   if(p && p.mesh){
-    p.mesh.rotation[_rotHudActiveAxis] = v * Math.PI / 180;
+    // v7.1.6: 입력값을 "월드 고정축" 기준 증분 회전으로 적용 (Z핸들=월드 up)
+    const worldAxis = (_rotHudActiveAxis === 'z') ? new THREE.Vector3(0,1,0)   // 사용자 Z=월드 up=내부 Y
+                    : (_rotHudActiveAxis === 'y') ? new THREE.Vector3(0,0,1)   // 사용자 Y=내부 Z
+                    :                               new THREE.Vector3(1,0,0);  // X=내부 X
+    const q = new THREE.Quaternion().setFromAxisAngle(worldAxis, v * Math.PI/180);
+    p.mesh.quaternion.premultiply(q); // 월드축 회전은 앞에서 곱함
+    p._worldRot = null; // 증분 회전 → 절대각 표시 초기화
     syncRotPropPanel(p);
     if(transformState.activePart === p) showTransformHandles(p);
     updateDimLabels();
     refreshPropPanelTransform(p);
-    // HUD 텍스트 업데이트
+    const axLbl = (_rotHudActiveAxis==='z')?'Z(월드 up)':(_rotHudActiveAxis==='y')?'Y':'X';
     angSpan.textContent = v.toFixed(1) + '°';
-    toast('↻ ' + _rotHudActiveAxis.toUpperCase() + '축 = ' + v.toFixed(1) + '°');
-    setStat('회전 직접 입력: ' + _rotHudActiveAxis.toUpperCase() + '축 ' + v.toFixed(1) + '°');
+    toast('↻ ' + axLbl + '축(월드) ' + v.toFixed(1) + '° 회전');
+    setStat('회전(월드축 증분): ' + axLbl + ' ' + v.toFixed(1) + '°');
   }
   inp.style.display = 'none';
   angSpan.style.display = '';
@@ -6301,13 +6340,14 @@ function syncRotPropPanel(part){
 function refreshPropPanelTransform(part){
   if(!part || !part.mesh) return;
   if(state.selectedPartId !== part.id) return;
-  // 회전 (라디안 → 도) — v7.1.5 Z-up: 표시 Y↔Z 스왑 (사용자 Z=내부 Y)
+  // 회전 (v7.1.6: 월드 고정축 각도 표시 — 저장된 _worldRot 우선)
   const rx = document.getElementById('psRotX');
   const ry = document.getElementById('psRotY');
   const rz = document.getElementById('psRotZ');
-  if(rx) rx.value = (part.mesh.rotation.x * 180/Math.PI).toFixed(1);
-  if(ry) ry.value = (part.mesh.rotation.z * 180/Math.PI).toFixed(1);  // 사용자 Y ← 내부 Z
-  if(rz) rz.value = (part.mesh.rotation.y * 180/Math.PI).toFixed(1);  // 사용자 Z ← 내부 Y
+  const wr = part._worldRot || {x:0,y:0,z:0};
+  if(rx) rx.value = (wr.x||0).toFixed(1);
+  if(ry) ry.value = (wr.y||0).toFixed(1);
+  if(rz) rz.value = (wr.z||0).toFixed(1);
   // 위치 — v7.1.5 Z-up
   const pos = part.mesh.position;
   const px = document.getElementById('propPosX');
@@ -6395,15 +6435,15 @@ function applyPropRotation(){
   const rx = parseFloat(document.getElementById('psRotX').value);
   const ry = parseFloat(document.getElementById('psRotY').value);
   const rz = parseFloat(document.getElementById('psRotZ').value);
-  // v7.1.5 Z-up: 사용자 RY→내부 Z, 사용자 RZ→내부 Y
-  if(!isNaN(rx)) part.mesh.rotation.x = rx * Math.PI / 180;
-  if(!isNaN(rz)) part.mesh.rotation.y = rz * Math.PI / 180;  // 내부 Y ← 사용자 RZ
-  if(!isNaN(ry)) part.mesh.rotation.z = ry * Math.PI / 180;  // 내부 Z ← 사용자 RY
+  // v7.1.6: 월드 고정축 자세 — Z박스는 항상 월드 up 둘레
+  const q = worldEulerToQuat(isNaN(rx)?0:rx, isNaN(ry)?0:ry, isNaN(rz)?0:rz);
+  part.mesh.quaternion.copy(q);
+  part._worldRot = { x: isNaN(rx)?0:rx, y: isNaN(ry)?0:ry, z: isNaN(rz)?0:rz }; // v7.1.6
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   // 크기는 회전으로 인해 월드 BB가 바뀌므로 갱신
   refreshPropPanelTransform(part);
-  setStat('↻ 회전 변경: X=' + (isNaN(rx)?'-':rx) + '° Y=' + (isNaN(ry)?'-':ry) + '° Z=' + (isNaN(rz)?'-':rz) + '°');
+  setStat('↻ 회전(월드축): X=' + (isNaN(rx)?'-':rx) + '° Y=' + (isNaN(ry)?'-':ry) + '° Z=' + (isNaN(rz)?'-':rz) + '°');
 }
 
 function toast(msg){

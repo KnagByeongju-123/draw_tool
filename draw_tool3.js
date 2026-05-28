@@ -1760,7 +1760,7 @@ function setupRaycastClick(dom){
       if(wasRotate){
         if(p && p.mesh){
           // v7.1.6: 월드축 회전이므로 로컬 Euler 대신 축 이름만 안내
-          const axisName = (h.axis === 'z') ? 'Z(높이/월드 up)' : (h.axis === 'y') ? 'Y' : 'X';
+          const axisName = (h.axis === 'y') ? 'Z(높이/월드 up)' : (h.axis === 'z') ? 'Y' : 'X';
           toast('↻ ' + axisName + '축(월드 고정) 회전 완료  (HUD 클릭 = 직접 입력)');
           setStat('회전 완료: ' + axisName + '축 (월드 고정축 기준)');
           syncRotPropPanel(p);
@@ -2077,16 +2077,16 @@ function showTransformHandles(part){
     if(rot) grp.rotation.set(rot.x||0, rot.y||0, rot.z||0);
     return grp;
   }
-  // Y축 회전(yaw): 상단부 "뒤쪽"(Z 음수)에 수평으로 누운 아이콘 (요청)
-  group.add(makeRotIcon('y', 0x44dd44,
+  // v7.1.10: Z-up 색 — 내부 Y(수직 회전=사용자 Z)=흰색
+  group.add(makeRotIcon('y', 0xeeeeee,
     {x: 0, y: size.y/2 + maxSize*0.18, z: -size.z/2 - maxSize*0.22},
     {x: -Math.PI/2}));
   // X축 회전(pitch): 우측에 세로 아이콘
   group.add(makeRotIcon('x', 0xdd4444,
     {x: size.x/2 + maxSize*0.22, y: 0, z: 0},
     {y: Math.PI/2}));
-  // Z축 회전(roll): 바닥 앞쪽에 수평 아이콘
-  group.add(makeRotIcon('z', 0x4488dd,
+  // v7.1.10: 내부 Z(깊이 회전=사용자 Y)=녹색
+  group.add(makeRotIcon('z', 0x44dd44,
     {x: 0, y: -size.y/2 - maxSize*0.08, z: size.z/2 + maxSize*0.30},
     {x: -Math.PI/2}));
 
@@ -2124,7 +2124,8 @@ function showRotationRing(part, axis){
   const maxSize = Math.max(size.x, size.y, size.z, 10);
   const ringR = maxSize * 0.62;
   const tube = maxSize * 0.018;
-  const color = {x:0xdd4444, y:0x44dd44, z:0x4488dd}[axis] || 0xf39c12;
+  // v7.1.10: Z-up 색 일치 — 내부 Y(수직)=사용자 Z(흰색), 내부 Z(깊이)=사용자 Y(녹색), X=빨강
+  const color = {x:0xdd4444, y:0xeeeeee, z:0x44dd44}[axis] || 0xf39c12;
 
   const grp = new THREE.Group();
   // 보이는 원형 링
@@ -2150,7 +2151,8 @@ function showRotationRing(part, axis){
   scene.add(grp);
   transformState.rotationRing = grp;
   transformState.rotationRingAxis = axis;
-  setStat('↻ ' + axis.toUpperCase() + '축 회전 링 — 링을 드래그하여 회전 (빈 곳 클릭 시 닫힘)');
+  const ringAxisName = (axis==='y') ? 'Z(높이)' : (axis==='z') ? 'Y' : 'X';
+  setStat('↻ ' + ringAxisName + '축 회전 링 — 링을 드래그하여 회전 (빈 곳 클릭 시 닫힘)');
 }
 
 function hideRotationRing(){
@@ -2397,11 +2399,11 @@ function handleDrag(e){
       const step = snapDeg * Math.PI / 180;
       deltaSigned = Math.round(deltaSigned / step) * step;
     }
-    // v7.1.6: 핸들 축을 "월드 고정축"으로 해석해 회전 (부품이 기울어도 Z핸들=월드 up)
-    //   내부 Y-up 기준: 사용자 Z(up)=내부 Y, 사용자 Y=내부 Z, X=X
-    const worldAxis = (h.axis === 'z') ? new THREE.Vector3(0,1,0)   // 사용자 Z = 월드 up = 내부 Y
-                    : (h.axis === 'y') ? new THREE.Vector3(0,0,1)   // 사용자 Y = 내부 Z
-                    :                    new THREE.Vector3(1,0,0);  // X = 내부 X
+    // v7.1.10: 회전 링은 각 내부축 둘레로 돌게 만들어져 있으므로 핸들 축 = 내부 회전축 그대로 사용
+    //   (x→내부X, y→내부Y(수직=사용자 Z up), z→내부Z(사용자 Y))
+    const worldAxis = (h.axis === 'y') ? new THREE.Vector3(0,1,0)   // 내부 Y(수직=사용자 Z up)
+                    : (h.axis === 'z') ? new THREE.Vector3(0,0,1)   // 내부 Z(=사용자 Y)
+                    :                    new THREE.Vector3(1,0,0);  // 내부 X
     const qDelta = new THREE.Quaternion().setFromAxisAngle(worldAxis, deltaSigned);
     // 시작 자세에 월드축 회전을 "앞에서" 곱함 → 월드 고정축 기준
     p.mesh.quaternion.copy(qDelta.multiply(transformState._quatInitial));
@@ -6358,10 +6360,10 @@ function applyRotHudInput(){
   const id = state.selectedPartId;
   const p = state.parts.find(x => x.id === id);
   if(p && p.mesh){
-    // v7.1.6: 입력값을 "월드 고정축" 기준 증분 회전으로 적용 (Z핸들=월드 up)
-    const worldAxis = (_rotHudActiveAxis === 'z') ? new THREE.Vector3(0,1,0)   // 사용자 Z=월드 up=내부 Y
-                    : (_rotHudActiveAxis === 'y') ? new THREE.Vector3(0,0,1)   // 사용자 Y=내부 Z
-                    :                               new THREE.Vector3(1,0,0);  // X=내부 X
+    // v7.1.10: HUD 활성 축 = 회전 핸들 내부축 그대로 (y→내부Y 수직, z→내부Z)
+    const worldAxis = (_rotHudActiveAxis === 'y') ? new THREE.Vector3(0,1,0)
+                    : (_rotHudActiveAxis === 'z') ? new THREE.Vector3(0,0,1)
+                    :                               new THREE.Vector3(1,0,0);
     const q = new THREE.Quaternion().setFromAxisAngle(worldAxis, v * Math.PI/180);
     p.mesh.quaternion.premultiply(q); // 월드축 회전은 앞에서 곱함
     p._worldRot = null; // 증분 회전 → 절대각 표시 초기화

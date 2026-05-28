@@ -1,4 +1,4 @@
-// ##### draw_tool_core2.js  Rev.19.17  최신본 — 라벨자동수정[penPoints내undefined요소크래시방지]·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
+// ##### draw_tool_core2.js  Rev.19.18  최신본 — 줄이기(선단축)추가·라벨자동수정·두께버튼삭제·명령키보드방향순환·만남·절교/절각·점·선·지름·거리두기·연장·기준점·방향교점·각교점·호·=수식·이동 #####
 // 이 파일은 draw_tool_core.js 다음에 로드되어야 합니다 (전역 변수/함수 공유).
 
 // Rev.16.29: 한붓그리기 점번호 시스템
@@ -1063,6 +1063,66 @@ function tryPenCommand(cmdStr){
     return true;
   }
 
+  // Rev.19.18: 줄이기 - i1-i2 선의 i2쪽 끝점을 안쪽(i1 방향)으로 당겨 선 길이를 줄임. (연장의 반대)
+  //   줄이기 1 2 30     → i2쪽을 30mm 줄임 (거리)
+  //   줄이기 1 2 반     → 절반 길이로 줄임
+  //   줄이기 1 2 X 50   → i2쪽 끝의 X좌표가 50mm 되도록
+  //   줄이기 1 2 Y 30   → i2쪽 끝의 Y좌표가 30mm 되도록
+  if ((toks[0] === '줄이기' || toks[0] === '단축' || toks[0] === 'SHORTEN' || toks[0] === 'TRIM')
+      && toks.length >= 4){
+    const i1 = parsePenIdx(toks[1]), i2 = parsePenIdx(toks[2]);
+    if (i1 == null || i2 == null || !penPoints[i1] || !penPoints[i2]) return false;
+    const ln = penFindLineByEndpoints(i1, i2);
+    const a = penPoints[i1], b = penPoints[i2];
+    const len = Math.hypot(b.x-a.x, b.y-a.y);
+    if (len < 1e-6) return true;
+    const ux = (b.x-a.x)/len, uy = (b.y-a.y)/len;   // i1→i2 단위방향
+    let nx, ny, label;
+    const mode = toks[3];
+
+    if (mode === 'X' || mode === 'x'){
+      const xmm = evalExpr(toks[4]);
+      if (!isFinite(xmm)) return false;
+      const targetPx = penMmToPx(xmm, 0).x;
+      if (Math.abs(ux) < 1e-6){ document.getElementById('statusHint').textContent='줄이기: 세로선은 X좌표로 줄이기 불가'; return true; }
+      const t = (targetPx - b.x) / ux;
+      nx = b.x + ux*t; ny = b.y + uy*t; label = `X=${xmm}`;
+    } else if (mode === 'Y' || mode === 'y'){
+      const ymm = evalExpr(toks[4]);
+      if (!isFinite(ymm)) return false;
+      const targetPy = penMmToPx(0, ymm).y;
+      if (Math.abs(uy) < 1e-6){ document.getElementById('statusHint').textContent='줄이기: 가로선은 Y좌표로 줄이기 불가'; return true; }
+      const t = (targetPy - b.y) / uy;
+      nx = b.x + ux*t; ny = b.y + uy*t; label = `Y=${ymm}`;
+    } else if (mode === '반' || mode === '절반' || mode === 'HALF'){
+      // 절반 길이로
+      const dPx = len/2;
+      nx = a.x + ux*dPx; ny = a.y + uy*dPx; label = '절반';
+    } else {
+      // 거리(mm)만큼 i2쪽에서 안쪽으로 당김
+      const dist = evalExpr(mode);
+      if (!isFinite(dist)) return false;
+      const dPx = dist/mmPerPixel;
+      const remainPx = len - dPx;
+      if (remainPx <= 1e-6){ document.getElementById('statusHint').textContent=`줄이기: ${dist}mm가 선 길이보다 같거나 큼 (선이 사라짐)`; return true; }
+      nx = b.x - ux*dPx; ny = b.y - uy*dPx; label = `${dist}mm`;
+    }
+
+    if (ln){
+      const which = (Math.hypot(ln.p1.x-b.x, ln.p1.y-b.y) < Math.hypot(ln.p2.x-b.x, ln.p2.y-b.y)) ? 'p1' : 'p2';
+      ln[which] = { x:nx, y:ny };
+      penPoints[i2] = { x:nx, y:ny };
+      penUpdateLabel(i2, nx, ny);
+      penFinish(`↤ ${i1}-${i2} 선 ${i2}번 쪽 ${label} 줄임`);
+    } else {
+      // 선이 없으면 i1→(줄인 끝점) 새 선 + 끝점 번호 부여
+      penAddLine(a.x, a.y, nx, ny);
+      const ne = penAddPoint(nx, ny);
+      penFinish(`↤ ${i1}-${i2} 방향 ${label} 선 생성 → P${ne}`);
+    }
+    return true;
+  }
+
   // Rev.17.0: 두께 1 5 좌 / 우 / 양 - 1~5번 연결 경로(선·호 포함)를 소재두께만큼 평행복제.
   //   좌/우: 거리두기 칸 두께만큼 한쪽으로. 양: 칸 두께의 절반씩 양쪽으로 (중심선 방식).
   // Rev.18.6: penPoints 배열에 없는 번호여도 화면상 점/라벨에서 자동 복구 (조용히 return false 제거)
@@ -1710,6 +1770,7 @@ function tryDimCommand(cmdStr){
     ],
     '연장/절교': [
       { l:'연장', t:'연장 ', ex:'연장 1 2 30 / 교점 / X 50 / Y 30' },
+      { l:'줄이기', t:'줄이기 ', ex:'줄이기 1 2 30 → 1-2선 2번쪽 30mm 줄임 / 반(절반) / X 50 / Y 30' },
       { l:'절교 두점', t:'절교 ', ex:'절교 9 10 3 수직 / 수평' },
       { l:'절교 방향', t:'절교 ', ex:'절교 1 하 수평 0 → 1서 아래로 0번 수평선까지' },
       { l:'절각', t:'절각 ', ex:'절각 3 45 5 수직 → 3서 45도, 5번 수직선까지' },

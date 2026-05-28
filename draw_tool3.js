@@ -7321,12 +7321,20 @@ document.addEventListener('keydown', (e)=>{
     }
     state.drawing = null; setTool('select'); hideTransformHandles(); state.parts.forEach(p => p._selected = false); renderPartsList(); updateMultiSelectHighlight(); return;
   }
-  if(e.key === 'Delete' || e.key === 'Backspace'){
+  if(e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Del'){
     // v3.1: 3D 모드 - 다중 선택된 모든 부품 일괄 삭제
     if(state.mode === 'model'){
-      const selParts = state.parts.filter(p => p._selected);
+      let selParts = state.parts.filter(p => p._selected);
+      // v7.1.4b: 선택 후보 보강 — _selected가 비었으면 selectedPartId / 트랜스폼 핸들 활성 부품도 인정
+      if(selParts.length === 0){
+        let fbId = state.selectedPartId;
+        if(fbId == null && typeof transformState !== 'undefined' && transformState && transformState.activePart) fbId = transformState.activePart.id;
+        const fb = (fbId != null) ? state.parts.find(p => p.id === fbId) : null;
+        if(fb) selParts = [fb];
+      }
       if(selParts.length > 1){
         if(!confirm(selParts.length + '개 부품을 삭제하시겠습니까?')) return;
+        e.preventDefault();
         // confirm을 한 번만 받도록 deletePartById의 confirm 우회
         const ids = selParts.map(p => p.id);
         ids.forEach(id => {
@@ -7346,14 +7354,19 @@ document.addEventListener('keydown', (e)=>{
         pushHistory(); // v4.6
         toast('🗑️ ' + ids.length + '개 부품 삭제됨');
         return;
-      } else if(selParts.length === 1 || state.selectedPartId){
+      } else if(selParts.length === 1){
         // v4.9.2: Del키 단일 삭제는 confirm 없이 즉시 (Ctrl+Z로 복구 가능)
-        const id = selParts.length === 1 ? selParts[0].id : state.selectedPartId;
-        deletePartById(id, true);
+        e.preventDefault();
+        deletePartById(selParts[0].id, true);
+        return;
+      } else {
+        // v7.1.4b: 3D 모드인데 선택이 없으면 조용히 끝내지 않고 안내
+        toast('삭제할 부품을 먼저 선택하세요 (클릭)');
         return;
       }
     }
-    // 스케치 모드 또는 3D에서 선택 없으면 스케치 삭제 시도
+    // 스케치 모드에서는 스케치 선택 삭제 시도
+    e.preventDefault();
     deleteSelected();
     return;
   }

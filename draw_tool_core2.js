@@ -1635,9 +1635,8 @@ function penChamferAtPoint(pt, cMm){
 //   - Shift 누른 채 마우스 이동 = 슬로우(미세) 이동, 최종 좌클릭 시 적용
 let penDrawFirst = null;     // {x,y} 첫 클릭점(픽셀). null이면 시작 전
 let penDrawFirstIdx = -1;    // 첫 점의 펜 번호
-let penDrawSlowAnchor = null;// Shift 슬로우 기준점 {sx,sy(화면), x,y(현재 정밀 픽셀)}
+let penDrawSlowAnchor = null;// (Rev.19.29 미사용·호환유지)
 let penDrawCurPt = null;     // 현재 미리보기 끝점(픽셀, 슬로우 반영)
-const PEN_SLOW_FACTOR = 0.1; // Shift 슬로우 비율 (마우스 이동의 10%)
 
 // 텍스트모드 드로잉이 활성 조건: 텍스트모드 + 원점지정완료 + 클릭연결모드 아님
 function penDrawActive(){
@@ -1646,25 +1645,21 @@ function penDrawActive(){
       && !(typeof penConnectMode2 !== 'undefined' && penConnectMode2);
 }
 
-// 슬로우 적용해 보정된 현재 점 계산 (mousemove에서 사용)
+// 보정된 현재 점 계산 (mousemove에서 사용)
+// Rev.19.29: Shift = 직선/45도 잠금 (시작점 기준 0/45/90/135/180/... 8방향). 길이는 유지.
 function penDrawResolvePoint(e){
   const raw = getCanvasPoint(e);  // 스냅 적용된 좌표
   if (shiftDown && penDrawFirst){
-    // Shift 슬로우: 직전 정밀점 기준으로 마우스 이동분의 10%만 반영
-    const r = drawCanvas.getBoundingClientRect();
-    const sx = (e.clientX - r.left) / (zoom||1);
-    const sy = (e.clientY - r.top) / (zoom||1);
-    if (!penDrawSlowAnchor){
-      // 슬로우 시작: 현재 미리보기 점(없으면 첫점)을 기준으로 고정
-      const base = penDrawCurPt || penDrawFirst;
-      penDrawSlowAnchor = { sx, sy, x: base.x, y: base.y };
-    }
-    const dx = (sx - penDrawSlowAnchor.sx) * PEN_SLOW_FACTOR;
-    const dy = (sy - penDrawSlowAnchor.sy) * PEN_SLOW_FACTOR;
-    return { x: penDrawSlowAnchor.x + dx, y: penDrawSlowAnchor.y + dy, slow:true };
+    const dx = raw.x - penDrawFirst.x;
+    const dy = raw.y - penDrawFirst.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) return { x: penDrawFirst.x, y: penDrawFirst.y, lock:true };
+    // 현재 각도를 45도 단위로 반올림
+    const step = Math.PI / 4;                  // 45°
+    const ang  = Math.round(Math.atan2(dy, dx) / step) * step;
+    return { x: penDrawFirst.x + Math.cos(ang) * len,
+             y: penDrawFirst.y + Math.sin(ang) * len, lock:true };
   }
-  // Shift 해제되면 슬로우 기준 리셋
-  penDrawSlowAnchor = null;
   return raw;
 }
 
@@ -1717,11 +1712,11 @@ function penDrawPreview(p2){
   preCtx.fillText(lblAng, bx + padX, by + padY + lh);
   preCtx.restore();
   // Rev.19.28: 연장/수선/평행/접점 등 정밀스냅 마커·라벨 표기 (일반모드와 동일)
-  if (!p2.slow && typeof drawSnapIndicator === 'function') drawSnapIndicator();
+  if (!p2.lock && typeof drawSnapIndicator === 'function') drawSnapIndicator();
   // 하단 상태바는 보조 안내만
   document.getElementById('statusHint').textContent =
     `／ 텍스트선: ${lblLen} · ${ang.toFixed(1)}°`
-    + (p2.slow ? ' [Shift 슬로우]' : ' · Shift=미세이동')
+    + (p2.lock ? ' [Shift 직선/45°]' : ' · Shift=직선/45°')
     + (continuousMode ? ' · ⛓연속' : '') + ' · 좌클릭=확정';
 }
 
@@ -1743,7 +1738,7 @@ function handlePenDrawClick(e){
     penCur = idx; penPickFirst = idx;
     redoStack=[]; pushHistory(); redrawDraw(); updateCount();
     document.getElementById('statusHint').textContent =
-      `／ 텍스트선 시작 P${idx} · 두 번째 점 클릭 (Shift=미세이동)` + (continuousMode?' · ⛓연속':'');
+      `／ 텍스트선 시작 P${idx} · 두 번째 점 클릭 (Shift=직선/45°)` + (continuousMode?' · ⛓연속':'');
     return true;
   }
   // 2) 두 번째 점 — 선 생성
@@ -1805,7 +1800,7 @@ function startTextMode(){
       const _p = document.getElementById('headerBtnPenInput'); if (_p) _p.classList.add('active');
       const _n = document.getElementById('headerBtnNormalMode'); if (_n) _n.classList.remove('active');
       const _ci = document.getElementById('cmdInput'); if (_ci) _ci.focus();
-      document.getElementById('statusHint').textContent = `⌨ 텍스트 모드 (점 ${penPoints.length}개) · 마우스로 선긋기 가능(빈곳 클릭→끝점 클릭) · Shift=미세이동 · ⛓연속선토글`;
+      document.getElementById('statusHint').textContent = `⌨ 텍스트 모드 (점 ${penPoints.length}개) · 마우스로 선긋기 가능(빈곳 클릭→끝점 클릭) · Shift=직선/45° · ⛓연속선토글`;
       if (typeof redrawDraw === 'function') redrawDraw();
       return;
     }

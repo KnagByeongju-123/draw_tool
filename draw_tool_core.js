@@ -2330,7 +2330,7 @@ window.addEventListener('keydown', e => {
     }
   }
 });
-window.addEventListener('keyup', e => { if (e.key === 'Shift'){ shiftDown = false; if (typeof penDrawSlowAnchor !== 'undefined') penDrawSlowAnchor = null; } }); // Rev.19.26: Shift 해제 시 슬로우 기준 리셋
+window.addEventListener('keyup', e => { if (e.key === 'Shift'){ shiftDown = false; if (typeof penDrawSlowAnchor !== 'undefined') penDrawSlowAnchor = null; } }); // Rev.19.29: Shift 해제 시 잠금 보조상태 리셋(호환)
 
 function applyShiftConstraint(p1, p2) {
   if (!shiftDown || tool !== 'line') return p2;

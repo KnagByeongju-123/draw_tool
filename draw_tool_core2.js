@@ -1821,6 +1821,12 @@ function startTextMode(){
 }
 // Rev.16.82: 일반 모드로 전환 (텍스트모드 해제 + 선택 도구)
 function startNormalMode(){
+  // Rev.19.30: 단순화 모드에서는 일반모드로 빠지지 않고 텍스트모드 유지 (빈 화면 방지)
+  if (document.body.classList.contains('simple-mode')){
+    if (typeof cancelPenDraw === 'function') cancelPenDraw();
+    if (typeof startTextMode === 'function') startTextMode();
+    return;
+  }
   if (typeof cancelPenDraw === 'function') cancelPenDraw(); // Rev.19.26
   penPickMode = false; penPickFirst = -1; penAwaitOrigin = false;
   const pbtn = document.getElementById('headerBtnPenInput'); if (pbtn) pbtn.classList.remove('active');
@@ -1836,6 +1842,29 @@ function startNormalMode(){
   if (tbtn) tbtn.addEventListener('click', startTextMode);
   const nbtn = document.getElementById('headerBtnNormalMode');
   if (nbtn) nbtn.addEventListener('click', startNormalMode);
+  // Rev.19.30: 단순화(텍스트 전용) 모드 토글 — 일반 작도 UI 숨김 + 텍스트모드 자동진입
+  const sbtn = document.getElementById('simpleModeToggle');
+  if (sbtn) sbtn.addEventListener('click', () => {
+    const on = document.body.classList.toggle('simple-mode');
+    try { localStorage.setItem('drawSimpleMode', on ? '1' : '0'); } catch(e){}
+    if (on){
+      // 도구 스트립 팝업이 열려 있으면 닫기
+      const ts = document.getElementById('toolStrip'); if (ts) ts.classList.add('collapsed');
+      // 텍스트 모드로 자동 진입
+      if (typeof startTextMode === 'function') startTextMode();
+      document.getElementById('statusHint').textContent = '✨ 단순화 모드 ON — 텍스트 작업만 표시 (단순화 다시 누르면 전체 도구)';
+    } else {
+      document.getElementById('statusHint').textContent = '🧰 전체 도구 표시 — 일반 작도 도구 복귀';
+    }
+  });
+  // 저장된 단순화 설정 복원 (기본: OFF)
+  try {
+    if (localStorage.getItem('drawSimpleMode') === '1'){
+      document.body.classList.add('simple-mode');
+      const ts = document.getElementById('toolStrip'); if (ts) ts.classList.add('collapsed');
+      if (typeof startTextMode === 'function') setTimeout(startTextMode, 0);
+    }
+  } catch(e){}
 })();
 
 function tryDimCommand(cmdStr){

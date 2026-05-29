@@ -7898,6 +7898,48 @@ function fitSketchToShapes(){
 
 window.addEventListener('load', init);
 
+// ─── 커맨드바/명령키보드 토글 (툴바 버튼용) ─────────────────
+window.sk3ToggleCmdBar = function() {
+  let bar = document.getElementById('sk3CmdBar');
+  if (!bar) {
+    // 아직 초기화 안 됐으면 지금 초기화
+    if (typeof initCmdBar === 'function') initCmdBar();
+    bar = document.getElementById('sk3CmdBar');
+  }
+  if (!bar) return;
+  if (bar.style.display === 'none') {
+    bar.style.display = 'flex';
+    toast('💬 명령창 표시');
+  } else {
+    bar.style.display = 'none';
+    toast('💬 명령창 숨김');
+  }
+};
+
+window.sk3ToggleCmdKb = function() {
+  let panel = document.getElementById('sk3KbPanel');
+  let openBtn = document.getElementById('sk3KbOpenBtn');
+  if (!panel) {
+    if (typeof initCmdKeyboard === 'function') initCmdKeyboard();
+    panel = document.getElementById('sk3KbPanel');
+    openBtn = document.getElementById('sk3KbOpenBtn');
+  }
+  if (!panel) return;
+  const visible = panel.style.display === 'flex';
+  panel.style.display = visible ? 'none' : 'flex';
+  if (openBtn) openBtn.style.display = visible ? '' : 'none';
+  toast(visible ? '⌨ 명령 키보드 닫음' : '⌨ 명령 키보드 열림');
+};
+
+// 안전망: load 이벤트가 이미 발생한 경우 (지연 로드 시) 즉시 초기화
+if (document.readyState === 'complete') {
+  setTimeout(function() {
+    if (!document.getElementById('sk3CmdBar') && typeof initCmdBar === 'function') {
+      try { initCmdBar(); } catch(e) { console.error('initCmdBar 실패:', e); }
+    }
+  }, 100);
+}
+
 
 
 /* ============================================================
@@ -9222,7 +9264,7 @@ function initCmdKeyboard() {
   const style = document.createElement('style');
   style.textContent = `
     #sk3KbPanel {
-      position:fixed; right:14px; bottom:96px; z-index:8500;
+      position:fixed; right:14px; bottom:140px; z-index:9050;
       width:270px;
       background:rgba(14,18,24,0.97); border:1px solid #2e3a45;
       border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.5);
@@ -9297,7 +9339,7 @@ function initCmdKeyboard() {
     #sk3KbClear:hover { border-color:#ff5050; }
     #sk3KbRun:hover   { background:#2a7a2a; }
     #sk3KbOpenBtn {
-      position:fixed; right:14px; bottom:96px; z-index:8400;
+      position:fixed; right:14px; bottom:140px; z-index:9000;
       background:rgba(30,60,100,0.92); color:#7ab8e8;
       border:1px solid #3a5a80; border-radius:8px;
       padding:7px 12px; font-size:12px; cursor:pointer;

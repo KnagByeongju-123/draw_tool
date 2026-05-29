@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.8 (단일본) - 텍스트모드 통합 (커맨드바 + 명령 키보드 + 한붓그리기)</title>
+<title>tool3 v8.9 (단일본) - 텍스트모드 통합 (커맨드바 + 명령 키보드 + 한붓그리기)</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.8</h1>
+  <h1>📐 tool3 v8.9</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -316,6 +316,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <button id="btn-diameter" onclick="sk3ToggleDiameter()" title="직경좌표: 회전체 단면용 (Cx,Cy)+직경 표시">⌀ 직경</button>
     <button id="btn-thickness" onclick="sk3SetThickness()" title="소재 두께 입력 (mm) — 명령: 두께 N1 N2 좌/우">⚙ 두께</button>
     <button id="btn-wconnect" onclick="sk3ToggleWheelConnect()" title="휠클릭 연결: ON 후 점 2개에 휠클릭(가운데 버튼)으로 선 생성">⚡ 연결</button>
+    <button id="btn-continuous" onclick="sk3ToggleContinuous()" title="연속선: ON=펜 클릭 시 이전 점과 자동 선 연결, OFF=점만 추가">⛓ 연속선</button>
   </div>
   <div class="group sketch-only">
     <label>스냅:</label>
@@ -1345,6 +1346,7 @@ const state = {
   workPlanePickMode: false,   // true면 다음 면 클릭이 워크플레인 지정
   workPlane: null,            // {origin: Vector3, normal: Vector3, partId: number, mesh: THREE.Group}
   boxSelect: null,            // v8.5: 우클릭 박스 선택 진행 상태 {sx,sy,ex,ey,wpStart,wpEnd,addToSel}
+  continuousMode: false,      // v8.9: 연속선 토글 OFF=점만, ON=점+이전점과 자동 선
 };
 
 const skCanvas = document.getElementById('sketchCanvas');
@@ -1505,6 +1507,15 @@ window.sk3SetThickness = function(){
   state.thickness = v;
   toast('두께 = ' + v + 'mm');
   skCmdLog('  ⚙ 소재 두께 = ' + v + 'mm', 'sys');
+};
+
+// v8.9: 연속선 토글 (펜 클릭 시 자동 선 연결 ON/OFF)
+window.sk3ToggleContinuous = function(){
+  state.continuousMode = !state.continuousMode;
+  toast(state.continuousMode ? '⛓ 연속선 ON: 펜 클릭 시 이전 점과 자동 선 연결' : '⛓ 연속선 OFF: 펜 클릭 시 점만 추가');
+  skCmdLog('  ⛓ 연속선 ' + (state.continuousMode ? 'ON' : 'OFF'), 'sys');
+  const btn = document.getElementById('btn-continuous');
+  if(btn) btn.style.background = state.continuousMode ? '#16a085' : '';
 };
 
 // 휠클릭 연결 모드 토글
@@ -1887,32 +1898,51 @@ skCanvas.addEventListener('mousedown', (e)=>{
   }
 
   if(state.tool === 'pen'){
-    // 한붓그리기 펜: 클릭 = 점 추가 + 이전 점과 선 연결
-    // Shift = 직교 스냅 (수직/수평/45°)
+    // v8.9: 2D 텍스트모드 패턴 이식
+    //   1) 기존 점 위 클릭 → 그 점 재사용 (penCur로 설정만)
+    //   2) 연속선 OFF면 점만 / ON이면 이전 점과 자동 선
+    //   3) Shift = 8방향 직교 스냅
     let tx = wp.x, ty = wp.y;
     if(e.shiftKey && state.penCur >= 0 && state.penPoints[state.penCur]){
       const cur = state.penPoints[state.penCur];
       const dx = wp.x - cur.x, dy = wp.y - cur.y;
-      // 8방향 스냅
       const ang = Math.atan2(dy, dx);
       const snapAng = Math.round(ang / (Math.PI/4)) * (Math.PI/4);
       const ln = Math.hypot(dx, dy);
       tx = cur.x + ln*Math.cos(snapAng);
       ty = cur.y + ln*Math.sin(snapAng);
     }
+    // 클릭 위치 근처의 기존 점 찾기 (재사용)
+    const nearIdx = sk3FindNearestPenPoint({x:tx, y:ty});
+    if(nearIdx >= 0){
+      // 기존 점 위 클릭 → 그 점 재사용
+      const reuse = state.penPoints[nearIdx];
+      // 연속선 ON + 이전 점 있으면 선 추가
+      if(state.continuousMode && state.penCur >= 0 && state.penCur !== nearIdx && state.penPoints[state.penCur]){
+        const cur = state.penPoints[state.penCur];
+        pushHistory();
+        state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:reuse.x, y2:reuse.y,
+          color: document.getElementById('sketchColor').value || '#000000',
+          lineWidth: parseInt(document.getElementById('lineWidth').value)||2});
+      }
+      state.penCur = nearIdx;
+      redrawSketch(); updateInfo();
+      setStat('▸ P' + nearIdx + ' 재사용 (' + reuse.x.toFixed(2) + ', ' + reuse.y.toFixed(2) + ')mm · ' + (state.continuousMode?'⛓연속선 ON':'⛓연속선 OFF · 점만'));
+      return;
+    }
+    // 새 점 추가
     pushHistory();
-    // 이전 점이 있으면 선 자동 추가
-    if(state.penCur >= 0 && state.penPoints[state.penCur]){
+    // 연속선 ON + 이전 점 있으면 선 자동 추가
+    if(state.continuousMode && state.penCur >= 0 && state.penPoints[state.penCur]){
       const cur = state.penPoints[state.penCur];
       state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:tx, y2:ty,
         color: document.getElementById('sketchColor').value || '#000000',
         lineWidth: parseInt(document.getElementById('lineWidth').value)||2});
     }
-    // 새 점 추가
     state.penPoints.push({x:tx, y:ty});
     state.penCur = state.penPoints.length - 1;
     redrawSketch(); updateInfo();
-    setStat('펜: P' + state.penCur + ' (' + tx.toFixed(2) + ', ' + ty.toFixed(2) + ')mm · Esc=종료 · Shift=직교');
+    setStat('● P' + state.penCur + ' 추가 (' + tx.toFixed(2) + ', ' + ty.toFixed(2) + ')mm · ' + (state.continuousMode?'⛓연속선 ON':'⛓연속선 OFF · 점만') + ' · Esc=종료');
     return;
   }
 

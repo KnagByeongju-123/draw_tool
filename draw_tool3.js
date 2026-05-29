@@ -1676,11 +1676,10 @@ function initThree(){
   gridHelper.visible = state.showGrid;
   scene.add(gridHelper);
   axesHelper = new THREE.AxesHelper(60);
-  // v7.2: 축 색상 표준화 — X=빨강, Y=초록, Z=파랑 (Three.js 기본값 유지)
-  //   AxesHelper의 기본 색상이 이미 R/G/B 이므로 별도 vertexColors 설정 불필요
+  // v8.3: 축 색상 — X=빨강, Y=연두, Z=파랑 (표준 RGB 매핑)
   {
     const cX = new THREE.Color(0xff3333); // X 빨강
-    const cY = new THREE.Color(0x33ff33); // Y 초록
+    const cY = new THREE.Color(0x88ff66); // Y 연두
     const cZ = new THREE.Color(0x3366ff); // Z 파랑
     const colors = new Float32Array([
       cX.r, cX.g, cX.b,  cX.r, cX.g, cX.b,   // X축 두 점

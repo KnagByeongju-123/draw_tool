@@ -305,10 +305,17 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <button id="btn-rect" onclick="setTool('rect')" title="사각형 (R)">⬜</button>
     <button id="btn-circle" onclick="setTool('circle')" title="원 (C)">⭕</button>
     <button id="btn-arc" onclick="setTool('arc')" title="호 (A)">⌒</button>
+    <button id="btn-pen" onclick="setTool('pen')" title="펜 한붓그리기 (P) - 좌클릭마다 점+선 자동 추가 · Shift=직교 · Esc=종료" style="background:#3a5530;color:#90e090;font-weight:bold">✎</button>
     <button id="btn-fillet" onclick="setTool('fillet')" title="필렛 (F) - 드래그로 선 2개 선택 후 R 입력">⌣R</button>
     <button id="btn-select" onclick="setTool('select')" title="선택 (S)">👆</button>
     <button id="btn-cmdkb" onclick="sk3ToggleCmdKb()" title="⌨ 명령 키보드 (텍스트로 도면 그리기)" style="background:#3a5a80;color:#7ab8e8;font-weight:bold">⌨</button>
     <button id="btn-cmdbar" onclick="sk3ToggleCmdBar()" title="하단 명령창 표시/숨김 (: 또는 / 키로 포커스)" style="background:#3a4a55">⌃_</button>
+  </div>
+  <div class="group sketch-only" style="border-left:1px solid #444;padding-left:8px">
+    <button id="btn-pencoord" onclick="sk3TogglePenCoord()" title="점좌표: 점 옆에 (X,Y) 좌표 표시 ON/OFF">📍 점좌표</button>
+    <button id="btn-diameter" onclick="sk3ToggleDiameter()" title="직경좌표: 회전체 단면용 (Cx,Cy)+직경 표시">⌀ 직경</button>
+    <button id="btn-thickness" onclick="sk3SetThickness()" title="소재 두께 입력 (mm) — 명령: 두께 N1 N2 좌/우">⚙ 두께</button>
+    <button id="btn-wconnect" onclick="sk3ToggleWheelConnect()" title="휠클릭 연결: ON 후 점 2개에 휠클릭(가운데 버튼)으로 선 생성">⚡ 연결</button>
   </div>
   <div class="group sketch-only">
     <label>스냅:</label>

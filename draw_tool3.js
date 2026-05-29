@@ -285,13 +285,18 @@ const state = {
   penCur: -1,      // 현재 점 인덱스 (-1=없음)
   penShowLabels: true,  // 점 번호 라벨 표시
   penOrigin: null, // 기준점 {x,y} (노란 십자)
+  penShowCoord: false,  // 점 옆에 좌표 라벨 표시
+  penDiameterMode: null, // {Cx, Cy} 직경좌표 모드 (회전체용)
+  thickness: 0.6,  // 소재 두께(mm)
+  wheelConnectMode: false, // 휠클릭 연결 모드 ON 시 true
+  wheelConnectFirst: -1,   // 휠클릭 첫번째 점 인덱스
   gridSnap: true,
   gridSize: 10,
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
   autoPopup: true, // v6.2: 도형 클릭 시 위치/크기/회전 입력 팝업 자동 표시
   blenderKeys: false, // v6.4: 블렌더식 단축키(G/R/S 모달 변형) 사용 여부
-  showGrid: true,
+  showGrid: false,  // 기본 OFF (필요시 G 키 또는 ⊞ 버튼)
   showAxes: true,
   wireframe: false,
   showEdges: true,  // v6.6: 입체도형 외곽 모서리 선 표시
@@ -378,15 +383,25 @@ function drawPenLabels(){
     skCtx.arc(sp.x, sp.y, 3.5, 0, Math.PI*2);
     skCtx.fill();
     skCtx.stroke();
-    // 번호 텍스트 (검은 외곽 + 노란 채움)
-    skCtx.font = 'bold 12px monospace';
+    // 번호 + (옵션) 좌표 텍스트
+    let label = 'P' + i;
+    if(state.penShowCoord){
+      label += ' ' + sk3FormatCoord(p.x, p.y);
+    }
+    skCtx.font = 'bold 11px monospace';
     skCtx.textAlign = 'left';
     skCtx.textBaseline = 'middle';
-    skCtx.lineWidth = 3;
-    skCtx.strokeStyle = '#000';
-    skCtx.strokeText(String(i), sp.x + 7, sp.y - 7);
+    // 라벨 배경 박스 (가독성)
+    const m = skCtx.measureText(label);
+    const bw = m.width + 6, bh = 14;
+    skCtx.fillStyle = 'rgba(20,30,40,0.78)';
+    skCtx.strokeStyle = 'rgba(120,220,180,0.5)';
+    skCtx.lineWidth = 1;
+    skCtx.fillRect(sp.x + 6, sp.y - 14, bw, bh);
+    skCtx.strokeRect(sp.x + 6, sp.y - 14, bw, bh);
+    // 텍스트
     skCtx.fillStyle = '#ffe070';
-    skCtx.fillText(String(i), sp.x + 7, sp.y - 7);
+    skCtx.fillText(label, sp.x + 9, sp.y - 7);
   });
   // 현재점 강조 (오렌지 링)
   if(state.penCur >= 0 && state.penPoints[state.penCur]){
@@ -400,6 +415,210 @@ function drawPenLabels(){
   }
   skCtx.restore();
 }
+
+// 좌표 라벨 포맷 (직경좌표 모드 지원)
+function sk3FormatCoord(x, y){
+  if(state.penDiameterMode){
+    // 직경좌표: 표시X = Cx - 2*x (x는 좌측이 +D), Y = Cy + y
+    const Cx = state.penDiameterMode.Cx || 0;
+    const Cy = state.penDiameterMode.Cy || 0;
+    return '(' + (Cx - 2*x).toFixed(2) + ', ' + (Cy + y).toFixed(2) + ')⌀';
+  }
+  return '(' + x.toFixed(2) + ', ' + y.toFixed(2) + ')';
+}
+
+// 점좌표 표시 토글
+window.sk3TogglePenCoord = function(){
+  state.penShowCoord = !state.penShowCoord;
+  redrawSketch();
+  skCmdLog('  📍 점 좌표라벨 ' + (state.penShowCoord ? 'ON' : 'OFF'), 'sys');
+  toast('점좌표 ' + (state.penShowCoord ? 'ON' : 'OFF'));
+  const btn = document.getElementById('btn-pencoord');
+  if(btn) btn.style.background = state.penShowCoord ? '#a04030' : '';
+};
+
+// 직경좌표 모드 토글
+window.sk3ToggleDiameter = function(){
+  if(state.penDiameterMode){
+    state.penDiameterMode = null;
+    skCmdLog('  ⌀ 직경좌표 OFF', 'sys');
+    toast('직경좌표 OFF');
+  } else {
+    const Cx = parseFloat(prompt('직경좌표 원점 Cx (mm)', '0'));
+    if(isNaN(Cx)) return;
+    const Cy = parseFloat(prompt('직경좌표 원점 Cy (mm)', '0'));
+    if(isNaN(Cy)) return;
+    state.penDiameterMode = {Cx, Cy};
+    skCmdLog('  ⌀ 직경좌표 ON: Cx=' + Cx + ', Cy=' + Cy, 'sys');
+    toast('직경좌표 ON');
+  }
+  redrawSketch();
+  const btn = document.getElementById('btn-diameter');
+  if(btn) btn.style.background = state.penDiameterMode ? '#7d4296' : '';
+};
+
+// 두께 입력값 저장
+window.sk3SetThickness = function(){
+  const v = parseFloat(prompt('소재 두께(mm)', String(state.thickness || 0.6)));
+  if(!isFinite(v) || v <= 0) return;
+  state.thickness = v;
+  toast('두께 = ' + v + 'mm');
+  skCmdLog('  ⚙ 소재 두께 = ' + v + 'mm', 'sys');
+};
+
+// 휠클릭 연결 모드 토글
+window.sk3ToggleWheelConnect = function(){
+  if(state.wheelConnectMode){
+    state.wheelConnectMode = false;
+    state.wheelConnectFirst = -1;
+    toast('⚡ 연결 모드 OFF');
+    skCmdLog('  ⚡ 휠클릭 연결 OFF', 'sys');
+  } else {
+    state.wheelConnectMode = true;
+    state.wheelConnectFirst = -1;
+    toast('⚡ 연결 ON: 두 점에서 휠클릭(가운데버튼)으로 선 연결');
+    skCmdLog('  ⚡ 휠클릭 연결 ON (1회용)', 'sys');
+  }
+  const btn = document.getElementById('btn-wconnect');
+  if(btn) btn.style.background = state.wheelConnectMode ? '#d35400' : '';
+};
+
+// 가장 가까운 한붓그리기 점 찾기 (worldspace tolerance ~ 5px)
+function sk3FindNearestPenPoint(wp){
+  const tol = 8 / state.pixelsPerMm;
+  let bestIdx = -1, bestD = Infinity;
+  state.penPoints.forEach((p, i) => {
+    const d = Math.hypot(p.x - wp.x, p.y - wp.y);
+    if(d < tol && d < bestD){ bestD = d; bestIdx = i; }
+  });
+  return bestIdx;
+}
+
+// 휠클릭 → 점 연결
+function sk3HandleWheelConnectClick(wp){
+  const idx = sk3FindNearestPenPoint(wp);
+  if(idx < 0){ toast('점 위에서 휠클릭하세요'); return; }
+  if(state.wheelConnectFirst < 0){
+    state.wheelConnectFirst = idx;
+    state.penCur = idx;
+    redrawSketch();
+    toast('⚡ 시작 P' + idx + ' → 둘째 점 휠클릭');
+    skCmdLog('  ⚡ 시작점 P' + idx, 'sys');
+    return;
+  }
+  const i1 = state.wheelConnectFirst, i2 = idx;
+  if(i1 === i2){ toast('다른 점을 선택하세요'); return; }
+  const p1 = state.penPoints[i1], p2 = state.penPoints[i2];
+  pushHistory();
+  state.shapes.push({type:'line', x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y,
+    color: document.getElementById('sketchColor').value || '#000000',
+    lineWidth: parseInt(document.getElementById('lineWidth').value)||2});
+  state.penCur = i2;
+  redrawSketch(); updateInfo();
+  skCmdLog('  ⚡ 연결: P' + i1 + '–P' + i2 + ' (자동 OFF)', 'sys');
+  toast('⚡ P' + i1 + '–P' + i2 + ' 연결 완료');
+  // 자동 OFF
+  state.wheelConnectMode = false;
+  state.wheelConnectFirst = -1;
+  const btn = document.getElementById('btn-wconnect');
+  if(btn) btn.style.background = '';
+}
+
+// ─── 스케치 더블클릭 → 도형 속성 편집 모달 ───────────────
+function sk3FindShapeAt(wp){
+  const tol = 8 / state.pixelsPerMm;
+  for(let i = state.shapes.length - 1; i >= 0; i--){
+    const s = state.shapes[i];
+    if(s.type === 'line'){
+      const dx = s.x2-s.x1, dy = s.y2-s.y1, ln2 = dx*dx+dy*dy;
+      if(ln2 < 1e-9) continue;
+      let t = ((wp.x-s.x1)*dx + (wp.y-s.y1)*dy)/ln2;
+      if(t < -0.05 || t > 1.05) continue;
+      t = Math.max(0, Math.min(1, t));
+      const px = s.x1+dx*t, py = s.y1+dy*t;
+      if(Math.hypot(wp.x-px, wp.y-py) < tol) return {idx:i, s:s};
+    } else if(s.type === 'rect'){
+      const minX = Math.min(s.x1,s.x2), maxX = Math.max(s.x1,s.x2);
+      const minY = Math.min(s.y1,s.y2), maxY = Math.max(s.y1,s.y2);
+      // 경계 또는 내부
+      if(wp.x >= minX-tol && wp.x <= maxX+tol && wp.y >= minY-tol && wp.y <= maxY+tol){
+        return {idx:i, s:s};
+      }
+    } else if(s.type === 'circle'){
+      const d = Math.hypot(wp.x-s.cx, wp.y-s.cy);
+      if(Math.abs(d - s.r) < tol || d < s.r) return {idx:i, s:s};
+    } else if(s.type === 'arc'){
+      const d = Math.hypot(wp.x-s.cx, wp.y-s.cy);
+      if(Math.abs(d - s.r) < tol) return {idx:i, s:s};
+    }
+  }
+  return null;
+}
+
+function sk3OpenShapeEditor(hit){
+  if(!hit || !hit.s) return;
+  const s = hit.s;
+  let info = '도형 #' + hit.idx + ' [' + s.type + ']\n';
+  if(s.type === 'line'){
+    const L = Math.hypot(s.x2-s.x1, s.y2-s.y1);
+    info += '길이: ' + L.toFixed(2) + 'mm\n';
+    info += '시작: (' + s.x1.toFixed(2) + ', ' + s.y1.toFixed(2) + ')\n';
+    info += '끝:   (' + s.x2.toFixed(2) + ', ' + s.y2.toFixed(2) + ')';
+  } else if(s.type === 'rect'){
+    const W = Math.abs(s.x2-s.x1), H = Math.abs(s.y2-s.y1);
+    info += 'W×H: ' + W.toFixed(2) + ' × ' + H.toFixed(2) + 'mm';
+  } else if(s.type === 'circle'){
+    info += '중심: (' + s.cx.toFixed(2) + ', ' + s.cy.toFixed(2) + ')\n';
+    info += '직경 Ø' + (s.r*2).toFixed(2) + 'mm (R' + s.r.toFixed(2) + ')';
+  } else if(s.type === 'arc'){
+    info += '중심: (' + s.cx.toFixed(2) + ', ' + s.cy.toFixed(2) + ') R' + s.r.toFixed(2) + 'mm';
+  }
+  const action = prompt(info + '\n\n[1]색상 변경  [2]선두께 변경  [3]채움색 변경  [4]크기 변경  [5]삭제  취소=Cancel', '1');
+  if(action === null) return;
+  pushHistory();
+  if(action === '1'){
+    const c = prompt('선 색상 (#hex)', s.color || '#000000');
+    if(c){ s.color = c; }
+  } else if(action === '2'){
+    const w = parseFloat(prompt('선 두께 (1-20)', String(s.lineWidth || 2)));
+    if(isFinite(w) && w > 0){ s.lineWidth = w; }
+  } else if(action === '3'){
+    const c = prompt('채움 색상 (#hex, 빈값=제거)', s.fillColor || '#ffd54a');
+    if(c === ''){ delete s.fillColor; } else if(c){ s.fillColor = c; }
+  } else if(action === '4'){
+    if(s.type === 'circle'){
+      const d = parseFloat(prompt('직경 (mm)', String(s.r*2)));
+      if(isFinite(d) && d > 0) s.r = d/2;
+    } else if(s.type === 'rect'){
+      const w = parseFloat(prompt('가로 W (mm)', String(Math.abs(s.x2-s.x1))));
+      const h = parseFloat(prompt('세로 H (mm)', String(Math.abs(s.y2-s.y1))));
+      if(isFinite(w) && isFinite(h) && w > 0 && h > 0){
+        const cx = (s.x1+s.x2)/2, cy = (s.y1+s.y2)/2;
+        s.x1 = cx - w/2; s.y1 = cy - h/2;
+        s.x2 = cx + w/2; s.y2 = cy + h/2;
+      }
+    } else if(s.type === 'line'){
+      const L = parseFloat(prompt('길이 (mm) — 시작점 고정, 끝점 비율 조정', String(Math.hypot(s.x2-s.x1, s.y2-s.y1))));
+      if(isFinite(L) && L > 0){
+        const dx = s.x2-s.x1, dy = s.y2-s.y1, ln = Math.hypot(dx,dy);
+        if(ln > 1e-6){
+          s.x2 = s.x1 + dx/ln*L;
+          s.y2 = s.y1 + dy/ln*L;
+        }
+      }
+    } else if(s.type === 'arc'){
+      const r = parseFloat(prompt('반지름 (mm)', String(s.r)));
+      if(isFinite(r) && r > 0) s.r = r;
+    }
+  } else if(action === '5'){
+    if(confirm('정말 삭제하시겠습니까?')){
+      state.shapes.splice(hit.idx, 1);
+    }
+  }
+  redrawSketch(); updateInfo();
+  skCmdLog('  ✏ 도형 #' + hit.idx + ' 편집됨', 'sys');
+}
+
 
 function drawGrid(){
   const w = skCanvas.width, h = skCanvas.height;
@@ -590,6 +809,12 @@ skCanvas.addEventListener('mousedown', (e)=>{
   let wp = screenToWorld(sx, sy);
   wp = snapPoint(wp);
   
+  // 휠클릭(중간버튼)으로 연결 모드면 연결 우선 처리
+  if(e.button === 1 && state.wheelConnectMode){
+    e.preventDefault();
+    sk3HandleWheelConnectClick(wp);
+    return;
+  }
   // 휠클릭(중간버튼) 또는 우클릭으로 화면 이동 (CAD 표준)
   if(e.button === 1 || e.button === 2){
     e.preventDefault();
@@ -608,6 +833,36 @@ skCanvas.addEventListener('mousedown', (e)=>{
   if(state.tool === 'wipe'){
     state.drawing = {type:'wipe', start: wp, current: wp};
     redrawSketch();
+    return;
+  }
+
+  if(state.tool === 'pen'){
+    // 한붓그리기 펜: 클릭 = 점 추가 + 이전 점과 선 연결
+    // Shift = 직교 스냅 (수직/수평/45°)
+    let tx = wp.x, ty = wp.y;
+    if(e.shiftKey && state.penCur >= 0 && state.penPoints[state.penCur]){
+      const cur = state.penPoints[state.penCur];
+      const dx = wp.x - cur.x, dy = wp.y - cur.y;
+      // 8방향 스냅
+      const ang = Math.atan2(dy, dx);
+      const snapAng = Math.round(ang / (Math.PI/4)) * (Math.PI/4);
+      const ln = Math.hypot(dx, dy);
+      tx = cur.x + ln*Math.cos(snapAng);
+      ty = cur.y + ln*Math.sin(snapAng);
+    }
+    pushHistory();
+    // 이전 점이 있으면 선 자동 추가
+    if(state.penCur >= 0 && state.penPoints[state.penCur]){
+      const cur = state.penPoints[state.penCur];
+      state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:tx, y2:ty,
+        color: document.getElementById('sketchColor').value || '#000000',
+        lineWidth: parseInt(document.getElementById('lineWidth').value)||2});
+    }
+    // 새 점 추가
+    state.penPoints.push({x:tx, y:ty});
+    state.penCur = state.penPoints.length - 1;
+    redrawSketch(); updateInfo();
+    setStat('펜: P' + state.penCur + ' (' + tx.toFixed(2) + ', ' + ty.toFixed(2) + ')mm · Esc=종료 · Shift=직교');
     return;
   }
 
@@ -920,6 +1175,40 @@ window.addEventListener('mouseup', ()=>{
 
 skCanvas.addEventListener('contextmenu', (e)=>e.preventDefault());
 
+// 스케치 더블클릭 → 도형 속성 편집 모달
+skCanvas.addEventListener('dblclick', (e)=>{
+  if(state.mode !== 'sketch') return;
+  const rect = skCanvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const wp = screenToWorld(sx, sy);
+  const hit = sk3FindShapeAt(wp);
+  if(hit){
+    sk3OpenShapeEditor(hit);
+  } else {
+    // 점 위 더블클릭 → 점 좌표 변경
+    const pidx = sk3FindNearestPenPoint(wp);
+    if(pidx >= 0){
+      const p = state.penPoints[pidx];
+      const newX = parseFloat(prompt('P' + pidx + ' X (mm)', String(p.x.toFixed(3))));
+      if(isNaN(newX)) return;
+      const newY = parseFloat(prompt('P' + pidx + ' Y (mm)', String(p.y.toFixed(3))));
+      if(isNaN(newY)) return;
+      pushHistory();
+      // 점 좌표 변경 + 연결된 선 이동
+      const tol = 0.01;
+      state.shapes.forEach(s => {
+        if(s.type !== 'line') return;
+        if(Math.abs(s.x1-p.x)<tol && Math.abs(s.y1-p.y)<tol){ s.x1=newX; s.y1=newY; }
+        if(Math.abs(s.x2-p.x)<tol && Math.abs(s.y2-p.y)<tol){ s.x2=newX; s.y2=newY; }
+      });
+      p.x = newX; p.y = newY;
+      redrawSketch(); updateInfo();
+      skCmdLog('  ✏ P' + pidx + ' → (' + newX + ', ' + newY + ')', 'sys');
+    }
+  }
+});
+
 skCanvas.addEventListener('wheel', (e)=>{
   if(state.mode !== 'sketch') return;
   e.preventDefault();
@@ -985,7 +1274,7 @@ function setTool(t){
   });
   const btn = document.getElementById('btn-' + t);
   if(btn) btn.classList.add('active');
-  const names = {line:'선', rect:'사각형', circle:'원', arc:'호', select:'선택', fillet:'필렛', wipe:'쓸어지우기'};
+  const names = {line:'선', rect:'사각형', circle:'원', arc:'호', select:'선택', fillet:'필렛', wipe:'쓸어지우기', pen:'펜(한붓)'};
   document.getElementById('footTool').textContent = names[t] || t;
   document.getElementById('curTool').textContent = names[t] || t;
   setStat('도구: ' + (names[t]||t));
@@ -1358,16 +1647,12 @@ function initThree(){
   } catch(_) {}
   
   // v2.4: 팅커캐드 스타일 격자 - 청록색 메인선, 회색 보조선
-  //   - 메인(10mm): 청록색
-  //   - 보조(1mm): 어두운 회색
-  // GridHelper는 단일 색상이므로 2개 겹쳐서 사용
-  gridHelper = new THREE.GridHelper(500, 500, 0x336060, 0x2a2a2a); // 1mm 보조 (500등분)
+  // v8.0: 1mm 보조 그리드(250,000 라인) 제거 — 성능 개선
+  // 10mm 메인 그리드만 사용 (50등분 = 2,500 라인)
+  gridHelper = new THREE.GridHelper(500, 50, 0x4ec9b0, 0x3a6a6a); // 10mm 격자만
+  gridHelper.userData.isMainGrid = true;
+  gridHelper.visible = state.showGrid;
   scene.add(gridHelper);
-  const gridMain = new THREE.GridHelper(500, 50, 0x4ec9b0, 0x3a6a6a); // 10mm 메인
-  gridMain.position.y = 0.01; // 보조선 위로 살짝
-  gridMain.userData.isMainGrid = true;
-  scene.add(gridMain);
-  gridHelper.userData.subGrid = gridMain; // 같이 토글되도록 참조 저장
   axesHelper = new THREE.AxesHelper(60);
   // v6.4: 축 색상 커스텀 — X=빨강, Y=파랑, Z=흰색
   //   AxesHelper 정점 색상 순서: X(2점), Y(2점), Z(2점)
@@ -5810,7 +6095,6 @@ function toggleGrid(){
     state.showGrid = !state.showGrid;
     if(gridHelper){
       gridHelper.visible = state.showGrid;
-      if(gridHelper.userData.subGrid) gridHelper.userData.subGrid.visible = state.showGrid;
     }
   } else {
     state.showGrid = !state.showGrid;
@@ -7556,6 +7840,7 @@ document.addEventListener('keydown', (e)=>{
     else if(e.key === 'a' || e.key === 'A') setTool('arc');
     else if(e.key === 'f' || e.key === 'F') setTool('fillet');
     else if(e.key === 's' || e.key === 'S') setTool('select');
+    else if(e.key === 'p' || e.key === 'P') setTool('pen');
     else if(e.key === 'g' || e.key === 'G') toggleGrid();
   }
 });
@@ -7986,7 +8271,9 @@ function sk3ExecuteCmd(raw) {
     'C':'circle','CIRCLE':'circle','CIR':'circle',
     'A':'arc','ARC':'arc',
     'F':'fillet','FILLET':'fillet',
-    'S':'select','SEL':'select','SELECT':'select','ESC':'select'
+    'S':'select','SEL':'select','SELECT':'select',
+    'P':'pen','PEN':'pen','펜':'pen',
+    'ESC':'select'
   };
   if (toolMap[upper]) {
     setTool(toolMap[upper]);
@@ -8143,8 +8430,13 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('  외곽선                 선택된 선들 끝점 자동 라벨', 'help');
     skCmdLog('  쓸어지우기 / WIPE      드래그 박스 안 도형 일괄 삭제', 'help');
     skCmdLog('  삼각형 W [X Y rot°]    정삼각형', 'help');
+    skCmdLog('  두께 N1 N2 좌/우       N1→N2 평행, 두께값(툴바)만큼', 'help');
+    skCmdLog('─── 마우스 ─────────────────────────────', 'sys');
+    skCmdLog('  도형 더블클릭         색·두께·크기·삭제 모달', 'help');
+    skCmdLog('  점 더블클릭           좌표 직접 입력 (연결 선 함께 이동)', 'help');
+    skCmdLog('  ⚡ 연결 ON + 휠클릭×2 두 점 선으로 연결 (자동 OFF)', 'help');
     skCmdLog('─── 도구 단축키 ───────────────────────────', 'sys');
-    skCmdLog('  L=선  R=사각형  C=원  A=호  F=필렛  S=선택', 'help');
+    skCmdLog('  L=선  R=사각형  C=원  A=호  P=✎펜  F=필렛  S=선택', 'help');
     skCmdLog('─── 기타 ──────────────────────────────────', 'sys');
     skCmdLog('  UNDO/U  REDO/Y  CLR  ZOOM N  2D  3D', 'help');
     skCmdLog('  : 또는 / 키 → 커맨드창 포커스', 'help');
@@ -9045,6 +9337,32 @@ function sk3ExecuteCmd(raw) {
     _penAddPt(nx, ny);
     redrawSketch(); updateInfo();
     skCmdLog('  · 점 ' + toks[1] + ' 지름 ' + D1 + ' ' + D2 + ' (독립) → P' + state.penCur, 'sys');
+    _lastCmd = raw; return;
+  }
+
+
+  // ─── 두께 N1 N2 좌/우 (소재 두께만큼 평행선) ──────────────
+  if(key === '두께' && toks.length >= 4){
+    const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
+    const side = toks[3];
+    const p1 = _penGetPt(i1), p2 = _penGetPt(i2);
+    if(!p1 || !p2){ skCmdLog('  ⚠ 두께: 점 번호 오류', 'err'); return; }
+    if(side !== '좌' && side !== '우' && side !== 'L' && side !== 'R'){
+      skCmdLog('  ⚠ 두께 방향은 좌/우', 'err'); return;
+    }
+    const T = state.thickness || 0.6;
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const ln = Math.hypot(dx, dy);
+    if(ln < 1e-6){ skCmdLog('  ⚠ 두 점이 일치', 'err'); return; }
+    let nx, ny;
+    if(side === '좌' || side === 'L'){ nx = -dy/ln; ny = dx/ln; }
+    else                              { nx =  dy/ln; ny = -dx/ln; }
+    const ox = nx*T, oy = ny*T;
+    pushHistory();
+    state.shapes.push({type:'line', x1:p1.x+ox, y1:p1.y+oy, x2:p2.x+ox, y2:p2.y+oy,
+      color:col(), lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    skCmdLog('  ⚙ 두께 P' + i1 + '–P' + i2 + ' ' + side + ' ' + T + 'mm', 'sys');
     _lastCmd = raw; return;
   }
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.7 (단일본) - 텍스트모드 통합 (커맨드바 + 명령 키보드 + 한붓그리기)</title>
+<title>tool3 v8.8 (단일본) - 텍스트모드 통합 (커맨드바 + 명령 키보드 + 한붓그리기)</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.7</h1>
+  <h1>📐 tool3 v8.8</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -2256,6 +2256,13 @@ const _SK_DBL_INTERVAL_POINT = 500;  // v8.7: 점 위 더블클릭만 500ms (실
 const _SK_DBL_DIST = 8;              // px
 skCanvas.addEventListener('click', (e)=>{
   if(state.mode !== 'sketch') return;
+  // v8.8: 펜 도구 ON이면 더블클릭 판정 자체를 skip
+  //   - mousedown이 이미 점 찍기로 처리했으므로 click의 더블클릭 트리거는 무용
+  //   - 방금 추가한 점이 hit되어 무한 점 추가/속성팝업 트리거 버그 해결
+  if(state.tool === 'pen'){
+    _skLastClickTime = 0; _skLastClickPos = null;
+    return;
+  }
   const now = Date.now();
   const rect = skCanvas.getBoundingClientRect();
   const sx = e.clientX - rect.left, sy = e.clientY - rect.top;

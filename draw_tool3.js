@@ -1224,6 +1224,13 @@ const _SK_DBL_INTERVAL_POINT = 500;  // v8.7: 점 위 더블클릭만 500ms (실
 const _SK_DBL_DIST = 8;              // px
 skCanvas.addEventListener('click', (e)=>{
   if(state.mode !== 'sketch') return;
+  // v8.8: 펜 도구 ON이면 더블클릭 판정 자체를 skip
+  //   - mousedown이 이미 점 찍기로 처리했으므로 click의 더블클릭 트리거는 무용
+  //   - 방금 추가한 점이 hit되어 무한 점 추가/속성팝업 트리거 버그 해결
+  if(state.tool === 'pen'){
+    _skLastClickTime = 0; _skLastClickPos = null;
+    return;
+  }
   const now = Date.now();
   const rect = skCanvas.getBoundingClientRect();
   const sx = e.clientX - rect.left, sy = e.clientY - rect.top;

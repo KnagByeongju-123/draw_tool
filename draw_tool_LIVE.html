@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.56 (라이브 단일본)</title>
+<title>도면 작도기 Rev.19.57 (라이브 단일본)</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -366,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.56</h1>
+  <h1>📐 도면 작도기 Rev.19.57</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -383,7 +383,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <!-- 드롭다운 메뉴바 (Rev.7.7) -->
 <!-- 기존 코드 호환용 숨김 더미 버튼들 -->
 <div style="display:none;">
-  <button id="btnClearBg"></button>
   <button id="btnContinuous"></button>
   <button id="btnSnap"></button>
   <button id="btnContinueFromSel"></button>
@@ -400,14 +399,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
     <div class="menu-title">📁 파일 <span class="arrow">▼</span></div>
     <div class="menu-dropdown">
       <div class="menu-section">새로 시작</div>
-      <div class="menu-item" id="btnNewFile"><span class="ico">📄</span> 새 파일 (전체 초기화)<span class="shortcut">Ctrl+N</span></div>
-      <div class="menu-sep"></div>
-      <div class="menu-section">배경</div>
-      <label class="menu-item" style="cursor:pointer;">
-        <span class="ico">📷</span> 배경 이미지 열기...
-        <input type="file" id="imgFile" accept="image/*" style="display:none;">
-      </label>
-      <div class="menu-item" id="menuClearBg"><span class="ico">❌</span> 배경 이미지 제거</div>
       <div class="menu-sep"></div>
       <div class="menu-section">프로젝트 (작업 저장/열기)</div>
       <div class="menu-item" id="btnSaveProject"><span class="ico">📁</span> 도면 저장 (.json)<span class="shortcut">Ctrl+S</span></div>
@@ -515,29 +506,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
         <span class="zoom-preset" data-zoom="100" style="cursor:pointer; padding:2px 6px; background:#3a3a3a; border-radius:3px;">100%</span>
         <span class="zoom-preset" data-zoom="200" style="cursor:pointer; padding:2px 6px; background:#3a3a3a; border-radius:3px;">200%</span>
       </div>
-      <div class="menu-item" style="cursor:default;">
-        <span class="ico">🖼️</span> 배경 투명도:
-        <input type="range" id="bgOpacity" min="0" max="100" value="100" style="margin-left:auto; width:90px;">
-        <span id="bgOpacityVal" style="font-size:10px; min-width:34px;">100%</span>
-      </div>
-      <div class="menu-sep"></div>
-      <div class="menu-section">배경 이미지 맞춤</div>
-      <div class="menu-item" style="cursor:default;">
-        <span class="ico">🔎</span> 배경 크기:
-        <input type="range" id="bgScale" min="10" max="400" value="100" style="margin-left:auto; width:90px;">
-        <span id="bgScaleVal" style="font-size:10px; min-width:34px;">100%</span>
-      </div>
-      <div class="menu-item" style="cursor:default;">
-        <span class="ico">↔️</span> 배경 X:
-        <input type="range" id="bgOffsetX" min="-1000" max="1000" value="0" style="margin-left:auto; width:90px;">
-        <span id="bgOffsetXVal" style="font-size:10px; min-width:34px;">0</span>
-      </div>
-      <div class="menu-item" style="cursor:default;">
-        <span class="ico">↕️</span> 배경 Y:
-        <input type="range" id="bgOffsetY" min="-1000" max="1000" value="0" style="margin-left:auto; width:90px;">
-        <span id="bgOffsetYVal" style="font-size:10px; min-width:34px;">0</span>
-      </div>
-      <div class="menu-item" id="menuBgReset" style="cursor:pointer;"><span class="ico">↩️</span> 배경 위치/크기 초기화</div>
     </div>
   </div>
 
@@ -1593,14 +1561,6 @@ let zoom = 0.06;
 // Rev.11.24: 눈금자(그리드) 표시
 let gridOn = false;
 let gridSpacingMm = 10;   // 격자 간격 (mm)
-let bgImage = null;
-let bgImageOpacity = 1.0; // 배경 이미지 불투명도 (0~1)
-let bgImageScale = 1.0;   // Rev.11.10: 배경 이미지 자체 확대/축소 (도면 맞춤용)
-let bgImageOffsetX = 0;   // Rev.11.10: 배경 이미지 X 오프셋 (px)
-let bgImageOffsetY = 0;   // Rev.11.10: 배경 이미지 Y 오프셋 (px)
-let bgZoom = 1.0;         // Rev.13.2: 배경 독립 확대/축소 (작업영역과 별개, CSS transform)
-let bgZoomOriginX = 50;   // transform-origin X (%)
-let bgZoomOriginY = 50;   // transform-origin Y (%)
 let tool = 'select';
 let shapes = [];
 let fills = [];        // 영역 채움 목록 [{type:'fill', points:[{x,y}...], color, alpha}]
@@ -1615,6 +1575,8 @@ let firstClick = null;
 
 let continuousMode = false;
 let snapMode = false;
+// Rev.19.57: 배경 이미지 기능 삭제 — 조건분기 호환용으로만 null 유지
+let bgImage = null;
 let snapPoints = [];
 let snapShown = null;
 let selectedIds = new Set();
@@ -1790,43 +1752,6 @@ function fitZoomToViewport(){
 }
 
 // ====== 배경 ======
-document.getElementById('imgFile').addEventListener('change', e => {
-  const f = e.target.files[0];
-  if (!f) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const img = new Image();
-    img.onload = () => {
-      bgImage = img;
-      // Rev.11.10: 새 이미지 로드 시 배경 맞춤 슬라이더 초기화
-      bgImageScale = 1.0; bgImageOffsetX = 0; bgImageOffsetY = 0;
-      bgZoom = 1.0; bgZoomOriginX = 50; bgZoomOriginY = 50; applyBgZoom();
-      const bs = document.getElementById('bgScale');
-      const bx = document.getElementById('bgOffsetX');
-      const by = document.getElementById('bgOffsetY');
-      if (bs){ bs.value = 100; document.getElementById('bgScaleVal').textContent = '100%'; }
-      if (bx){ bx.value = 0; document.getElementById('bgOffsetXVal').textContent = '0'; }
-      if (by){ by.value = 0; document.getElementById('bgOffsetYVal').textContent = '0'; }
-      setCanvasSize(img.naturalWidth, img.naturalHeight);
-      fitZoomToViewport();   // Rev.16.50: 불러온 이미지 화면 꽉 차게 자동 맞춤
-      resetCalibration();
-      if (typeof cv !== 'undefined' && cv.Mat) {
-        detectSnapPoints();
-        detectBackgroundArcs();
-      }
-    };
-    img.src = ev.target.result;
-  };
-  reader.readAsDataURL(f);
-});
-
-document.getElementById('btnClearBg').addEventListener('click', () => {
-  bgImage = null;
-  snapPoints = []; detectedArcs = [];
-  updateSnapStat();
-  redrawBg();
-});
-
 document.getElementById('zoom').addEventListener('input', e => {
   zoom = parseInt(e.target.value) / 100;
   document.getElementById('zoomVal').textContent = e.target.value + '%';
@@ -1866,47 +1791,6 @@ document.getElementById('zoom').addEventListener('input', e => {
     if (typeof updateSelActionBar === 'function') updateSelActionBar();
   }, { passive:false });
 })();
-
-// 배경 이미지 불투명도
-document.getElementById('bgOpacity').addEventListener('input', e => {
-  bgImageOpacity = parseInt(e.target.value) / 100;
-  document.getElementById('bgOpacityVal').textContent = e.target.value + '%';
-  redrawBg();
-});
-
-// Rev.11.10: 배경 이미지 크기 (도면 맞춤용)
-document.getElementById('bgScale').addEventListener('input', e => {
-  bgImageScale = parseInt(e.target.value) / 100;
-  document.getElementById('bgScaleVal').textContent = e.target.value + '%';
-  redrawBg();
-});
-
-// Rev.11.10: 배경 이미지 X 오프셋
-document.getElementById('bgOffsetX').addEventListener('input', e => {
-  bgImageOffsetX = parseInt(e.target.value);
-  document.getElementById('bgOffsetXVal').textContent = e.target.value;
-  redrawBg();
-});
-
-// Rev.11.10: 배경 이미지 Y 오프셋
-document.getElementById('bgOffsetY').addEventListener('input', e => {
-  bgImageOffsetY = parseInt(e.target.value);
-  document.getElementById('bgOffsetYVal').textContent = e.target.value;
-  redrawBg();
-});
-
-// Rev.11.10: 배경 위치/크기 초기화
-document.getElementById('menuBgReset').addEventListener('click', () => {
-  bgImageScale = 1.0; bgImageOffsetX = 0; bgImageOffsetY = 0;
-  bgZoom = 1.0; bgZoomOriginX = 50; bgZoomOriginY = 50; applyBgZoom();
-  document.getElementById('bgScale').value = 100;
-  document.getElementById('bgScaleVal').textContent = '100%';
-  document.getElementById('bgOffsetX').value = 0;
-  document.getElementById('bgOffsetXVal').textContent = '0';
-  document.getElementById('bgOffsetY').value = 0;
-  document.getElementById('bgOffsetYVal').textContent = '0';
-  redrawBg();
-});
 
 // Rev.11.10: 빠른 배율 프리셋 버튼
 document.querySelectorAll('.zoom-preset').forEach(el => {
@@ -2139,7 +2023,6 @@ document.querySelectorAll('.ts-act').forEach(btn => {
     const a = btn.dataset.act;
     const trigger = id => { const el = document.getElementById(id); if (el) el.click(); };
     switch(a){
-      case 'open':     trigger('imgFile'); break;
       case 'save':     trigger('btnSaveProject'); break;
       case 'undo':     trigger('btnUndo'); break;
       case 'redo':     trigger('btnRedo'); break;
@@ -9780,22 +9663,10 @@ function handleArcHandleDrag(p) {
 }
 
 // Rev.13.2: 배경 캔버스만 독립 CSS scale (작업 캔버스와 무관)
-function applyBgZoom() {
-  bgCanvas.style.transformOrigin = bgZoomOriginX + '% ' + bgZoomOriginY + '%';
-  bgCanvas.style.transform = 'scale(' + bgZoom + ')';
-}
 function redrawAll() { redrawBg(); redrawFills(); redrawDraw(); }
 function redrawBg() {
+  // Rev.19.57: 배경 이미지 기능 삭제 — 그리드만 그림
   bgCtx.clearRect(0,0,baseW,baseH);
-  if (bgImage) {
-    // Rev.19.55: 배경 이미지를 캔버스 작업영역에 자동으로 꽉 채워서 그림 (offset/scale 무시)
-    bgCtx.save();
-    bgCtx.globalAlpha = bgImageOpacity;
-    bgCtx.drawImage(bgImage, 0, 0, baseW, baseH);
-    bgCtx.restore();
-    bgCtx.globalAlpha = 1;
-  }
-  // Rev.11.24: 눈금자(그리드)
   if (gridOn) drawGrid();
 }
 
@@ -10245,14 +10116,6 @@ function buildProjectData(){
     calibSet: calibSet,
     baseW: baseW, baseH: baseH,
     zoom: zoom,
-    bg: {
-      hasImage: !!bgImage,
-      src: bgImage ? (bgImage.src || null) : null, // dataURL이면 그대로 보존
-      opacity: bgImageOpacity,
-      scale: bgImageScale,
-      offsetX: bgImageOffsetX,
-      offsetY: bgImageOffsetY
-    },
     shapes: JSON.parse(JSON.stringify(shapes)),
     fills: JSON.parse(JSON.stringify(fills)),
     rotAxis: rotAxis ? JSON.parse(JSON.stringify(rotAxis)) : null,
@@ -10316,21 +10179,6 @@ function loadProjectData(data){
       document.getElementById('statusHint').textContent = `📂 도면 열기 완료 (도형 ${shapes.length}개)`;
   };
 
-  // 배경 이미지 복원 (dataURL일 때만)
-  const bg = data.bg || {};
-  bgImageOpacity = (typeof bg.opacity === 'number') ? bg.opacity : 1.0;
-  bgImageScale   = (typeof bg.scale === 'number') ? bg.scale : 1.0;
-  bgImageOffsetX = (typeof bg.offsetX === 'number') ? bg.offsetX : 0;
-  bgImageOffsetY = (typeof bg.offsetY === 'number') ? bg.offsetY : 0;
-  if (bg.hasImage && bg.src && bg.src.indexOf('data:') === 0){
-    const img = new Image();
-    img.onload = () => { bgImage = img; finishLoad(); };
-    img.onerror = () => { bgImage = null; finishLoad(); };
-    img.src = bg.src;
-  } else {
-    bgImage = null;
-    finishLoad();
-  }
   return true;
 }
 
@@ -11934,10 +11782,6 @@ document.querySelectorAll('.menu-item').forEach(it => {
   });
 });
 
-// 신규 메뉴 ID들 → 기존 더미 버튼으로 위임
-document.getElementById('menuClearBg').addEventListener('click', () => {
-  document.getElementById('btnClearBg').click();
-});
 document.getElementById('menuContinueFromSel').addEventListener('click', () => {
   document.getElementById('btnContinueFromSel').click();
 });
@@ -12509,8 +12353,6 @@ window.addEventListener('keydown', e => {
   if (e.ctrlKey && e.key === '0') {
     e.preventDefault();
     if (bgImage) {
-      bgZoom = 1.0; bgZoomOriginX = 50; bgZoomOriginY = 50;
-      applyBgZoom();
       const hint = document.getElementById('statusHint');
       if (hint) hint.textContent = '🖼 배경 독립줌 초기화 (100%)';
     }
@@ -15762,19 +15604,6 @@ function tryDimCommand(cmdStr){
           if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
           if (typeof openPenShapeModal === 'function') openPenShapeModal('triangle', null);
         }, ex:'△ 정삼각형: 중심X,Y · 변 길이 · 회전° 입력 → 도형 추가' },
-      // Rev.19.52: 배경 도면(이미지) — 사각형 안에 도면 맞춰 넣기
-      { l:'📷 배경 도면', action: () => {
-          const f = document.getElementById('imgFile');
-          if (f) f.click();
-          const sh = document.getElementById('statusHint');
-          if (sh) sh.textContent = '📷 배경 이미지 선택: 캔버스에 자동으로 채워집니다';
-        }, ex:'📷 배경 도면 열기: 이미지 파일 선택 → 캔버스 작업영역에 자동으로 꽉 채워 표시' },
-      { l:'❌ 배경 제거', action: () => {
-          const m = document.getElementById('menuClearBg');
-          if (m) m.click();
-          const sh = document.getElementById('statusHint');
-          if (sh) sh.textContent = '❌ 배경 이미지 제거됨';
-        }, ex:'❌ 배경 이미지 제거 (도형은 유지)' },
     ],
     '연장/절교': [
       { l:'연장', t:'연장 ', ex:'연장 1 2 30 / 교점 / X 50 / Y 30' },
@@ -17306,24 +17135,6 @@ function initPanZoom() {
       if (e.deltaY < 0) subdivideCount = Math.min(50, subdivideCount + 1);
       else subdivideCount = Math.max(1, subdivideCount - 1);
       drawSubdividePreview();
-      return;
-    }
-
-    // Rev.13.1: Ctrl+휠 = 배경 독립 확대/축소 (작업영역과 별개 CSS scale)
-    //            마우스 위치 기준 zoom-origin → 마우스 아래 지점 고정
-    if (e.ctrlKey && bgImage) {
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.08 : (1 / 1.08);
-      bgZoom = Math.max(0.05, Math.min(20.0, bgZoom * factor));
-
-      // 마우스 위치를 bgCanvas 기준 % 로 변환 → transform-origin 설정
-      const rect = bgCanvas.getBoundingClientRect();
-      bgZoomOriginX = Math.max(0, Math.min(100, Math.round(((e.clientX - rect.left) / rect.width)  * 100)));
-      bgZoomOriginY = Math.max(0, Math.min(100, Math.round(((e.clientY - rect.top)  / rect.height) * 100)));
-      applyBgZoom();
-
-      const hint = document.getElementById('statusHint');
-      if (hint) hint.textContent = `🖼 배경 독립줌: ${Math.round(bgZoom*100)}%  (Ctrl+휠 / Ctrl+0=초기화)`;
       return;
     }
 

@@ -3064,19 +3064,6 @@ function tryDimCommand(cmdStr){
           if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
           if (typeof openPenShapeModal === 'function') openPenShapeModal('triangle', null);
         }, ex:'△ 정삼각형: 중심X,Y · 변 길이 · 회전° 입력 → 도형 추가' },
-      // Rev.19.52: 배경 도면(이미지) — 사각형 안에 도면 맞춰 넣기
-      { l:'📷 배경 도면', action: () => {
-          const f = document.getElementById('imgFile');
-          if (f) f.click();
-          const sh = document.getElementById('statusHint');
-          if (sh) sh.textContent = '📷 배경 이미지 선택: 캔버스에 자동으로 채워집니다';
-        }, ex:'📷 배경 도면 열기: 이미지 파일 선택 → 캔버스 작업영역에 자동으로 꽉 채워 표시' },
-      { l:'❌ 배경 제거', action: () => {
-          const m = document.getElementById('menuClearBg');
-          if (m) m.click();
-          const sh = document.getElementById('statusHint');
-          if (sh) sh.textContent = '❌ 배경 이미지 제거됨';
-        }, ex:'❌ 배경 이미지 제거 (도형은 유지)' },
     ],
     '연장/절교': [
       { l:'연장', t:'연장 ', ex:'연장 1 2 30 / 교점 / X 50 / Y 30' },

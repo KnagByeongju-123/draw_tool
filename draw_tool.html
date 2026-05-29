@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.56</title>
+<title>도면 작도기 Rev.19.57</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -366,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.56</h1>
+  <h1>📐 도면 작도기 Rev.19.57</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -383,7 +383,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <!-- 드롭다운 메뉴바 (Rev.7.7) -->
 <!-- 기존 코드 호환용 숨김 더미 버튼들 -->
 <div style="display:none;">
-  <button id="btnClearBg"></button>
   <button id="btnContinuous"></button>
   <button id="btnSnap"></button>
   <button id="btnContinueFromSel"></button>
@@ -400,14 +399,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
     <div class="menu-title">📁 파일 <span class="arrow">▼</span></div>
     <div class="menu-dropdown">
       <div class="menu-section">새로 시작</div>
-      <div class="menu-item" id="btnNewFile"><span class="ico">📄</span> 새 파일 (전체 초기화)<span class="shortcut">Ctrl+N</span></div>
-      <div class="menu-sep"></div>
-      <div class="menu-section">배경</div>
-      <label class="menu-item" style="cursor:pointer;">
-        <span class="ico">📷</span> 배경 이미지 열기...
-        <input type="file" id="imgFile" accept="image/*" style="display:none;">
-      </label>
-      <div class="menu-item" id="menuClearBg"><span class="ico">❌</span> 배경 이미지 제거</div>
       <div class="menu-sep"></div>
       <div class="menu-section">프로젝트 (작업 저장/열기)</div>
       <div class="menu-item" id="btnSaveProject"><span class="ico">📁</span> 도면 저장 (.json)<span class="shortcut">Ctrl+S</span></div>
@@ -515,29 +506,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
         <span class="zoom-preset" data-zoom="100" style="cursor:pointer; padding:2px 6px; background:#3a3a3a; border-radius:3px;">100%</span>
         <span class="zoom-preset" data-zoom="200" style="cursor:pointer; padding:2px 6px; background:#3a3a3a; border-radius:3px;">200%</span>
       </div>
-      <div class="menu-item" style="cursor:default;">
-        <span class="ico">🖼️</span> 배경 투명도:
-        <input type="range" id="bgOpacity" min="0" max="100" value="100" style="margin-left:auto; width:90px;">
-        <span id="bgOpacityVal" style="font-size:10px; min-width:34px;">100%</span>
-      </div>
-      <div class="menu-sep"></div>
-      <div class="menu-section">배경 이미지 맞춤</div>
-      <div class="menu-item" style="cursor:default;">
-        <span class="ico">🔎</span> 배경 크기:
-        <input type="range" id="bgScale" min="10" max="400" value="100" style="margin-left:auto; width:90px;">
-        <span id="bgScaleVal" style="font-size:10px; min-width:34px;">100%</span>
-      </div>
-      <div class="menu-item" style="cursor:default;">
-        <span class="ico">↔️</span> 배경 X:
-        <input type="range" id="bgOffsetX" min="-1000" max="1000" value="0" style="margin-left:auto; width:90px;">
-        <span id="bgOffsetXVal" style="font-size:10px; min-width:34px;">0</span>
-      </div>
-      <div class="menu-item" style="cursor:default;">
-        <span class="ico">↕️</span> 배경 Y:
-        <input type="range" id="bgOffsetY" min="-1000" max="1000" value="0" style="margin-left:auto; width:90px;">
-        <span id="bgOffsetYVal" style="font-size:10px; min-width:34px;">0</span>
-      </div>
-      <div class="menu-item" id="menuBgReset" style="cursor:pointer;"><span class="ico">↩️</span> 배경 위치/크기 초기화</div>
     </div>
   </div>
 

@@ -430,9 +430,13 @@ function sk3FormatCoord(x, y){
 // 점좌표 표시 토글
 window.sk3TogglePenCoord = function(){
   state.penShowCoord = !state.penShowCoord;
+  // v8.4: 점좌표 ON 시 펜 도구 자동 활성화 (사용자가 점 찍을 의도)
+  if(state.penShowCoord && state.tool !== 'pen' && typeof setTool === 'function'){
+    setTool('pen');
+  }
   redrawSketch();
   skCmdLog('  📍 점 좌표라벨 ' + (state.penShowCoord ? 'ON' : 'OFF'), 'sys');
-  toast('점좌표 ' + (state.penShowCoord ? 'ON' : 'OFF'));
+  toast('점좌표 ' + (state.penShowCoord ? 'ON (펜 도구 자동 활성)' : 'OFF'));
   const btn = document.getElementById('btn-pencoord');
   if(btn) btn.style.background = state.penShowCoord ? '#a04030' : '';
 };
@@ -450,7 +454,9 @@ window.sk3ToggleDiameter = function(){
     if(isNaN(Cy)) return;
     state.penDiameterMode = {Cx, Cy};
     skCmdLog('  ⌀ 직경좌표 ON: Cx=' + Cx + ', Cy=' + Cy, 'sys');
-    toast('직경좌표 ON');
+    toast('직경좌표 ON (펜 도구 자동 활성)');
+    // v8.4: 직경좌표 ON 시 펜 도구 자동 활성화
+    if(state.tool !== 'pen' && typeof setTool === 'function') setTool('pen');
   }
   redrawSketch();
   const btn = document.getElementById('btn-diameter');
@@ -478,6 +484,8 @@ window.sk3ToggleWheelConnect = function(){
     state.wheelConnectFirst = -1;
     toast('⚡ 연결 ON: 두 점에서 휠클릭(가운데버튼)으로 선 연결');
     skCmdLog('  ⚡ 휠클릭 연결 ON (1회용)', 'sys');
+    // v8.4: 연결 모드 ON 시 펜 도구 자동 활성화 (점 위 휠클릭 선택용)
+    if(state.tool !== 'pen' && typeof setTool === 'function') setTool('pen');
   }
   const btn = document.getElementById('btn-wconnect');
   if(btn) btn.style.background = state.wheelConnectMode ? '#d35400' : '';
@@ -867,6 +875,12 @@ skCanvas.addEventListener('mousedown', (e)=>{
   }
 
   if(state.tool === 'select'){
+    // v8.4: select 도구로 빈 곳 좌클릭 시 안내 메시지 (점 찍기는 펜 도구로)
+    const hitShape = sk3FindShapeAt(wp);
+    const hitPoint = sk3FindNearestPenPoint(wp);
+    if(!hitShape && hitPoint < 0){
+      setStat('💡 점을 찍으려면 좌측 ✎ 펜 버튼(P키) 또는 📍 점좌표 버튼을 누르세요');
+    }
     selectShapeAt(wp, e.shiftKey);
     return;
   }

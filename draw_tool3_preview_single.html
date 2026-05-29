@@ -305,6 +305,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <button id="btn-rect" onclick="setTool('rect')" title="사각형 (R)">⬜</button>
     <button id="btn-circle" onclick="setTool('circle')" title="원 (C)">⭕</button>
     <button id="btn-arc" onclick="setTool('arc')" title="호 (A)">⌒</button>
+    <button id="btn-pen" onclick="setTool('pen')" title="펜 한붓그리기 (P) - 좌클릭마다 점+선 자동 추가 · Shift=직교 · Esc=종료" style="background:#3a5530;color:#90e090;font-weight:bold">✎</button>
     <button id="btn-fillet" onclick="setTool('fillet')" title="필렛 (F) - 드래그로 선 2개 선택 후 R 입력">⌣R</button>
     <button id="btn-select" onclick="setTool('select')" title="선택 (S)">👆</button>
     <button id="btn-cmdkb" onclick="sk3ToggleCmdKb()" title="명령 키보드 (텍스트로 도면 그리기)" style="background:#3a5a80;color:#7ab8e8;font-weight:bold">⌨</button>
@@ -1327,7 +1328,7 @@ const state = {
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
   autoPopup: true, // v6.2: 도형 클릭 시 위치/크기/회전 입력 팝업 자동 표시
   blenderKeys: false, // v6.4: 블렌더식 단축키(G/R/S 모달 변형) 사용 여부
-  showGrid: true,
+  showGrid: false,  // 기본 OFF (필요시 G 키 또는 ⊞ 버튼)
   showAxes: true,
   wireframe: false,
   showEdges: true,  // v6.6: 입체도형 외곽 모서리 선 표시
@@ -1856,6 +1857,31 @@ skCanvas.addEventListener('mousedown', (e)=>{
     return;
   }
 
+  if(state.tool === 'pen'){
+    let tx = wp.x, ty = wp.y;
+    if(e.shiftKey && state.penCur >= 0 && state.penPoints[state.penCur]){
+      const cur = state.penPoints[state.penCur];
+      const dx = wp.x - cur.x, dy = wp.y - cur.y;
+      const ang = Math.atan2(dy, dx);
+      const snapAng = Math.round(ang / (Math.PI/4)) * (Math.PI/4);
+      const ln = Math.hypot(dx, dy);
+      tx = cur.x + ln*Math.cos(snapAng);
+      ty = cur.y + ln*Math.sin(snapAng);
+    }
+    pushHistory();
+    if(state.penCur >= 0 && state.penPoints[state.penCur]){
+      const cur = state.penPoints[state.penCur];
+      state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:tx, y2:ty,
+        color: document.getElementById('sketchColor').value || '#000000',
+        lineWidth: parseInt(document.getElementById('lineWidth').value)||2});
+    }
+    state.penPoints.push({x:tx, y:ty});
+    state.penCur = state.penPoints.length - 1;
+    redrawSketch(); updateInfo();
+    setStat('펜: P' + state.penCur + ' (' + tx.toFixed(2) + ', ' + ty.toFixed(2) + ')mm · Esc=종료 · Shift=직교');
+    return;
+  }
+
   if(state.tool === 'select'){
     selectShapeAt(wp, e.shiftKey);
     return;
@@ -2252,7 +2278,7 @@ function setTool(t){
   });
   const btn = document.getElementById('btn-' + t);
   if(btn) btn.classList.add('active');
-  const names = {line:'선', rect:'사각형', circle:'원', arc:'호', select:'선택', fillet:'필렛', wipe:'쓸어지우기'};
+  const names = {line:'선', rect:'사각형', circle:'원', arc:'호', select:'선택', fillet:'필렛', wipe:'쓸어지우기', pen:'펜(한붓)'};
   document.getElementById('footTool').textContent = names[t] || t;
   document.getElementById('curTool').textContent = names[t] || t;
   setStat('도구: ' + (names[t]||t));
@@ -2625,16 +2651,12 @@ function initThree(){
   } catch(_) {}
   
   // v2.4: 팅커캐드 스타일 격자 - 청록색 메인선, 회색 보조선
-  //   - 메인(10mm): 청록색
-  //   - 보조(1mm): 어두운 회색
-  // GridHelper는 단일 색상이므로 2개 겹쳐서 사용
-  gridHelper = new THREE.GridHelper(500, 500, 0x336060, 0x2a2a2a); // 1mm 보조 (500등분)
+  // v8.0: 1mm 보조 그리드(250,000 라인) 제거 — 성능 개선
+  // 10mm 메인 그리드만 사용 (50등분 = 2,500 라인)
+  gridHelper = new THREE.GridHelper(500, 50, 0x4ec9b0, 0x3a6a6a); // 10mm 격자만
+  gridHelper.userData.isMainGrid = true;
+  gridHelper.visible = state.showGrid;
   scene.add(gridHelper);
-  const gridMain = new THREE.GridHelper(500, 50, 0x4ec9b0, 0x3a6a6a); // 10mm 메인
-  gridMain.position.y = 0.01; // 보조선 위로 살짝
-  gridMain.userData.isMainGrid = true;
-  scene.add(gridMain);
-  gridHelper.userData.subGrid = gridMain; // 같이 토글되도록 참조 저장
   axesHelper = new THREE.AxesHelper(60);
   // v6.4: 축 색상 커스텀 — X=빨강, Y=파랑, Z=흰색
   //   AxesHelper 정점 색상 순서: X(2점), Y(2점), Z(2점)
@@ -7077,7 +7099,6 @@ function toggleGrid(){
     state.showGrid = !state.showGrid;
     if(gridHelper){
       gridHelper.visible = state.showGrid;
-      if(gridHelper.userData.subGrid) gridHelper.userData.subGrid.visible = state.showGrid;
     }
   } else {
     state.showGrid = !state.showGrid;
@@ -8823,6 +8844,7 @@ document.addEventListener('keydown', (e)=>{
     else if(e.key === 'a' || e.key === 'A') setTool('arc');
     else if(e.key === 'f' || e.key === 'F') setTool('fillet');
     else if(e.key === 's' || e.key === 'S') setTool('select');
+    else if(e.key === 'p' || e.key === 'P') setTool('pen');
     else if(e.key === 'g' || e.key === 'G') toggleGrid();
   }
 });
@@ -9244,7 +9266,9 @@ function sk3ExecuteCmd(raw) {
   const toolMap = {
     'L':'line','LINE':'line','R':'rect','REC':'rect','RECT':'rect',
     'C':'circle','CIRCLE':'circle','CIR':'circle','A':'arc','ARC':'arc',
-    'F':'fillet','FILLET':'fillet','S':'select','SEL':'select','SELECT':'select','ESC':'select'
+    'F':'fillet','FILLET':'fillet','S':'select','SEL':'select','SELECT':'select',
+    'P':'pen','PEN':'pen','펜':'pen',
+    'ESC':'select'
   };
   if (toolMap[upper]) {
     setTool(toolMap[upper]);
@@ -9388,7 +9412,7 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('  점 더블클릭           좌표 직접 입력 (연결 선 함께 이동)', 'help');
     skCmdLog('  ⚡ 연결 ON + 휠클릭×2 두 점 선으로 연결 (자동 OFF)', 'help');
     skCmdLog('─── 도구 ───────────────────────────────', 'sys');
-    skCmdLog('  L=선  R=사각형  C=원  A=호  F=필렛  S=선택', 'help');
+    skCmdLog('  L=선  R=사각형  C=원  A=호  P=✎펜  F=필렛  S=선택', 'help');
     skCmdLog('─── 기타 ───────────────────────────────', 'sys');
     skCmdLog('  U=취소  Y=재실행  CLR=전체삭제  ZOOM N  2D  3D', 'help');
     skCmdLog('  : 또는 / 키 → 커맨드창 포커스', 'help');

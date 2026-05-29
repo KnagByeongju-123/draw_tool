@@ -291,6 +291,8 @@ const state = {
   wheelConnectMode: false, // 휠클릭 연결 모드 ON 시 true
   wheelConnectFirst: -1,   // 휠클릭 첫번째 점 인덱스
   gridSnap: false,  // v8.10: 기본 OFF (자유 클릭) — 사용자가 격자 버튼으로 ON 가능
+  objSnap: true,    // v8.11: 객체 스냅 (점/끝점/중점/중심/사분점/수평수직 가이드)
+  _lastSnapKind: null,  // 마지막 스냅 종류 — 시각 피드백용
   gridSize: 10,
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
@@ -314,6 +316,7 @@ const state = {
   workPlane: null,            // {origin: Vector3, normal: Vector3, partId: number, mesh: THREE.Group}
   boxSelect: null,            // v8.5: 우클릭 박스 선택 진행 상태 {sx,sy,ex,ey,wpStart,wpEnd,addToSel}
   continuousMode: false,      // v8.9: 연속선 토글 OFF=점만, ON=점+이전점과 자동 선
+  dragPoint: null,            // v8.11: 점 드래그 진행 상태 {idx, origX, origY, startWp}
 };
 
 const skCanvas = document.getElementById('sketchCanvas');
@@ -339,10 +342,54 @@ function screenToWorld(sx, sy){
     y: -(sy - skCanvas.height/2 - state.panY) / state.pixelsPerMm
   };
 }
+// v8.11: snapPoint = 객체 스냅(OSNAP) — 점/끝점/중점/중심/직각·수평 가이드에 붙기
+//   격자 스냅은 별도 (state.gridSnap이 true일 때만)
 function snapPoint(p){
-  if(!state.gridSnap) return p;
-  const g = state.gridSize;
-  return {x: Math.round(p.x/g)*g, y: Math.round(p.y/g)*g};
+  // 1) 격자 스냅 (옵션, 기본 OFF)
+  let result = p;
+  if(state.gridSnap){
+    const g = state.gridSize;
+    result = {x: Math.round(p.x/g)*g, y: Math.round(p.y/g)*g};
+  }
+  // 2) 객체 스냅 (기본 ON)
+  if(state.objSnap === false) return result;
+  const tol = 6 / state.pixelsPerMm;  // 화면 6px 반경
+  let best = null, bestD = Infinity, kind = null;
+  const consider = (x, y, k) => {
+    const d = Math.hypot(x - p.x, y - p.y);
+    if(d < tol && d < bestD){ bestD = d; best = {x, y}; kind = k; }
+  };
+  // (A) 한붓그리기 점들
+  state.penPoints.forEach(pt => consider(pt.x, pt.y, 'point'));
+  // (B) 도형의 끝점·중점·중심
+  state.shapes.forEach(s => {
+    if(s.type === 'line'){
+      consider(s.x1, s.y1, 'endpoint');
+      consider(s.x2, s.y2, 'endpoint');
+      consider((s.x1+s.x2)/2, (s.y1+s.y2)/2, 'midpoint');
+    } else if(s.type === 'rect'){
+      const xs = [s.x1, s.x2], ys = [s.y1, s.y2];
+      xs.forEach(x => ys.forEach(y => consider(x, y, 'endpoint')));
+      consider((s.x1+s.x2)/2, (s.y1+s.y2)/2, 'center');
+    } else if(s.type === 'circle' || s.type === 'arc'){
+      consider(s.cx, s.cy, 'center');
+      // 사분점(4시 방향) — 원의 N/E/S/W
+      consider(s.cx + s.r, s.cy, 'quadrant');
+      consider(s.cx - s.r, s.cy, 'quadrant');
+      consider(s.cx, s.cy + s.r, 'quadrant');
+      consider(s.cx, s.cy - s.r, 'quadrant');
+    }
+  });
+  // (C) 현재 penCur 기준 수평·수직 가이드 — 같은 X 또는 같은 Y 라인
+  if(state.penCur >= 0 && state.penPoints[state.penCur]){
+    const ref = state.penPoints[state.penCur];
+    // 수평선 (같은 Y): 마우스가 같은 높이에 있으면 X 자유, Y는 ref.y
+    if(Math.abs(p.y - ref.y) < tol){ consider(p.x, ref.y, 'horizontal'); }
+    // 수직선 (같은 X)
+    if(Math.abs(p.x - ref.x) < tol){ consider(ref.x, p.y, 'vertical'); }
+  }
+  state._lastSnapKind = best ? kind : null;
+  return best || result;
 }
 
 function redrawSketch(){
@@ -508,7 +555,7 @@ window.sk3ToggleWheelConnect = function(){
 
 // 가장 가까운 한붓그리기 점 찾기 (worldspace tolerance ~ 5px)
 function sk3FindNearestPenPoint(wp){
-  const tol = 8 / state.pixelsPerMm;
+  const tol = 6 / state.pixelsPerMm;  // v8.11: 6px (OSNAP과 동일)
   let bestIdx = -1, bestD = Infinity;
   state.penPoints.forEach((p, i) => {
     const d = Math.hypot(p.x - wp.x, p.y - wp.y);
@@ -919,7 +966,21 @@ skCanvas.addEventListener('mousedown', (e)=>{
     // v8.4: select 도구로 빈 곳 좌클릭 시 안내 메시지 (점 찍기는 펜 도구로)
     const hitShape = sk3FindShapeAt(wp);
     const hitPoint = sk3FindNearestPenPoint(wp);
-    if(!hitShape && hitPoint < 0){
+    // v8.11: 점 위 좌클릭 = 드래그 이동 시작
+    if(hitPoint >= 0){
+      state.dragPoint = {
+        idx: hitPoint,
+        origX: state.penPoints[hitPoint].x,
+        origY: state.penPoints[hitPoint].y,
+        startWp: {x: wp.x, y: wp.y}
+      };
+      state.penCur = hitPoint;
+      skCanvas.style.cursor = 'move';
+      redrawSketch();
+      setStat('🤚 P' + hitPoint + ' 드래그 중 — 놓으면 이동 확정 (Esc=취소)');
+      return;
+    }
+    if(!hitShape){
       setStat('💡 점을 찍으려면 좌측 ✎ 펜 버튼(P키) 또는 📍 점좌표 버튼을 누르세요');
     }
     selectShapeAt(wp, e.shiftKey);
@@ -1010,6 +1071,24 @@ skCanvas.addEventListener('mousemove', (e)=>{
     redrawSketch();
     return;
   }
+  // v8.11: 점 드래그 진행 중 — 점과 연결된 선 미리보기 이동
+  if(state.dragPoint){
+    let wp = screenToWorld(sx, sy);
+    wp = snapPoint(wp);  // OSNAP 적용 — 다른 점에 붙기
+    const p = state.penPoints[state.dragPoint.idx];
+    const oldX = p.x, oldY = p.y;
+    p.x = wp.x; p.y = wp.y;
+    // 연결된 선도 임시 갱신
+    const tol = 0.01;
+    state.shapes.forEach(s => {
+      if(s.type !== 'line') return;
+      if(Math.abs(s.x1-oldX)<tol && Math.abs(s.y1-oldY)<tol){ s.x1=wp.x; s.y1=wp.y; }
+      if(Math.abs(s.x2-oldX)<tol && Math.abs(s.y2-oldY)<tol){ s.x2=wp.x; s.y2=wp.y; }
+    });
+    redrawSketch();
+    document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(2)}  Y: ${wp.y.toFixed(2)}` + (state._lastSnapKind?' ['+state._lastSnapKind+']':'');
+    return;
+  }
   // v8.5: 박스 선택 진행 중 — 박스 갱신 + 미리보기 그리기
   if(state.boxSelect){
     state.boxSelect.ex = sx;
@@ -1031,6 +1110,37 @@ skCanvas.addEventListener('mousemove', (e)=>{
 
 skCanvas.addEventListener('mouseup', (e)=>{
   if(isPanning){isPanning = false; panStart = null; skCanvas.style.cursor = ''; return;}
+  // v8.11: 점 드래그 마침 → 변경 확정 + 히스토리
+  if(state.dragPoint){
+    const dp = state.dragPoint;
+    const p = state.penPoints[dp.idx];
+    // 실제 이동이 일어났는지 확인
+    if(Math.abs(p.x - dp.origX) > 0.01 || Math.abs(p.y - dp.origY) > 0.01){
+      // 임시 변경을 되돌리고 pushHistory 후 다시 적용
+      const finalX = p.x, finalY = p.y;
+      // 원위치 복원
+      const tol = 0.01;
+      state.shapes.forEach(s => {
+        if(s.type !== 'line') return;
+        if(Math.abs(s.x1-finalX)<tol && Math.abs(s.y1-finalY)<tol){ s.x1=dp.origX; s.y1=dp.origY; }
+        if(Math.abs(s.x2-finalX)<tol && Math.abs(s.y2-finalY)<tol){ s.x2=dp.origX; s.y2=dp.origY; }
+      });
+      p.x = dp.origX; p.y = dp.origY;
+      pushHistory();
+      // 다시 최종 위치로
+      state.shapes.forEach(s => {
+        if(s.type !== 'line') return;
+        if(Math.abs(s.x1-dp.origX)<tol && Math.abs(s.y1-dp.origY)<tol){ s.x1=finalX; s.y1=finalY; }
+        if(Math.abs(s.x2-dp.origX)<tol && Math.abs(s.y2-dp.origY)<tol){ s.x2=finalX; s.y2=finalY; }
+      });
+      p.x = finalX; p.y = finalY;
+      setStat('✓ P' + dp.idx + ' 이동 (' + finalX.toFixed(2) + ', ' + finalY.toFixed(2) + ')');
+    }
+    state.dragPoint = null;
+    skCanvas.style.cursor = '';
+    redrawSketch(); updateInfo();
+    return;
+  }
   // v8.5: 우클릭 드래그 마침 → 박스 안 도형들 선택
   if(state.boxSelect && e.button === 2){
     sk3FinishBoxSelect(state.boxSelect);
@@ -1406,6 +1516,8 @@ window.sk3UpdateSelProp = function(){
     let html = '';
     if(s.type === 'line'){
       title.textContent = '◢ 선 (line)';
+      const lineLen = Math.hypot(s.x2-s.x1, s.y2-s.y1);
+      const lineDeg = Math.atan2(s.y2-s.y1, s.x2-s.x1) * 180 / Math.PI;
       html = `
         <div class="prop-row"><label>P1.X</label><input type="number" step="0.1" id="sk3p1x" value="${s.x1.toFixed(2)}"></div>
         <div class="prop-row"><label>P1.Y</label><input type="number" step="0.1" id="sk3p1y" value="${s.y1.toFixed(2)}"></div>
@@ -1414,10 +1526,12 @@ window.sk3UpdateSelProp = function(){
         <div class="prop-row"><label>색상</label><input type="color" id="sk3color" value="${s.color||'#000000'}"></div>
         <div class="prop-row"><label>굵기</label><input type="number" step="1" id="sk3lw" value="${s.lineWidth||2}"></div>
         <button onclick="sk3ApplySelProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
-        <div style="font-size:10px;color:#888;margin-top:4px">길이: ${Math.hypot(s.x2-s.x1, s.y2-s.y1).toFixed(2)}mm</div>`;
+        <div style="font-size:10px;color:#888;margin-top:4px">길이: ${lineLen.toFixed(2)}mm · 각도: ${lineDeg.toFixed(2)}°</div>`;
     } else if(s.type === 'rect'){
       title.textContent = '▭ 사각형 (rect)';
       const w = Math.abs(s.x2-s.x1), h = Math.abs(s.y2-s.y1);
+      const rectDiag = Math.hypot(w, h);
+      const rectArea = w * h;
       html = `
         <div class="prop-row"><label>X1</label><input type="number" step="0.1" id="sk3p1x" value="${s.x1.toFixed(2)}"></div>
         <div class="prop-row"><label>Y1</label><input type="number" step="0.1" id="sk3p1y" value="${s.y1.toFixed(2)}"></div>
@@ -1426,7 +1540,7 @@ window.sk3UpdateSelProp = function(){
         <div class="prop-row"><label>색상</label><input type="color" id="sk3color" value="${s.color||'#000000'}"></div>
         <div class="prop-row"><label>굵기</label><input type="number" step="1" id="sk3lw" value="${s.lineWidth||2}"></div>
         <button onclick="sk3ApplySelProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
-        <div style="font-size:10px;color:#888;margin-top:4px">W=${w.toFixed(2)} × H=${h.toFixed(2)}mm</div>`;
+        <div style="font-size:10px;color:#888;margin-top:4px">W=${w.toFixed(2)} × H=${h.toFixed(2)}mm · 대각선=${rectDiag.toFixed(2)}mm · 면적=${rectArea.toFixed(1)}mm²</div>`;
     } else if(s.type === 'circle'){
       title.textContent = '○ 원 (circle)';
       html = `
@@ -1441,6 +1555,8 @@ window.sk3UpdateSelProp = function(){
       title.textContent = '⌒ 호 (arc)';
       const sd = (s.startAngle*180/Math.PI).toFixed(1);
       const ed = (s.endAngle*180/Math.PI).toFixed(1);
+      const arcSweep = Math.abs(parseFloat(ed) - parseFloat(sd));
+      const arcLen = s.r * arcSweep * Math.PI / 180;
       html = `
         <div class="prop-row"><label>중심 X</label><input type="number" step="0.1" id="sk3cx" value="${s.cx.toFixed(2)}"></div>
         <div class="prop-row"><label>중심 Y</label><input type="number" step="0.1" id="sk3cy" value="${s.cy.toFixed(2)}"></div>
@@ -1448,7 +1564,8 @@ window.sk3UpdateSelProp = function(){
         <div class="prop-row"><label>시작°</label><input type="number" step="0.1" id="sk3sd" value="${sd}"></div>
         <div class="prop-row"><label>끝°</label><input type="number" step="0.1" id="sk3ed" value="${ed}"></div>
         <div class="prop-row"><label>색상</label><input type="color" id="sk3color" value="${s.color||'#000000'}"></div>
-        <button onclick="sk3ApplySelProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>`;
+        <button onclick="sk3ApplySelProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
+        <div style="font-size:10px;color:#888;margin-top:4px">호 폭: ${arcSweep.toFixed(1)}° · 호 길이: ${arcLen.toFixed(2)}mm</div>`;
     } else {
       title.textContent = '? ' + s.type;
       html = '<div style="font-size:10px;color:#888">이 도형은 속성 편집을 지원하지 않습니다.</div>';

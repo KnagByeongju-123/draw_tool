@@ -281,6 +281,10 @@ const state = {
   selectedPartId: null,
   history: [],
   historyIdx: -1,
+  penPoints: [],   // 한붓그리기 점 배열 [{x,y}]
+  penCur: -1,      // 현재 점 인덱스 (-1=없음)
+  penShowLabels: true,  // 점 번호 라벨 표시
+  penOrigin: null, // 기준점 {x,y} (노란 십자)
   gridSnap: true,
   gridSize: 10,
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
@@ -342,6 +346,59 @@ function redrawSketch(){
   if(state.showAxes) drawAxes();
   state.shapes.forEach((s, idx)=> drawShape(s, state.selectedShapes.has(idx)));
   if(state.drawing) drawPreview();
+  drawPenLabels();
+}
+
+// 한붓그리기 점·번호 라벨 그리기
+function drawPenLabels(){
+  // 기준점 십자 (노란 +)
+  if(state.penOrigin){
+    const sp = worldToScreen(state.penOrigin.x, state.penOrigin.y);
+    skCtx.save();
+    skCtx.strokeStyle = '#ffe040';
+    skCtx.lineWidth = 2;
+    skCtx.beginPath();
+    skCtx.moveTo(sp.x - 9, sp.y); skCtx.lineTo(sp.x + 9, sp.y);
+    skCtx.moveTo(sp.x, sp.y - 9); skCtx.lineTo(sp.x, sp.y + 9);
+    skCtx.stroke();
+    skCtx.fillStyle = '#ffe040';
+    skCtx.font = 'bold 10px monospace';
+    skCtx.fillText('⊕', sp.x + 11, sp.y - 4);
+    skCtx.restore();
+  }
+  if(!state.penShowLabels || !state.penPoints || state.penPoints.length === 0) return;
+  skCtx.save();
+  state.penPoints.forEach((p, i) => {
+    const sp = worldToScreen(p.x, p.y);
+    // 점 마커 (노란 원)
+    skCtx.fillStyle = '#f0c040';
+    skCtx.strokeStyle = '#000';
+    skCtx.lineWidth = 1;
+    skCtx.beginPath();
+    skCtx.arc(sp.x, sp.y, 3.5, 0, Math.PI*2);
+    skCtx.fill();
+    skCtx.stroke();
+    // 번호 텍스트 (검은 외곽 + 노란 채움)
+    skCtx.font = 'bold 12px monospace';
+    skCtx.textAlign = 'left';
+    skCtx.textBaseline = 'middle';
+    skCtx.lineWidth = 3;
+    skCtx.strokeStyle = '#000';
+    skCtx.strokeText(String(i), sp.x + 7, sp.y - 7);
+    skCtx.fillStyle = '#ffe070';
+    skCtx.fillText(String(i), sp.x + 7, sp.y - 7);
+  });
+  // 현재점 강조 (오렌지 링)
+  if(state.penCur >= 0 && state.penPoints[state.penCur]){
+    const cp = state.penPoints[state.penCur];
+    const sp = worldToScreen(cp.x, cp.y);
+    skCtx.strokeStyle = '#ff6020';
+    skCtx.lineWidth = 2.5;
+    skCtx.beginPath();
+    skCtx.arc(sp.x, sp.y, 7, 0, Math.PI*2);
+    skCtx.stroke();
+  }
+  skCtx.restore();
 }
 
 function drawGrid(){
@@ -414,7 +471,7 @@ function drawAxes(){
 function drawShape(s, selected){
   skCtx.strokeStyle = selected ? '#ff0000' : (s.color || '#000');
   skCtx.lineWidth = (s.lineWidth || 2);
-  skCtx.fillStyle = 'rgba(100,150,200,0.1)';
+  skCtx.fillStyle = s.fillColor || 'rgba(100,150,200,0.1)';
   
   if(s.type === 'line'){
     const p1 = worldToScreen(s.x1, s.y1);
@@ -507,6 +564,17 @@ function drawPreview(){
     skCtx.beginPath();
     skCtx.rect(Math.min(p1.x,p2.x), Math.min(p1.y,p2.y), Math.abs(p2.x-p1.x), Math.abs(p2.y-p1.y));
     skCtx.stroke();
+  } else if(d.type === 'wipe'){
+    const p1 = worldToScreen(d.start.x, d.start.y);
+    const p2 = worldToScreen(d.current.x, d.current.y);
+    const x = Math.min(p1.x,p2.x), y = Math.min(p1.y,p2.y);
+    const w = Math.abs(p2.x-p1.x), h = Math.abs(p2.y-p1.y);
+    skCtx.strokeStyle = '#ff5050';
+    skCtx.fillStyle = 'rgba(255,80,80,0.18)';
+    skCtx.lineWidth = 1.5;
+    skCtx.setLineDash([6, 4]);
+    skCtx.fillRect(x, y, w, h);
+    skCtx.strokeRect(x, y, w, h);
   }
   skCtx.setLineDash([]);
 }
@@ -533,6 +601,12 @@ skCanvas.addEventListener('mousedown', (e)=>{
   
   if(state.tool === 'fillet'){
     state.drawing = {type:'fillet', start: wp, current: wp};
+    redrawSketch();
+    return;
+  }
+
+  if(state.tool === 'wipe'){
+    state.drawing = {type:'wipe', start: wp, current: wp};
     redrawSketch();
     return;
   }
@@ -664,6 +738,48 @@ skCanvas.addEventListener('mouseup', (e)=>{
     applyFillet(hits[0], hits[1], ix, R);
     redrawSketch();
   }
+  // 쓸어지우기 처리
+  if(state.mode === 'sketch' && state.tool === 'wipe' && state.drawing && state.drawing.type === 'wipe'){
+    const d = state.drawing;
+    state.drawing = null;
+    const bx1 = Math.min(d.start.x, d.current.x);
+    const bx2 = Math.max(d.start.x, d.current.x);
+    const by1 = Math.min(d.start.y, d.current.y);
+    const by2 = Math.max(d.start.y, d.current.y);
+    const toRemove = [];
+    state.shapes.forEach((s, idx) => {
+      let inBox = false;
+      if(s.type === 'line'){
+        const ib = (x,y) => x >= bx1 && x <= bx2 && y >= by1 && y <= by2;
+        inBox = ib(s.x1,s.y1) || ib(s.x2,s.y2) || segIntersectsBox(s, bx1,by1,bx2,by2);
+      } else if(s.type === 'rect'){
+        const r1x=Math.min(s.x1,s.x2), r2x=Math.max(s.x1,s.x2);
+        const r1y=Math.min(s.y1,s.y2), r2y=Math.max(s.y1,s.y2);
+        inBox = !(r2x<bx1 || r1x>bx2 || r2y<by1 || r1y>by2);
+      } else if(s.type === 'circle' || s.type === 'arc'){
+        inBox = bx1<=s.cx && s.cx<=bx2 && by1<=s.cy && s.cy<=by2;
+      }
+      if(inBox) toRemove.push(idx);
+    });
+    if(toRemove.length > 0){
+      pushHistory();
+      toRemove.sort((a,b)=>b-a).forEach(i => state.shapes.splice(i,1));
+      // 박스 안의 한붓그리기 점도 함께 삭제
+      const ptsBefore = state.penPoints.length;
+      state.penPoints = state.penPoints.filter(p =>
+        !(bx1<=p.x && p.x<=bx2 && by1<=p.y && p.y<=by2));
+      if(state.penPoints.length < ptsBefore){
+        state.penCur = Math.min(state.penCur, state.penPoints.length - 1);
+      }
+      redrawSketch();
+      updateInfo();
+      skCmdLog('  🧽 쓸어지우기: 도형 ' + toRemove.length + '개, 점 ' + (ptsBefore - state.penPoints.length) + '개 삭제', 'sys');
+      toast(toRemove.length + '개 도형 삭제');
+    } else {
+      toast('박스 안에 도형이 없습니다');
+    }
+    redrawSketch();
+  }
 });
 
 function segIntersectsBox(s, bx1,by1,bx2,by2){
@@ -699,37 +815,74 @@ function applyFillet(h1, h2, ix, R){
   const ux1=L1.x2-L1.x1, uy1=L1.y2-L1.y1, len1=Math.hypot(ux1,uy1);
   const ux2=L2.x2-L2.x1, uy2=L2.y2-L2.y1, len2=Math.hypot(ux2,uy2);
   if(len1<1e-6||len2<1e-6) return;
-  const dot=(ux1*ux2+uy1*uy2)/(len1*len2);
-  const ang=Math.acos(Math.max(-1,Math.min(1,Math.abs(dot))));
-  const dist=R/Math.tan(Math.PI/2-ang/2);
+
+  // 두 선 사이 각도 (실제 각도, abs 없이)
+  const dot = (ux1*ux2+uy1*uy2)/(len1*len2);
+  const ang = Math.acos(Math.max(-1,Math.min(1,dot))); // 0~π
+  const halfAng = ang/2;
+  if(Math.abs(Math.sin(halfAng))<1e-6) return;
+  const dist = R / Math.tan(halfAng); // 교점→접점 거리
   if(isNaN(dist)||!isFinite(dist)||dist<1e-6) return;
+
+  // 각 선의 교점에 가까운 끝 방향으로 접점 계산
   function trimPt(L, ix, d){
     const dx=L.x2-L.x1, dy=L.y2-L.y1, ln=Math.hypot(dx,dy);
     const udx=dx/ln, udy=dy/ln;
     const d1=Math.hypot(ix.x-L.x1,ix.y-L.y1);
     const d2=Math.hypot(ix.x-L.x2,ix.y-L.y2);
+    // 교점에서 선 안쪽 방향(교점에서 멀어지는 방향)으로 d만큼
     if(d1<d2){ return {x:ix.x+udx*d, y:ix.y+udy*d}; }
     else      { return {x:ix.x-udx*d, y:ix.y-udy*d}; }
   }
   const T1=trimPt(L1,ix,dist);
   const T2=trimPt(L2,ix,dist);
-  const n1x=-(L1.y2-L1.y1)/len1, n1y=(L1.x2-L1.x1)/len1;
-  const n2x=-(L2.y2-L2.y1)/len2, n2y=(L2.x2-L2.x1)/len2;
-  function findCenter(T1,n1x,n1y,T2,n2x,n2y,R){
-    const candidates=[[1,1],[1,-1],[-1,1],[-1,-1]];
-    let best=null, bestD=Infinity;
-    candidates.forEach(([s1,s2])=>{
-      const cx1=T1.x+s1*n1x*R, cy1=T1.y+s1*n1y*R;
-      const cx2=T2.x+s2*n2x*R, cy2=T2.y+s2*n2y*R;
-      const d=Math.hypot(cx1-cx2,cy1-cy2);
-      if(d<bestD){bestD=d; best={x:(cx1+cx2)/2,y:(cy1+cy2)/2};}
-    });
-    return best;
+
+  // 호 중심: 교점에서 각도이등분선 방향으로 R/sin(halfAng) 거리
+  // 이등분선 방향 = 두 단위벡터 합산 후 정규화
+  // (교점에서 각 선의 안쪽 방향 단위벡터를 더함)
+  function unitAwayFromIx(L, ix){
+    const dx=L.x2-L.x1, dy=L.y2-L.y1, ln=Math.hypot(dx,dy);
+    const d1=Math.hypot(ix.x-L.x1,ix.y-L.y1);
+    const d2=Math.hypot(ix.x-L.x2,ix.y-L.y2);
+    if(d1<d2) return {x: dx/ln, y: dy/ln};
+    else      return {x:-dx/ln, y:-dy/ln};
   }
-  const C=findCenter(T1,n1x,n1y,T2,n2x,n2y,R);
-  if(!C) return;
-  const aStart=Math.atan2(T1.y-C.y,T1.x-C.x);
-  const aEnd  =Math.atan2(T2.y-C.y,T2.x-C.x);
+  const u1=unitAwayFromIx(L1,ix);
+  const u2=unitAwayFromIx(L2,ix);
+  const bx=u1.x+u2.x, by=u1.y+u2.y;
+  const blen=Math.hypot(bx,by);
+  if(blen<1e-6) return;
+  const centerDist = R / Math.sin(halfAng);
+  const C = {x: ix.x + (bx/blen)*centerDist, y: ix.y + (by/blen)*centerDist};
+
+  // 호 시작/끝 각도 (world 좌표계)
+  const aStart=Math.atan2(T1.y-C.y, T1.x-C.x);
+  const aEnd  =Math.atan2(T2.y-C.y, T2.x-C.x);
+
+  // 호 방향: canvas는 -endAngle→-startAngle(반시계) 로 그림
+  // 두 접점이 호 중심 주위를 어떤 방향으로 돌아야 올바른지 결정
+  // 교점이 호 중심에서 반대쪽에 있어야 함 → 교점 방향으로 가장 짧은 호를 피하는 방향
+  // 단순 결정: CCW로 그릴 때와 CW로 그릴 때 중 교점을 포함하지 않는 쪽 선택
+  // → 두 각도 차를 0~2π 로 맞춰 짧은 호 방향 결정
+  let dAngle = aEnd - aStart;
+  while(dAngle < -Math.PI) dAngle += 2*Math.PI;
+  while(dAngle >  Math.PI) dAngle -= 2*Math.PI;
+  // 교점이 호 중심 기준으로 어느 방향에 있는지
+  const ixAngle = Math.atan2(ix.y-C.y, ix.x-C.x);
+  // 짧은 호가 교점 쪽을 향하면 → 긴 호로 전환 (startAngle/endAngle 교환)
+  let finalStart=aStart, finalEnd=aEnd;
+  // 교점까지 각도가 aStart~aEnd 사이에 들어오면 방향 반전
+  function angleBetween(a, s, e){
+    // s→e 방향(CCW)으로 a가 들어오는지
+    let ds = e - s; while(ds<0) ds+=2*Math.PI;
+    let da = a - s; while(da<0) da+=2*Math.PI;
+    return da <= ds;
+  }
+  if(angleBetween(ixAngle, aStart, aEnd)){
+    // 교점이 짧은 호 안에 → swap해서 긴 호(교점 없는 쪽) 사용
+    finalStart=aEnd; finalEnd=aStart;
+  }
+
   function trimLine(L, ix, Tnew){
     const d1=Math.hypot(ix.x-L.x1,ix.y-L.y1);
     const d2=Math.hypot(ix.x-L.x2,ix.y-L.y2);
@@ -741,7 +894,7 @@ function applyFillet(h1, h2, ix, R){
   trimLine(L2,ix,T2);
   state.shapes.push({
     type:'arc', cx:C.x, cy:C.y, r:R,
-    startAngle:aStart, endAngle:aEnd,
+    startAngle:finalStart, endAngle:finalEnd,
     color: L1.color||'#000000',
     lineWidth: L1.lineWidth||2
   });
@@ -832,7 +985,7 @@ function setTool(t){
   });
   const btn = document.getElementById('btn-' + t);
   if(btn) btn.classList.add('active');
-  const names = {line:'선', rect:'사각형', circle:'원', arc:'호', select:'선택', fillet:'필렛'};
+  const names = {line:'선', rect:'사각형', circle:'원', arc:'호', select:'선택', fillet:'필렛', wipe:'쓸어지우기'};
   document.getElementById('footTool').textContent = names[t] || t;
   document.getElementById('curTool').textContent = names[t] || t;
   setStat('도구: ' + (names[t]||t));
@@ -909,9 +1062,7 @@ function serializePart(p){
     sourceShapes: p.sourceShapes ? JSON.parse(JSON.stringify(p.sourceShapes)) : undefined,
     params: p.params ? JSON.parse(JSON.stringify(p.params)) : {},
     _isHole: !!p._isHole,
-    _xform: t,
-    _origin: p._origin || null,      // v7.1.9: 기준점(오리진)
-    _worldRot: p._worldRot || null   // v7.1.6: 표시용 월드축 각도
+    _xform: t
   };
 }
 
@@ -938,8 +1089,6 @@ function deserializePart(pdata){
     part.mesh.rotation.set(t.rot[0], t.rot[1], t.rot[2]);
     part.mesh.scale.set(t.scl[0], t.scl[1], t.scl[2]);
   }
-  if(part && pdata._origin) part._origin = pdata._origin;       // v7.1.9
-  if(part && pdata._worldRot) part._worldRot = pdata._worldRot; // v7.1.6
   // v5.9: 구멍 상태 복원 (빨간 반투명 표시 포함)
   if(part && pdata._isHole){
     part._isHole = true;
@@ -1057,7 +1206,10 @@ function snapshotState(){
   return {
     shapes: JSON.parse(JSON.stringify(state.shapes)),
     parts: state.parts.map(serializePart),
-    partIdCounter: state.partIdCounter
+    partIdCounter: state.partIdCounter,
+    penPoints: JSON.parse(JSON.stringify(state.penPoints || [])),
+    penCur: state.penCur != null ? state.penCur : -1,
+    penOrigin: state.penOrigin ? {x:state.penOrigin.x, y:state.penOrigin.y} : null
   };
 }
 
@@ -1076,6 +1228,9 @@ function restoreSnapshot(snap){
   // 스케치 복원
   state.shapes = JSON.parse(JSON.stringify(snap.shapes || []));
   if(snap.partIdCounter !== undefined) state.partIdCounter = snap.partIdCounter;
+  state.penPoints = JSON.parse(JSON.stringify(snap.penPoints || []));
+  state.penCur = snap.penCur != null ? snap.penCur : -1;
+  state.penOrigin = snap.penOrigin ? {x:snap.penOrigin.x, y:snap.penOrigin.y} : null;
   // 3D 부품 복원
   (snap.parts || []).forEach(pdata => {
     const part = deserializePart(pdata);
@@ -1213,46 +1368,21 @@ function initThree(){
   gridMain.userData.isMainGrid = true;
   scene.add(gridMain);
   gridHelper.userData.subGrid = gridMain; // 같이 토글되도록 참조 저장
-  // v7.1.4g: 사용자 관점 축 — 바닥평면=X(빨강)/Y(녹색), 높이(위)=Z(흰색). 끝에 글자 라벨 표시.
-  //   (내부 three.js는 Y-up이라 위로 뻗은 축이 기하적으론 Y지만, 화면 표기는 Z로 라벨링)
+  axesHelper = new THREE.AxesHelper(60);
+  // v6.4: 축 색상 커스텀 — X=빨강, Y=파랑, Z=흰색
+  //   AxesHelper 정점 색상 순서: X(2점), Y(2점), Z(2점)
   {
-    const AX = 70; // 축 길이(mm)
-    const cHorizA = new THREE.Color(0xff2222); // 바닥 X 빨강
-    const cVert   = new THREE.Color(0xffffff); // 높이 Z 흰색
-    const cHorizB = new THREE.Color(0x33dd33); // 바닥 Y 녹색
-    // 각 축: 원점 → 양의 방향 끝
-    const positions = new Float32Array([
-      0,0,0,  AX,0,0,    // 가로축 A
-      0,0,0,  0,AX,0,    // 세로축 (위로)
-      0,0,0,  0,0,AX     // 가로축 B
+    const cX = new THREE.Color(0xff3333); // X 빨강
+    const cY = new THREE.Color(0x3366ff); // Y 파랑
+    const cZ = new THREE.Color(0xffffff); // Z 흰색
+    const colors = new Float32Array([
+      cX.r, cX.g, cX.b,  cX.r, cX.g, cX.b,   // X축 두 점
+      cY.r, cY.g, cY.b,  cY.r, cY.g, cY.b,   // Y축 두 점
+      cZ.r, cZ.g, cZ.b,  cZ.r, cZ.g, cZ.b    // Z축 두 점
     ]);
-    const cols = new Float32Array([
-      cHorizA.r,cHorizA.g,cHorizA.b,  cHorizA.r,cHorizA.g,cHorizA.b,
-      cVert.r,cVert.g,cVert.b,        cVert.r,cVert.g,cVert.b,
-      cHorizB.r,cHorizB.g,cHorizB.b,  cHorizB.r,cHorizB.g,cHorizB.b
-    ]);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-    const mat = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 2, depthTest: false, transparent: true, opacity: 1.0 });
-    axesHelper = new THREE.LineSegments(geo, mat);
-    axesHelper.renderOrder = 999; // 그리드 위에 항상 보이게
-    // v7.1.4g: 축 끝 글자 라벨 — 바닥=X(빨강)/Y(녹색), 높이(위)=Z(흰색)
-    const mkAxisLabel = (txt, color, pos) => {
-      const c = document.createElement('canvas'); c.width = 64; c.height = 64;
-      const x = c.getContext('2d');
-      x.font = 'bold 48px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-      x.fillStyle = color; x.fillText(txt, 32, 34);
-      const t = new THREE.CanvasTexture(c);
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
-      sp.position.set(pos[0], pos[1], pos[2]);
-      sp.scale.set(8, 8, 1);
-      sp.renderOrder = 1000;
-      axesHelper.add(sp);
-    };
-    mkAxisLabel('X', '#ff3333', [AX + 6, 0, 0]);   // 가로축 A(빨강) → X
-    mkAxisLabel('Y', '#33dd33', [0, 0, AX + 6]);   // 가로축 B(녹색) → Y
-    mkAxisLabel('Z', '#ffffff', [0, AX + 6, 0]);   // 세로축(흰색, 위) → Z
+    axesHelper.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    axesHelper.material.vertexColors = true;
+    axesHelper.material.needsUpdate = true;
   }
   scene.add(axesHelper);
   
@@ -1483,7 +1613,6 @@ function setupRaycastClick(dom){
         transformState.dragStart = {x: e.clientX, y: e.clientY};
         transformState._rotStart = null; // 회전 시작 각도 재계산용
         transformState._rotInitial = null;
-        transformState._quatInitial = null; // v7.1.6
         // v2.5: scale 시작 BB 캐시 초기화 (handleDrag 첫 호출 시 캡처)
         transformState._scaleStartBB = null;
         transformState._scaleStartPos = null;
@@ -1755,18 +1884,16 @@ function setupRaycastClick(dom){
       transformState.draggingHandle = null;
       transformState._rotStart = null;
       transformState._rotInitial = null;
-      transformState._quatInitial = null; // v7.1.6
       // v2.0: 회전 종료 시 - v3.9: HUD를 5초간 유지하여 직접 입력 가능
       if(wasRotate){
         if(p && p.mesh){
-          // v7.1.6: 월드축 회전이므로 로컬 Euler 대신 축 이름만 안내
-          const axisName = (h.axis === 'y') ? 'Z(높이/월드 up)' : (h.axis === 'z') ? 'Y' : 'X';
-          toast('↻ ' + axisName + '축(월드 고정) 회전 완료  (HUD 클릭 = 직접 입력)');
-          setStat('회전 완료: ' + axisName + '축 (월드 고정축 기준)');
+          const deg = (p.mesh.rotation[h.axis] * 180 / Math.PI);
+          const axisName = h.axis.toUpperCase();
+          toast('↻ ' + axisName + '축 회전 = ' + deg.toFixed(1) + '°  (HUD 클릭 = 직접 입력)');
+          setStat('회전 완료: ' + axisName + '축 ' + deg.toFixed(1) + '°');
           syncRotPropPanel(p);
-          // HUD 유지 + 클릭 가능 표시 (직접 입력은 월드축 절대각으로 적용)
-          rotHudPersist(h.axis, 0);
-          p._worldRot = null; // v7.1.6: 핸들 드래그는 상대회전 → 절대각 표시 초기화
+          // HUD에 마지막 정보 유지 + 클릭 가능 표시
+          rotHudPersist(h.axis, p.mesh.rotation[h.axis]);
         }
       }
       // v2.5: 크기 변경 종료 시 HUD 숨김 + 최종 크기 알림
@@ -2077,16 +2204,16 @@ function showTransformHandles(part){
     if(rot) grp.rotation.set(rot.x||0, rot.y||0, rot.z||0);
     return grp;
   }
-  // v7.1.10: Z-up 색 — 내부 Y(수직 회전=사용자 Z)=흰색
-  group.add(makeRotIcon('y', 0xeeeeee,
+  // Y축 회전(yaw): 상단부 "뒤쪽"(Z 음수)에 수평으로 누운 아이콘 (요청)
+  group.add(makeRotIcon('y', 0x44dd44,
     {x: 0, y: size.y/2 + maxSize*0.18, z: -size.z/2 - maxSize*0.22},
     {x: -Math.PI/2}));
   // X축 회전(pitch): 우측에 세로 아이콘
   group.add(makeRotIcon('x', 0xdd4444,
     {x: size.x/2 + maxSize*0.22, y: 0, z: 0},
     {y: Math.PI/2}));
-  // v7.1.10: 내부 Z(깊이 회전=사용자 Y)=녹색
-  group.add(makeRotIcon('z', 0x44dd44,
+  // Z축 회전(roll): 바닥 앞쪽에 수평 아이콘
+  group.add(makeRotIcon('z', 0x4488dd,
     {x: 0, y: -size.y/2 - maxSize*0.08, z: size.z/2 + maxSize*0.30},
     {x: -Math.PI/2}));
 
@@ -2124,8 +2251,7 @@ function showRotationRing(part, axis){
   const maxSize = Math.max(size.x, size.y, size.z, 10);
   const ringR = maxSize * 0.62;
   const tube = maxSize * 0.018;
-  // v7.1.10: Z-up 색 일치 — 내부 Y(수직)=사용자 Z(흰색), 내부 Z(깊이)=사용자 Y(녹색), X=빨강
-  const color = {x:0xdd4444, y:0xeeeeee, z:0x44dd44}[axis] || 0xf39c12;
+  const color = {x:0xdd4444, y:0x44dd44, z:0x4488dd}[axis] || 0xf39c12;
 
   const grp = new THREE.Group();
   // 보이는 원형 링
@@ -2151,8 +2277,7 @@ function showRotationRing(part, axis){
   scene.add(grp);
   transformState.rotationRing = grp;
   transformState.rotationRingAxis = axis;
-  const ringAxisName = (axis==='y') ? 'Z(높이)' : (axis==='z') ? 'Y' : 'X';
-  setStat('↻ ' + ringAxisName + '축 회전 링 — 링을 드래그하여 회전 (빈 곳 클릭 시 닫힘)');
+  setStat('↻ ' + axis.toUpperCase() + '축 회전 링 — 링을 드래그하여 회전 (빈 곳 클릭 시 닫힘)');
 }
 
 function hideRotationRing(){
@@ -2383,8 +2508,6 @@ function handleDrag(e){
     if(transformState._rotStart === null || transformState._rotStart === undefined){
       transformState._rotStart = Math.atan2(transformState.dragStart.y - cy, transformState.dragStart.x - cx);
       transformState._rotInitial = {x: p.mesh.rotation.x, y: p.mesh.rotation.y, z: p.mesh.rotation.z};
-      // v7.1.6: 회전 시작 시점의 자세를 쿼터니언으로 보관 (월드축 회전 기준)
-      transformState._quatInitial = p.mesh.quaternion.clone();
     }
     const angleNow = Math.atan2(e.clientY - cy, e.clientX - cx);
     let delta = angleNow - transformState._rotStart;
@@ -2399,16 +2522,11 @@ function handleDrag(e){
       const step = snapDeg * Math.PI / 180;
       deltaSigned = Math.round(deltaSigned / step) * step;
     }
-    // v7.1.10: 회전 링은 각 내부축 둘레로 돌게 만들어져 있으므로 핸들 축 = 내부 회전축 그대로 사용
-    //   (x→내부X, y→내부Y(수직=사용자 Z up), z→내부Z(사용자 Y))
-    const worldAxis = (h.axis === 'y') ? new THREE.Vector3(0,1,0)   // 내부 Y(수직=사용자 Z up)
-                    : (h.axis === 'z') ? new THREE.Vector3(0,0,1)   // 내부 Z(=사용자 Y)
-                    :                    new THREE.Vector3(1,0,0);  // 내부 X
-    const qDelta = new THREE.Quaternion().setFromAxisAngle(worldAxis, deltaSigned);
-    // 시작 자세에 월드축 회전을 "앞에서" 곱함 → 월드 고정축 기준
-    p.mesh.quaternion.copy(qDelta.multiply(transformState._quatInitial));
-    // v2.0: 실시간 각도 HUD 표시 (월드축 기준 누적 각)
-    showRotHud(h.axis, deltaSigned, deltaSigned, snapDeg > 0);
+    if(h.axis === 'y') p.mesh.rotation.y = transformState._rotInitial.y + deltaSigned;
+    else if(h.axis === 'x') p.mesh.rotation.x = transformState._rotInitial.x + deltaSigned;
+    else if(h.axis === 'z') p.mesh.rotation.z = transformState._rotInitial.z + deltaSigned;
+    // v2.0: 실시간 각도 HUD 표시
+    showRotHud(h.axis, p.mesh.rotation[h.axis], deltaSigned, snapDeg > 0);
     // 속성 패널 회전값도 즉시 갱신 (선택된 부품이 동일하면)
     syncRotPropPanel(p);
   }
@@ -4407,16 +4525,15 @@ function openPosSizeModal(){
   if(!target){toast('단일 부품을 선택하세요'); return}
   document.getElementById('posSizePartName').textContent = target.name;
   document.getElementById('psPosX').value = target.mesh.position.x.toFixed(1);
-  // v7.1.5: Z-up — 사용자 Z=높이(내부 Y), 사용자 Y=내부 Z
-  document.getElementById('psPosY').value = target.mesh.position.z.toFixed(1);
-  document.getElementById('psPosZ').value = target.mesh.position.y.toFixed(1);
-  // 크기: 로컬 치수(mm) — v7.1.7 회전 무관
+  document.getElementById('psPosY').value = target.mesh.position.y.toFixed(1);
+  document.getElementById('psPosZ').value = target.mesh.position.z.toFixed(1);
+  // 크기: 현재 바운딩박스 실제 치수(mm)
   target.mesh.updateMatrixWorld(true);
-  const sz = getLocalSize(target.mesh);
+  const bb = new THREE.Box3().setFromObject(target.mesh);
+  const sz = bb.getSize(new THREE.Vector3());
   document.getElementById('psSizeX').value = sz.x.toFixed(1);
-  // v7.1.5: Z-up — 사용자 Y 크기=내부 Z, 사용자 Z 크기=내부 Y
-  document.getElementById('psSizeY').value = sz.z.toFixed(1);
-  document.getElementById('psSizeZ').value = sz.y.toFixed(1);
+  document.getElementById('psSizeY').value = sz.y.toFixed(1);
+  document.getElementById('psSizeZ').value = sz.z.toFixed(1);
   // v7.1.4: 타입별 치수 요약 (구→⌀, 원통→⌀×높이)
   const summary = document.getElementById('posSizeSummary');
   if(summary){
@@ -4446,91 +4563,10 @@ function openPosSizeModal(){
     }
     summary.textContent = '📐 ' + txt;
   }
-  // v7.1.6: 회전은 월드 고정축 각도(_worldRot) 표시
-  {
-    const wr = target._worldRot || {x:0,y:0,z:0};
-    document.getElementById('psRotX').value = (wr.x||0).toFixed(1);
-    document.getElementById('psRotY').value = (wr.y||0).toFixed(1);
-    document.getElementById('psRotZ').value = (wr.z||0).toFixed(1);
-  }
-  // v7.1.9: 현재 기준점(오리진) 선택값 복원
-  {
-    const sel = normToOriginSel(target._origin);
-    const oxy = document.getElementById('psOriginXY');
-    const oz = document.getElementById('psOriginZ');
-    if(oxy) oxy.value = sel.xy;
-    if(oz) oz.value = sel.z;
-  }
+  document.getElementById('psRotX').value = (target.mesh.rotation.x * 180/Math.PI).toFixed(1);
+  document.getElementById('psRotY').value = (target.mesh.rotation.y * 180/Math.PI).toFixed(1);
+  document.getElementById('psRotZ').value = (target.mesh.rotation.z * 180/Math.PI).toFixed(1);
   document.getElementById('posSizeModal').classList.add('show');
-}
-
-// v7.1.9: 기준점(오리진) — 부품 로컬 BB 기준 정규화 좌표(각 축 0/0.5/1, 내부축)
-//   UI 선택값 → 내부축 정규화 {x,y,z}. 기본=중앙(0.5,0.5,0.5)
-function originSelToNorm(xySel, zSel){
-  const m = { l:0, c:0.5, r:1 };
-  const ux = m[(xySel||'cc')[0]] ?? 0.5;            // 사용자 X
-  const uy = m[(xySel||'cc')[1]] ?? 0.5;            // 사용자 Y = 내부 Z
-  const uz = { b:0, c:0.5, t:1 }[zSel||'c'] ?? 0.5; // 사용자 Z(높이) = 내부 Y
-  return { x: ux, y: uz, z: uy }; // 내부축 {x, y(높이), z}
-}
-// 정규화 오리진 → UI 선택값 복원
-function normToOriginSel(n){
-  const inv = v => (v<0.25?'l':v>0.75?'r':'c');
-  const invZ = v => (v<0.25?'b':v>0.75?'t':'c');
-  if(!n) return { xy:'cc', z:'c' };
-  return { xy: inv(n.x) + inv(n.z), z: invZ(n.y) };
-}
-// 부품의 현재 월드 기준점 좌표 (정규화 오리진 → 월드 위치)
-function getOriginWorld(mesh, norm){
-  norm = norm || {x:0.5,y:0.5,z:0.5};
-  // 로컬 지오메트리 BB
-  const box = new THREE.Box3(); let has=false;
-  mesh.traverse(o=>{ if(o.isMesh&&o.geometry){ if(!o.geometry.boundingBox)o.geometry.computeBoundingBox(); box.union(o.geometry.boundingBox); has=true; } });
-  if(!has) return mesh.position.clone();
-  const lp = new THREE.Vector3(
-    box.min.x + (box.max.x-box.min.x)*norm.x,
-    box.min.y + (box.max.y-box.min.y)*norm.y,
-    box.min.z + (box.max.z-box.min.z)*norm.z
-  );
-  mesh.updateMatrixWorld(true);
-  return lp.applyMatrix4(mesh.matrixWorld);
-}
-
-// v7.1.7: 부품의 "로컬" 치수(mm) — 회전과 무관. 지오메트리 BB × |scale|.
-//   회전된 부품도 각 로컬축 치수를 독립적으로 정확히 반환 (월드 AABB 사용 안 함).
-function getLocalSize(mesh){
-  const v = new THREE.Vector3();
-  // 메시(또는 자식 메시들)의 지오메트리 로컬 BB 합산
-  const box = new THREE.Box3();
-  let has = false;
-  mesh.traverse(o => {
-    if(o.isMesh && o.geometry){
-      if(!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-      const gb = o.geometry.boundingBox;
-      // 자식 메시의 로컬 변환(회전/위치 제외, 부모 기준 위치만)은 보통 단순하므로 직접 합산
-      box.union(gb);
-      has = true;
-    }
-  });
-  if(!has){ return v.set(1,1,1); }
-  box.getSize(v);
-  v.x *= Math.abs(mesh.scale.x);
-  v.y *= Math.abs(mesh.scale.y);
-  v.z *= Math.abs(mesh.scale.z);
-  return v;
-}
-
-// v7.1.6: 사용자 입력 각도(RX,RY,RZ, 도) → 월드 고정축 기준 절대 자세 쿼터니언
-//   Z=월드 up(=내부 Y), Y=내부 Z, X=내부 X. 합성 순서 Z→Y→X (각자 월드축).
-function worldEulerToQuat(uRXdeg, uRYdeg, uRZdeg){
-  const rx = (uRXdeg||0) * Math.PI/180;
-  const ry = (uRYdeg||0) * Math.PI/180;
-  const rz = (uRZdeg||0) * Math.PI/180;
-  const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rx); // 내부 X
-  const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), ry); // 사용자 Y = 내부 Z
-  const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), rz); // 사용자 Z(up) = 내부 Y
-  // 월드축 순차 적용: 먼저 X, 그 위에 Y, 그 위에 Z (앞에서 곱함)
-  return qz.multiply(qy).multiply(qx);
 }
 
 function applyPosSize(){
@@ -4538,64 +4574,46 @@ function applyPosSize(){
   const target = sel.length === 1 ? sel[0] : null;
   if(!target){toast('단일 부품을 선택하세요'); return}
 
-  // 위치 (v7.1.5 Z-up: 사용자 X,Y,Z → 내부 X,Z,Y)
+  // 위치
   target.mesh.position.set(
     parseFloat(document.getElementById('psPosX').value) || 0,
-    parseFloat(document.getElementById('psPosZ').value) || 0,   // 내부 Y ← 사용자 Z
-    parseFloat(document.getElementById('psPosY').value) || 0    // 내부 Z ← 사용자 Y
+    parseFloat(document.getElementById('psPosY').value) || 0,
+    parseFloat(document.getElementById('psPosZ').value) || 0
   );
-  // 회전 (v7.1.6: 월드 고정축 기준 — Z박스는 항상 월드 up 둘레)
-  const wantQuat = worldEulerToQuat(
-    parseFloat(document.getElementById('psRotX').value) || 0,
-    parseFloat(document.getElementById('psRotY').value) || 0,
-    parseFloat(document.getElementById('psRotZ').value) || 0
+  // 회전 (크기 역산 전에 회전을 0으로 맞춰 BB 측정 — 회전된 BB는 부정확하므로)
+  //   먼저 회전을 적용하기 전, scale=1 기준 기하 치수를 구하기 위해 회전을 잠시 0으로
+  const wantRot = new THREE.Euler(
+    (parseFloat(document.getElementById('psRotX').value) || 0) * Math.PI/180,
+    (parseFloat(document.getElementById('psRotY').value) || 0) * Math.PI/180,
+    (parseFloat(document.getElementById('psRotZ').value) || 0) * Math.PI/180
   );
-  // 크기(mm) → scale 역산 (v7.1.7: 로컬 지오메트리 BB 기준 — 회전 무관)
-  // v7.1.5 Z-up: 사용자 Y 크기 → 내부 Z, 사용자 Z 크기 → 내부 Y
-  const wantX = Math.max(0.5, parseFloat(document.getElementById('psSizeX').value) || 30);
-  const wantY = Math.max(0.5, parseFloat(document.getElementById('psSizeZ').value) || 30);  // 내부 Y ← 사용자 Z
-  const wantZ = Math.max(0.5, parseFloat(document.getElementById('psSizeY').value) || 30);  // 내부 Z ← 사용자 Y
-  // 로컬 지오메트리 기본 치수(스케일 1 기준) 측정
-  const gbox = new THREE.Box3();
-  let gh = false;
-  target.mesh.traverse(o => {
-    if(o.isMesh && o.geometry){
-      if(!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-      gbox.union(o.geometry.boundingBox); gh = true;
-    }
-  });
-  const gsz = gh ? gbox.getSize(new THREE.Vector3()) : new THREE.Vector3(1,1,1);
-  const baseX = gsz.x || 1, baseY = gsz.y || 1, baseZ = gsz.z || 1;
-  target.mesh.scale.set(
-    baseX > 0.0001 ? wantX / baseX : target.mesh.scale.x,
-    baseY > 0.0001 ? wantY / baseY : target.mesh.scale.y,
-    baseZ > 0.0001 ? wantZ / baseZ : target.mesh.scale.z
-  );
-  // 회전 적용 (v7.1.6: 월드 고정축 자세)
-  target.mesh.quaternion.copy(wantQuat);
-  target._worldRot = { // v7.1.6: 표시용 월드축 각도 보관
-    x: parseFloat(document.getElementById('psRotX').value) || 0,
-    y: parseFloat(document.getElementById('psRotY').value) || 0,
-    z: parseFloat(document.getElementById('psRotZ').value) || 0
-  };
-  // v7.1.9: 기준점(오리진) 저장 + 입력 위치 = 기준점 좌표가 되도록 보정
-  const oxy = document.getElementById('psOriginXY');
-  const oz = document.getElementById('psOriginZ');
-  target._origin = originSelToNorm(oxy ? oxy.value : 'cc', oz ? oz.value : 'c');
-  const wantPos = new THREE.Vector3(
-    parseFloat(document.getElementById('psPosX').value) || 0,
-    parseFloat(document.getElementById('psPosZ').value) || 0,   // 내부 Y ← 사용자 Z
-    parseFloat(document.getElementById('psPosY').value) || 0    // 내부 Z ← 사용자 Y
-  );
+  target.mesh.rotation.set(0,0,0);
   target.mesh.updateMatrixWorld(true);
-  const ow = getOriginWorld(target.mesh, target._origin);
-  target.mesh.position.add(wantPos.clone().sub(ow));
+
+  // 크기(mm) → scale 역산: 목표치수 ÷ (현재BB ÷ 현재scale)
+  const wantX = Math.max(0.5, parseFloat(document.getElementById('psSizeX').value) || 30);
+  const wantY = Math.max(0.5, parseFloat(document.getElementById('psSizeY').value) || 30);
+  const wantZ = Math.max(0.5, parseFloat(document.getElementById('psSizeZ').value) || 30);
+  const bb = new THREE.Box3().setFromObject(target.mesh);
+  const cur = bb.getSize(new THREE.Vector3());
+  const sc = target.mesh.scale.clone();
+  // 기본 기하 치수 = 현재BB ÷ 현재scale
+  const baseX = cur.x / (sc.x || 1);
+  const baseY = cur.y / (sc.y || 1);
+  const baseZ = cur.z / (sc.z || 1);
+  target.mesh.scale.set(
+    baseX > 0.0001 ? wantX / baseX : sc.x,
+    baseY > 0.0001 ? wantY / baseY : sc.y,
+    baseZ > 0.0001 ? wantZ / baseZ : sc.z
+  );
+  // 회전 적용
+  target.mesh.rotation.copy(wantRot);
 
   closeModal('posSizeModal');
   if(transformState.activePart === target) showTransformHandles(target);
   refreshPropPanelTransform(target);
   pushHistory();
-  toast('✅ 위치 · 크기 · 회전 적용 (기준점 고정)');
+  toast('✅ 위치 · 크기(mm) · 회전 적용됨');
 }
 
 // v6.2: 도형 클릭 시 입력창 자동 표시 토글
@@ -4686,21 +4704,20 @@ function rotate90(axis){
   const sel = getSelectedParts();
   const target = sel.length > 0 ? sel : (state.parts.length > 0 ? [state.parts[state.parts.length-1]] : []);
   if(target.length === 0){toast('부품을 선택하세요'); return}
-  // v7.1.6: 월드 고정축 기준 90° (axis 드롭다운: x/y/z → 월드축 매핑, z=월드 up)
-  const wAxis = (axis === 'z') ? new THREE.Vector3(0,1,0)
-              : (axis === 'y') ? new THREE.Vector3(0,0,1)
-              :                  new THREE.Vector3(1,0,0);
-  const q = new THREE.Quaternion().setFromAxisAngle(wAxis, Math.PI/2);
   target.forEach(p => {
-    p.mesh.quaternion.premultiply(q);
-    p._worldRot = null;
+    p.mesh.rotation[axis] += Math.PI/2;
     syncRotPropPanel(p);
   });
   if(transformState.activePart) showTransformHandles(transformState.activePart);
   updateDimLabels();
-  const axLbl = (axis==='z')?'Z(월드 up)':(axis==='y')?'Y':'X';
-  toast('↻ ' + (target.length>1?target.length+'개 ':'') + axLbl + '축(월드) +90°');
-  setStat(axLbl + '축(월드 고정) 90° 회전');
+  // v2.0: 누적 각도 표시
+  if(target.length === 1){
+    const deg = target[0].mesh.rotation[axis] * 180 / Math.PI;
+    toast('↻ ' + axis.toUpperCase() + '축 +90° → 누적 ' + deg.toFixed(1) + '°');
+    setStat(axis.toUpperCase() + '축 회전 누적: ' + deg.toFixed(1) + '°');
+  } else {
+    toast('↻ ' + target.length + '개 부품 ' + axis.toUpperCase() + '축 90° 회전');
+  }
 }
 
 // v3.2: 각도 조절 모달 (XYZ 축 임의 각도 회전)
@@ -4731,19 +4748,12 @@ function doRotateCustom(){
   const sel = getSelectedParts();
   const target = sel.length > 0 ? sel : (state.parts.length > 0 ? [state.parts[state.parts.length-1]] : []);
   if(target.length === 0){toast('부품을 선택하세요'); return}
-  // v7.1.6: 월드 고정축 기준 회전 (z=월드 up)
-  const wAxis = (axis === 'z') ? new THREE.Vector3(0,1,0)
-              : (axis === 'y') ? new THREE.Vector3(0,0,1)
-              :                  new THREE.Vector3(1,0,0);
   target.forEach(p => {
     if(mode === 'set'){
-      // 절대 설정: 현재 자세를 지우고 해당 월드축으로만 rad 회전
-      p.mesh.quaternion.copy(new THREE.Quaternion().setFromAxisAngle(wAxis, rad));
+      p.mesh.rotation[axis] = rad;
     } else {
-      const q = new THREE.Quaternion().setFromAxisAngle(wAxis, rad);
-      p.mesh.quaternion.premultiply(q);
+      p.mesh.rotation[axis] += rad;
     }
-    p._worldRot = null;
     syncRotPropPanel(p);
   });
   if(transformState.activePart) showTransformHandles(transformState.activePart);
@@ -6194,18 +6204,15 @@ function exportSTL(){
   const st = cleaned.stats;
 
   let stl = 'solid Catia3D\n';
-  // v7.1.5 Z-up: 내부(Y-up) → 파일(Z-up). 정점 Y↔Z 스왑 + 와인딩 반전(법선 유지).
-  const toZup = (v) => ({ x: v.x, y: v.z, z: v.y });
   useTris.forEach(t=>{
-    const a = toZup(t[0]), b = toZup(t[2]), c = toZup(t[1]); // 와인딩 반전: 0,2,1
     const n = new THREE.Vector3().crossVectors(
-      new THREE.Vector3(b.x-a.x, b.y-a.y, b.z-a.z),
-      new THREE.Vector3(c.x-a.x, c.y-a.y, c.z-a.z)
+      new THREE.Vector3().subVectors(t[1], t[0]),
+      new THREE.Vector3().subVectors(t[2], t[0])
     ).normalize();
     stl += `facet normal ${n.x} ${n.y} ${n.z}\n  outer loop\n`;
-    stl += `    vertex ${a.x} ${a.y} ${a.z}\n`;
-    stl += `    vertex ${b.x} ${b.y} ${b.z}\n`;
-    stl += `    vertex ${c.x} ${c.y} ${c.z}\n`;
+    stl += `    vertex ${t[0].x} ${t[0].y} ${t[0].z}\n`;
+    stl += `    vertex ${t[1].x} ${t[1].y} ${t[1].z}\n`;
+    stl += `    vertex ${t[2].x} ${t[2].y} ${t[2].z}\n`;
     stl += '  endloop\nendfacet\n';
   });
   stl += 'endsolid Catia3D\n';
@@ -6325,8 +6332,14 @@ function onRotHudClick(event){
   const angSpan = document.getElementById('rotHudAngle');
   const inp = document.getElementById('rotHudInput');
   if(!angSpan || !inp) return;
-  // v7.1.6: 월드축 증분 회전 → 시작값 0으로 채움
-  inp.value = '0';
+  // 현재 부품의 해당 축 각도를 가져와 입력창에 채움
+  const id = state.selectedPartId;
+  const p = state.parts.find(x => x.id === id);
+  let curDeg = 0;
+  if(p && p.mesh){
+    curDeg = p.mesh.rotation[_rotHudActiveAxis] * 180 / Math.PI;
+  }
+  inp.value = curDeg.toFixed(1);
   angSpan.style.display = 'none';
   inp.style.display = '';
   setTimeout(() => { inp.focus(); inp.select(); }, 0);
@@ -6360,21 +6373,15 @@ function applyRotHudInput(){
   const id = state.selectedPartId;
   const p = state.parts.find(x => x.id === id);
   if(p && p.mesh){
-    // v7.1.10: HUD 활성 축 = 회전 핸들 내부축 그대로 (y→내부Y 수직, z→내부Z)
-    const worldAxis = (_rotHudActiveAxis === 'y') ? new THREE.Vector3(0,1,0)
-                    : (_rotHudActiveAxis === 'z') ? new THREE.Vector3(0,0,1)
-                    :                               new THREE.Vector3(1,0,0);
-    const q = new THREE.Quaternion().setFromAxisAngle(worldAxis, v * Math.PI/180);
-    p.mesh.quaternion.premultiply(q); // 월드축 회전은 앞에서 곱함
-    p._worldRot = null; // 증분 회전 → 절대각 표시 초기화
+    p.mesh.rotation[_rotHudActiveAxis] = v * Math.PI / 180;
     syncRotPropPanel(p);
     if(transformState.activePart === p) showTransformHandles(p);
     updateDimLabels();
     refreshPropPanelTransform(p);
-    const axLbl = (_rotHudActiveAxis==='z')?'Z(월드 up)':(_rotHudActiveAxis==='y')?'Y':'X';
+    // HUD 텍스트 업데이트
     angSpan.textContent = v.toFixed(1) + '°';
-    toast('↻ ' + axLbl + '축(월드) ' + v.toFixed(1) + '° 회전');
-    setStat('회전(월드축 증분): ' + axLbl + ' ' + v.toFixed(1) + '°');
+    toast('↻ ' + _rotHudActiveAxis.toUpperCase() + '축 = ' + v.toFixed(1) + '°');
+    setStat('회전 직접 입력: ' + _rotHudActiveAxis.toUpperCase() + '축 ' + v.toFixed(1) + '°');
   }
   inp.style.display = 'none';
   angSpan.style.display = '';
@@ -6422,31 +6429,31 @@ function syncRotPropPanel(part){
 function refreshPropPanelTransform(part){
   if(!part || !part.mesh) return;
   if(state.selectedPartId !== part.id) return;
-  // 회전 (v7.1.6: 월드 고정축 각도 표시 — 저장된 _worldRot 우선)
+  // 회전 (라디안 → 도)
   const rx = document.getElementById('psRotX');
   const ry = document.getElementById('psRotY');
   const rz = document.getElementById('psRotZ');
-  const wr = part._worldRot || {x:0,y:0,z:0};
-  if(rx) rx.value = (wr.x||0).toFixed(1);
-  if(ry) ry.value = (wr.y||0).toFixed(1);
-  if(rz) rz.value = (wr.z||0).toFixed(1);
-  // 위치 — v7.1.5 Z-up
+  if(rx) rx.value = (part.mesh.rotation.x * 180/Math.PI).toFixed(1);
+  if(ry) ry.value = (part.mesh.rotation.y * 180/Math.PI).toFixed(1);
+  if(rz) rz.value = (part.mesh.rotation.z * 180/Math.PI).toFixed(1);
+  // 위치
   const pos = part.mesh.position;
   const px = document.getElementById('propPosX');
   const py = document.getElementById('propPosY');
   const pz = document.getElementById('propPosZ');
   if(px) px.value = pos.x.toFixed(1);
-  if(py) py.value = pos.z.toFixed(1);  // 사용자 Y ← 내부 Z
-  if(pz) pz.value = pos.y.toFixed(1);  // 사용자 Z ← 내부 Y
-  // 크기 (v7.1.7: 로컬 치수 — 회전 무관)
+  if(py) py.value = pos.y.toFixed(1);
+  if(pz) pz.value = pos.z.toFixed(1);
+  // 크기 (월드 바운딩박스)
   part.mesh.updateMatrixWorld(true);
-  const sz = getLocalSize(part.mesh);
+  const bb = new THREE.Box3().setFromObject(part.mesh);
+  const sz = bb.getSize(new THREE.Vector3());
   const sx = document.getElementById('propSizeX');
   const sy = document.getElementById('propSizeY');
   const sz2 = document.getElementById('propSizeZ');
   if(sx) sx.value = sz.x.toFixed(1);
-  if(sy) sy.value = sz.z.toFixed(1);  // 사용자 Y ← 내부 Z
-  if(sz2) sz2.value = sz.y.toFixed(1); // 사용자 Z ← 내부 Y
+  if(sy) sy.value = sz.y.toFixed(1);
+  if(sz2) sz2.value = sz.z.toFixed(1);
 }
 
 // v3.3: 입력된 위치값을 부품에 적용
@@ -6458,10 +6465,9 @@ function applyPropPosition(){
   const x = parseFloat(document.getElementById('propPosX').value);
   const y = parseFloat(document.getElementById('propPosY').value);
   const z = parseFloat(document.getElementById('propPosZ').value);
-  // v7.1.5 Z-up: 사용자 Y→내부 Z, 사용자 Z→내부 Y
   if(!isNaN(x)) part.mesh.position.x = x;
-  if(!isNaN(z)) part.mesh.position.y = z;   // 내부 Y ← 사용자 Z
-  if(!isNaN(y)) part.mesh.position.z = y;   // 내부 Z ← 사용자 Y
+  if(!isNaN(y)) part.mesh.position.y = y;
+  if(!isNaN(z)) part.mesh.position.z = z;
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   setStat('📍 위치 변경: X=' + x.toFixed(1) + ' Y=' + y.toFixed(1) + ' Z=' + z.toFixed(1));
@@ -6479,28 +6485,29 @@ function applyPropSize(axisChar){
     refreshPropPanelTransform(part);
     return;
   }
-  // v7.1.5 Z-up: 사용자 축 → 내부 축 (Y↔Z 스왑). 이하 로직은 내부 축 기준.
-  const uAxis = axisChar.toLowerCase();
-  axisChar = (uAxis === 'y') ? 'z' : (uAxis === 'z') ? 'y' : 'x';
-  // v7.1.9: 부품의 지정 기준점(오리진) 고정 — 변경 전 오리진 월드좌표 기록
-  const norm = part._origin || {x:0.5,y:0.5,z:0.5};
+  // 현재 BB의 그 축 크기를 측정해서 factor 계산
   part.mesh.updateMatrixWorld(true);
-  const originBefore = getOriginWorld(part.mesh, norm);
-  const localSz = getLocalSize(part.mesh);
-  const cur = localSz[axisChar];
+  const bb = new THREE.Box3().setFromObject(part.mesh);
+  const sz = bb.getSize(new THREE.Vector3());
+  const cur = sz[axisChar];
   if(cur < 0.001){ toast('현재 크기를 측정할 수 없습니다'); return; }
   const factor = newSize / cur;
-  // 부품 mesh.scale에 해당 (로컬)축 factor 곱하기
+  // 부품 mesh.scale에 해당 축 factor 곱하기
   part.mesh.scale[axisChar] *= factor;
-  // 기준점 고정: 변경 후 오리진이 원래 위치에 머물도록 위치 보정
-  part.mesh.updateMatrixWorld(true);
-  const originAfter = getOriginWorld(part.mesh, norm);
-  part.mesh.position.add(originBefore.clone().sub(originAfter));
+  // 바닥(또는 워크플레인) 안착 유지: Y 크기를 키울 때 부품이 바닥을 뚫지 않도록
+  //   간단 처리: 부품의 BB 최저점이 원래 바닥에 머물도록 보정 (Y축 변경 시에만)
+  if(axisChar === 'y'){
+    const oldMin = bb.min.y;
+    part.mesh.updateMatrixWorld(true);
+    const newBB = new THREE.Box3().setFromObject(part.mesh);
+    const newMin = newBB.min.y;
+    part.mesh.position.y += oldMin - newMin;
+  }
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   refreshPropPanelTransform(part);
-  toast('📐 ' + uAxis.toUpperCase() + ' 크기 = ' + newSize.toFixed(1) + ' mm (기준점 고정)');
-  setStat('크기 변경: ' + uAxis.toUpperCase() + '축 ' + newSize.toFixed(1) + ' mm');
+  toast('📐 ' + axisChar.toUpperCase() + ' 크기 = ' + newSize.toFixed(1) + ' mm');
+  setStat('크기 변경: ' + axisChar.toUpperCase() + '축 ' + newSize.toFixed(1) + ' mm');
 }
 
 // v3.3: 입력된 회전값을 부품에 적용 (절대값으로 설정)
@@ -6512,23 +6519,14 @@ function applyPropRotation(){
   const rx = parseFloat(document.getElementById('psRotX').value);
   const ry = parseFloat(document.getElementById('psRotY').value);
   const rz = parseFloat(document.getElementById('psRotZ').value);
-  // v7.1.9: 지정 기준점(오리진) 둘레로 회전 — 회전 전 오리진 월드좌표 기록
-  const norm = part._origin || {x:0.5,y:0.5,z:0.5};
-  part.mesh.updateMatrixWorld(true);
-  const originBefore = getOriginWorld(part.mesh, norm);
-  // v7.1.6: 월드 고정축 자세 — Z박스는 항상 월드 up 둘레
-  const q = worldEulerToQuat(isNaN(rx)?0:rx, isNaN(ry)?0:ry, isNaN(rz)?0:rz);
-  part.mesh.quaternion.copy(q);
-  part._worldRot = { x: isNaN(rx)?0:rx, y: isNaN(ry)?0:ry, z: isNaN(rz)?0:rz }; // v7.1.6
-  // 기준점 고정 보정
-  part.mesh.updateMatrixWorld(true);
-  const originAfter = getOriginWorld(part.mesh, norm);
-  part.mesh.position.add(originBefore.clone().sub(originAfter));
+  if(!isNaN(rx)) part.mesh.rotation.x = rx * Math.PI / 180;
+  if(!isNaN(ry)) part.mesh.rotation.y = ry * Math.PI / 180;
+  if(!isNaN(rz)) part.mesh.rotation.z = rz * Math.PI / 180;
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
   // 크기는 회전으로 인해 월드 BB가 바뀌므로 갱신
   refreshPropPanelTransform(part);
-  setStat('↻ 회전(월드축): X=' + (isNaN(rx)?'-':rx) + '° Y=' + (isNaN(ry)?'-':ry) + '° Z=' + (isNaN(rz)?'-':rz) + '°');
+  setStat('↻ 회전 변경: X=' + (isNaN(rx)?'-':rx) + '° Y=' + (isNaN(ry)?'-':ry) + '° Z=' + (isNaN(rz)?'-':rz) + '°');
 }
 
 function toast(msg){
@@ -7482,20 +7480,12 @@ document.addEventListener('keydown', (e)=>{
     }
     state.drawing = null; setTool('select'); hideTransformHandles(); state.parts.forEach(p => p._selected = false); renderPartsList(); updateMultiSelectHighlight(); return;
   }
-  if(e.key === 'Delete' || e.key === 'Backspace' || e.key === 'Del'){
+  if(e.key === 'Delete' || e.key === 'Backspace'){
     // v3.1: 3D 모드 - 다중 선택된 모든 부품 일괄 삭제
     if(state.mode === 'model'){
-      let selParts = state.parts.filter(p => p._selected);
-      // v7.1.4b: 선택 후보 보강 — _selected가 비었으면 selectedPartId / 트랜스폼 핸들 활성 부품도 인정
-      if(selParts.length === 0){
-        let fbId = state.selectedPartId;
-        if(fbId == null && typeof transformState !== 'undefined' && transformState && transformState.activePart) fbId = transformState.activePart.id;
-        const fb = (fbId != null) ? state.parts.find(p => p.id === fbId) : null;
-        if(fb) selParts = [fb];
-      }
+      const selParts = state.parts.filter(p => p._selected);
       if(selParts.length > 1){
         if(!confirm(selParts.length + '개 부품을 삭제하시겠습니까?')) return;
-        e.preventDefault();
         // confirm을 한 번만 받도록 deletePartById의 confirm 우회
         const ids = selParts.map(p => p.id);
         ids.forEach(id => {
@@ -7515,19 +7505,14 @@ document.addEventListener('keydown', (e)=>{
         pushHistory(); // v4.6
         toast('🗑️ ' + ids.length + '개 부품 삭제됨');
         return;
-      } else if(selParts.length === 1){
+      } else if(selParts.length === 1 || state.selectedPartId){
         // v4.9.2: Del키 단일 삭제는 confirm 없이 즉시 (Ctrl+Z로 복구 가능)
-        e.preventDefault();
-        deletePartById(selParts[0].id, true);
-        return;
-      } else {
-        // v7.1.4b: 3D 모드인데 선택이 없으면 조용히 끝내지 않고 안내
-        toast('삭제할 부품을 먼저 선택하세요 (클릭)');
+        const id = selParts.length === 1 ? selParts[0].id : state.selectedPartId;
+        deletePartById(id, true);
         return;
       }
     }
-    // 스케치 모드에서는 스케치 선택 삭제 시도
-    e.preventDefault();
+    // 스케치 모드 또는 3D에서 선택 없으면 스케치 삭제 시도
     deleteSelected();
     return;
   }
@@ -7631,7 +7616,7 @@ function init(){
   renderPartsList();
   updateInfo();
   redrawSketch();
-  setStat('tool3 v7.1.4 준비됨 · 원형 정확 지름표시(정의치수 기반)');
+  setStat('tool3 v8.0 준비됨 · 텍스트모드(커맨드바+명령키보드) + 한붓그리기 통합');
   // v2.2: 항상 3D 모드로 시작 (draw_tool import도 3D 바닥에 표시)
   switchMode('model');
   try {
@@ -7641,6 +7626,8 @@ function init(){
   } catch(e){}
   // v4.6: 초기(빈) 상태를 history[0]로 시드 → 첫 도형까지 완전히 되돌리기 가능
   if(state.history.length === 0) pushHistory();
+  // 커맨드바 초기화
+  initCmdBar();
 }
 // v7.1.4: 3D 메시 파일 가져오기 (STL 바이너리/아스키, OBJ)
 function importMeshFile(event){
@@ -7660,17 +7647,6 @@ function importMeshFile(event){
         toast('지원하지 않는 형식입니다 (STL/OBJ만 가능)'); return;
       }
       if(!geom){ toast('파일을 읽지 못했습니다'); return; }
-      // v7.1.5 Z-up: 파일(Z-up) → 내부(Y-up). 정점 Y↔Z 스왑 (export의 역변환)
-      if(ext === 'stl' || ext === 'obj'){
-        const pa = geom.attributes.position;
-        if(pa){
-          for(let i=0; i<pa.count; i++){
-            const y = pa.getY(i), z = pa.getZ(i);
-            pa.setY(i, z); pa.setZ(i, y);
-          }
-          pa.needsUpdate = true;
-        }
-      }
       geom.computeVertexNormals();
       geom.computeBoundingBox();
       // 바닥(Y=0)에 안착 + XZ 중심 정렬
@@ -7921,3 +7897,1577 @@ function fitSketchToShapes(){
 }
 
 window.addEventListener('load', init);
+
+
+
+/* ============================================================
+   draw_tool3 커맨드바 (텍스트 모드) 접목  v1.0
+   ============================================================ */
+
+let _cmdHistory = [], _cmdHistIdx = -1, _lastCmd = '';
+
+function skCmdLog(text, cls) {
+  const hist = document.getElementById('sk3CmdHistory');
+  if (!hist) return;
+  const div = document.createElement('div');
+  div.className = 'sk3-cmd-line' + (cls ? ' ' + cls : '');
+  div.textContent = text;
+  hist.appendChild(div);
+  hist.scrollTop = hist.scrollHeight;
+  while (hist.children.length > 150) hist.removeChild(hist.firstChild);
+}
+
+function evalSk3Expr(s) {
+  try {
+    s = String(s).replace(/[^0-9+\-*/.()]/g,'');
+    if (!s) return NaN;
+    return Function('"use strict";return (' + s + ')')();
+  } catch(e) { return NaN; }
+}
+
+function sk3ExecuteCmd(raw) {
+  raw = raw.trim();
+  if (!raw) {
+    if (_lastCmd) { skCmdLog('명령 반복: ' + _lastCmd, 'user'); sk3ExecuteCmd(_lastCmd); }
+    return;
+  }
+  if (_cmdHistory[0] !== raw) _cmdHistory.unshift(raw);
+  if (_cmdHistory.length > 50) _cmdHistory.pop();
+  _cmdHistIdx = -1;
+
+  const upper = raw.toUpperCase().trim();
+  skCmdLog('▶ ' + raw, 'user');
+
+  const toolMap = {
+    'L':'line','LINE':'line',
+    'R':'rect','REC':'rect','RECT':'rect',
+    'C':'circle','CIRCLE':'circle','CIR':'circle',
+    'A':'arc','ARC':'arc',
+    'F':'fillet','FILLET':'fillet',
+    'S':'select','SEL':'select','SELECT':'select','ESC':'select'
+  };
+  if (toolMap[upper]) {
+    setTool(toolMap[upper]);
+    skCmdLog('  → ' + upper + ' 도구 활성화', 'sys');
+    _lastCmd = upper;
+    return;
+  }
+
+  const toks = raw.replace(/,/g,' ').trim().split(/\s+/);
+  const key = toks[0].toUpperCase();
+  const nums = toks.slice(1).map(t => evalSk3Expr(t));
+  const col = () => document.getElementById('sketchColor').value || '#000000';
+  const lw = () => parseInt(document.getElementById('lineWidth').value)||2;
+
+  if ((key==='RECT'||key==='REC'||key==='사각형'||key==='BASE') && nums.length >= 2) {
+    let x1,y1,x2,y2;
+    if (nums.length >= 4 && nums.every(isFinite)) {
+      x1=nums[0]-nums[2]/2; y1=nums[1]-nums[3]/2; x2=nums[0]+nums[2]/2; y2=nums[1]+nums[3]/2;
+    } else if (nums.every(isFinite)) {
+      x1=-nums[0]/2; y1=-nums[1]/2; x2=nums[0]/2; y2=nums[1]/2;
+    } else { skCmdLog('  ⚠ 숫자 오류', 'err'); return; }
+    pushHistory();
+    state.shapes.push({type:'rect',x1,y1,x2,y2,color:col(),lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    const W=nums.length>=4?nums[2]:nums[0], H=nums.length>=4?nums[3]:nums[1];
+    skCmdLog('  ▭ 사각형 '+W+'×'+H+'mm 생성', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  if ((key==='LINE'||key==='선') && nums.length >= 4 && nums.every(isFinite)) {
+    pushHistory();
+    state.shapes.push({type:'line',x1:nums[0],y1:nums[1],x2:nums[2],y2:nums[3],color:col(),lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    skCmdLog('  ／ 선 ('+nums[0]+','+nums[1]+')→('+nums[2]+','+nums[3]+')mm', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  if ((key==='HLINE'||key==='가로선') && nums.length >= 1 && isFinite(nums[0])) {
+    let cx=0,cy=0,L=nums[0];
+    if(nums.length>=3 && nums.every(isFinite)){cx=nums[0];cy=nums[1];L=nums[2];}
+    pushHistory();
+    state.shapes.push({type:'line',x1:cx-L/2,y1:cy,x2:cx+L/2,y2:cy,color:col(),lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    skCmdLog('  ― 가로선 '+L+'mm', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  if ((key==='VLINE'||key==='세로선') && nums.length >= 1 && isFinite(nums[0])) {
+    let cx=0,cy=0,L=nums[0];
+    if(nums.length>=3 && nums.every(isFinite)){cx=nums[0];cy=nums[1];L=nums[2];}
+    pushHistory();
+    state.shapes.push({type:'line',x1:cx,y1:cy-L/2,x2:cx,y2:cy+L/2,color:col(),lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    skCmdLog('  ｜ 세로선 '+L+'mm', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  if ((key==='CIRCLE'||key==='원'||key==='CIR') && nums.length >= 1) {
+    let cx=0,cy=0,d=nums[0];
+    if(nums.length>=3 && isFinite(nums[2])){ cx=nums[0]; cy=nums[1]; d=nums[2]; }
+    if(!isFinite(d)||d<=0){ skCmdLog('  ⚠ 지름 오류', 'err'); return; }
+    pushHistory();
+    state.shapes.push({type:'circle',cx,cy,r:d/2,color:col(),lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    skCmdLog('  ○ 원 Ø'+d+'mm ('+cx+','+cy+')', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  if ((key==='ARC'||key==='호') && nums.length >= 5 && nums.every(isFinite)) {
+    pushHistory();
+    state.shapes.push({type:'arc',cx:nums[0],cy:nums[1],r:nums[2],
+      startAngle:nums[3]*Math.PI/180, endAngle:nums[4]*Math.PI/180,
+      color:col(), lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    skCmdLog('  ⌒ 호 R'+nums[2]+'mm '+nums[3]+'°→'+nums[4]+'°', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  if ((key==='FILLET'||key==='필렛') && nums.length >= 1 && isFinite(nums[0])) {
+    setTool('fillet');
+    skCmdLog('  ⌣R 필렛 모드 R='+nums[0]+'mm · 선 2개 드래그 선택', 'sys');
+    toast('필렛 R'+nums[0]+'mm · 선 2개 드래그로 선택하세요');
+    _lastCmd = raw; return;
+  }
+
+  if (key==='CLR'||key==='CLEAR'||key==='전체삭제') {
+    clearSketch(); skCmdLog('  🗑 스케치 전체 삭제', 'sys'); return;
+  }
+  if (key==='UNDO'||key==='U'||key==='백') {
+    undo(); skCmdLog('  ↶ 실행 취소', 'sys'); return;
+  }
+  if (key==='REDO'||key==='Y') {
+    redo(); skCmdLog('  ↷ 다시 실행', 'sys'); return;
+  }
+  if (key==='3D'||key==='MODEL') { switchMode('model'); skCmdLog('  → 3D 모드', 'sys'); return; }
+  if (key==='2D'||key==='SKETCH') { switchMode('sketch'); skCmdLog('  → 스케치 모드', 'sys'); return; }
+
+  if (key==='ZOOM' && nums.length>=1 && isFinite(nums[0]) && nums[0]>0) {
+    state.pixelsPerMm = Math.max(0.1, Math.min(200, nums[0]));
+    redrawSketch();
+    skCmdLog('  🔍 줌 '+nums[0]+'px/mm', 'sys'); return;
+  }
+
+  if (key==='?'||key==='HELP'||key==='도움말') {
+    skCmdLog('─── 도형 생성 ─────────────────────────────', 'sys');
+    skCmdLog('  RECT W H              사각형 (원점 중심)', 'help');
+    skCmdLog('  RECT X Y W H          사각형 (중심 지정)', 'help');
+    skCmdLog('  LINE x1 y1 x2 y2      선분', 'help');
+    skCmdLog('  HLINE [X Y] L         가로선 길이 L mm', 'help');
+    skCmdLog('  VLINE [X Y] L         세로선 길이 L mm', 'help');
+    skCmdLog('  CIRCLE [X Y] D        원 지름 D mm', 'help');
+    skCmdLog('  ARC cx cy R 시작° 끝° 호', 'help');
+    skCmdLog('  FILLET R              필렛 드래그 모드', 'help');
+    skCmdLog('─── 한붓그리기 (점번호 자동) ──────────────', 'sys');
+    skCmdLog('  우/좌/상/하 D          방향 D mm 선 + 점 추가', 'help');
+    skCmdLog('  우/좌/상/하 교점       방향으로 첫 교점까지 선', 'help');
+    skCmdLog('  각 A D / 각 A 교점     각도°+거리 또는 교점까지', 'help');
+    skCmdLog('  점 N                   N번 점을 현재점으로 선택', 'help');
+    skCmdLog('  점 X,Y                 좌표에 새 점', 'help');
+    skCmdLog('  점 우 3 [하 5]         방향+거리에 독립 점', 'help');
+    skCmdLog('  연결 N1 N2 / 선 N1 N2  두 점 직선 연결', 'help');
+    skCmdLog('  닫기                   현재점 → P0 연결', 'help');
+    skCmdLog('  선택 N                 현재점을 N번으로 이동', 'help');
+    skCmdLog('  시작 X Y               P0 좌표 설정', 'help');
+    skCmdLog('  백 / 점초기화          백=취소 / 점번호 리셋', 'help');
+    skCmdLog('  라벨토글               점 번호 표시 ON/OFF', 'help');
+    skCmdLog('─── 기준점 ──────────────────────────────', 'sys');
+    skCmdLog('  기준 X Y               (X,Y)에 기준점(노란⊕)', 'help');
+    skCmdLog('  기준 방향 D            현 기준점에서 방향D 이동', 'help');
+    skCmdLog('  기준 지름 D1 D2        (-D1/2, D2)에 기준점', 'help');
+    skCmdLog('  기준해제               기준점 제거', 'help');
+    skCmdLog('─── 편집 ────────────────────────────────', 'sys');
+    skCmdLog('  이동 N 방향 D          N번 점 이동(연결 선도)', 'help');
+    skCmdLog('  이동 방향 D            현재점 이동', 'help');
+    skCmdLog('  거리두기 N1 N2 좌/우 D 평행복제 (N1→N2 기준)', 'help');
+    skCmdLog('  알 N R / 알 N1 N2 R    점 교점에 필렛 R', 'help');
+    skCmdLog('  모따기 N R             교점 C모따기 (직선)', 'help');
+    skCmdLog('─── 연장 ────────────────────────────────', 'sys');
+    skCmdLog('  연장 N1 N2 D           N2 방향으로 D 연장', 'help');
+    skCmdLog('  연장 N1 N2 교점        N2 방향 첫 교점까지', 'help');
+    skCmdLog('  줄이기 N1 N2 D         N2쪽에서 D mm 축소', 'help');
+    skCmdLog('─── 절교/절각 ───────────────────────────', 'sys');
+    skCmdLog('  절교 N1 N2 N3 수직/수평  N1→N2 연장↔N3선', 'help');
+    skCmdLog('  절교 N 방향 수평/수직 N2  N에서 방향↔N2선', 'help');
+    skCmdLog('  절각 N A N2 수직/수평    N에서 A°↔N2선', 'help');
+    skCmdLog('─── 참조 ────────────────────────────────', 'sys');
+    skCmdLog('  교점                   모든 교차점 자동 번호', 'help');
+    skCmdLog('  만남 N1 N2             두 선 무한교점 번호', 'help');
+    skCmdLog('  라벨 / 번호            선 끝점 자동 번호', 'help');
+    skCmdLog('  정리 [N]               점+짧은선 일괄삭제(≤N)', 'help');
+    skCmdLog('─── 자동·도구 ────────────────────────────', 'sys');
+    skCmdLog('  교차 / 분할            모든 선 교차점에서 자동 분할', 'help');
+    skCmdLog('  채움 [#hex]            선택된 도형에 채움 색상', 'help');
+    skCmdLog('  외곽선                 선택된 선들 끝점 자동 라벨', 'help');
+    skCmdLog('  쓸어지우기 / WIPE      드래그 박스 안 도형 일괄 삭제', 'help');
+    skCmdLog('  삼각형 W [X Y rot°]    정삼각형', 'help');
+    skCmdLog('─── 도구 단축키 ───────────────────────────', 'sys');
+    skCmdLog('  L=선  R=사각형  C=원  A=호  F=필렛  S=선택', 'help');
+    skCmdLog('─── 기타 ──────────────────────────────────', 'sys');
+    skCmdLog('  UNDO/U  REDO/Y  CLR  ZOOM N  2D  3D', 'help');
+    skCmdLog('  : 또는 / 키 → 커맨드창 포커스', 'help');
+    return;
+  }
+
+
+  // ─── 한붓그리기(Pen) 명령 처리 ───────────────────────
+  // 헬퍼: 방향 단위벡터 (world좌표: Y+가 위)
+  function _penDir(d){
+    return {'우':{x:1,y:0},'좌':{x:-1,y:0},'상':{x:0,y:1},'하':{x:0,y:-1},
+            'R':{x:1,y:0},'L':{x:-1,y:0},'U':{x:0,y:1},'D':{x:0,y:-1}}[d];
+  }
+  function _isDir(d){ return ['우','좌','상','하','R','L','U','D'].includes(d); }
+  function _penAddPt(x,y){
+    state.penPoints.push({x:x, y:y});
+    state.penCur = state.penPoints.length - 1;
+    return state.penCur;
+  }
+  function _penEnsureStart(){
+    if(state.penPoints.length === 0){
+      state.penPoints.push({x:0, y:0});
+      state.penCur = 0;
+    }
+    if(state.penCur < 0) state.penCur = 0;
+  }
+  function _penCurPt(){ return state.penPoints[state.penCur]; }
+  // 반직선 ray vs 선분: 가장 가까운 t>0 교점 반환 (없으면 null)
+  function _penRayFirstHit(px,py,ux,uy){
+    let bestT = Infinity, hit = null;
+    state.shapes.forEach(s => {
+      if(s.type !== 'line') return;
+      // 선분 (s.x1,s.y1)-(s.x2,s.y2)와 ray 교차
+      const dx = s.x2-s.x1, dy = s.y2-s.y1;
+      const denom = ux*dy - uy*dx;
+      if(Math.abs(denom) < 1e-9) return;
+      const t = ((s.x1-px)*dy - (s.y1-py)*dx) / denom;
+      const u = ((s.x1-px)*uy - (s.y1-py)*ux) / denom;
+      if(t > 1e-4 && u >= -1e-4 && u <= 1+1e-4){
+        if(t < bestT){ bestT = t; hit = {x: px+ux*t, y: py+uy*t, t}; }
+      }
+    });
+    // 원/호 ray 교차도 간단히 처리 (원만)
+    state.shapes.forEach(s => {
+      if(s.type !== 'circle') return;
+      // ray (px,py) + t*(ux,uy) vs circle (cx,cy,r)
+      const fx = px - s.cx, fy = py - s.cy;
+      const a = ux*ux + uy*uy;
+      const b = 2*(fx*ux + fy*uy);
+      const c = fx*fx + fy*fy - s.r*s.r;
+      const disc = b*b - 4*a*c;
+      if(disc < 0) return;
+      const sd = Math.sqrt(disc);
+      [(-b-sd)/(2*a), (-b+sd)/(2*a)].forEach(t => {
+        if(t > 1e-4 && t < bestT){
+          bestT = t; hit = {x: px+ux*t, y: py+uy*t, t};
+        }
+      });
+    });
+    return hit;
+  }
+  // 점 좌표 가져오기 (인덱스 또는 N번)
+  function _penGetPt(idx){
+    if(idx == null || idx < 0 || idx >= state.penPoints.length) return null;
+    return state.penPoints[idx];
+  }
+  function _parsePenIdx(t){
+    const n = parseInt(t, 10);
+    if(isNaN(n) || n < 0) return null;
+    return n;
+  }
+
+  // ── 우/좌/상/하 D | 우/좌/상/하 교점 ──
+  if(_isDir(key) && toks.length >= 2){
+    _penEnsureStart();
+    const cur = _penCurPt();
+    const u = _penDir(key);
+    if(toks[1] === '교점' || toks[1].toUpperCase() === 'IX'){
+      const hit = _penRayFirstHit(cur.x, cur.y, u.x, u.y);
+      if(!hit){ skCmdLog('  ⚠ ' + key + ' 방향 교점 없음', 'err'); return; }
+      pushHistory();
+      state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:hit.x, y2:hit.y, color:col(), lineWidth:lw()});
+      _penAddPt(hit.x, hit.y);
+      redrawSketch(); updateInfo();
+      skCmdLog('  → ' + key + ' 교점 P' + state.penCur + ' (' + hit.x.toFixed(1) + ',' + hit.y.toFixed(1) + ')mm', 'sys');
+      _lastCmd = raw; return;
+    }
+    const D = evalSk3Expr(toks[1]);
+    if(!isFinite(D)){ skCmdLog('  ⚠ 거리 오류', 'err'); return; }
+    const nx = cur.x + u.x*D, ny = cur.y + u.y*D;
+    pushHistory();
+    state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:nx, y2:ny, color:col(), lineWidth:lw()});
+    _penAddPt(nx, ny);
+    redrawSketch(); updateInfo();
+    skCmdLog('  → ' + key + ' ' + D + 'mm → P' + state.penCur + ' (' + nx.toFixed(1) + ',' + ny.toFixed(1) + ')', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ── 선 우/좌/상/하 D | 선 우/좌/상/하 교점 ──
+  if(key === '선' && toks.length >= 3 && _isDir(toks[1])){
+    return sk3ExecuteCmd(toks.slice(1).join(' '));
+  }
+  // ── 선 N1 N2 (= 연결) ──
+  if(key === '선' && toks.length >= 3){
+    const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
+    if(i1 != null && i2 != null && _penGetPt(i1) && _penGetPt(i2)){
+      const p1 = _penGetPt(i1), p2 = _penGetPt(i2);
+      pushHistory();
+      state.shapes.push({type:'line', x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, color:col(), lineWidth:lw()});
+      state.penCur = i2;
+      redrawSketch(); updateInfo();
+      skCmdLog('  ／ 선 P' + i1 + '–P' + i2, 'sys');
+      _lastCmd = raw; return;
+    }
+  }
+
+  // ── 연결 N1 N2 ──
+  if((key === '연결' || key === 'CONNECT') && toks.length >= 3){
+    const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
+    if(i1 != null && i2 != null && _penGetPt(i1) && _penGetPt(i2)){
+      const p1 = _penGetPt(i1), p2 = _penGetPt(i2);
+      pushHistory();
+      state.shapes.push({type:'line', x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, color:col(), lineWidth:lw()});
+      state.penCur = i2;
+      redrawSketch(); updateInfo();
+      skCmdLog('  🔗 연결 P' + i1 + '–P' + i2, 'sys');
+      _lastCmd = raw; return;
+    }
+    skCmdLog('  ⚠ 연결: 점 번호가 잘못됨', 'err'); return;
+  }
+
+  // ── 닫기 (현재점 → 0번 연결) ──
+  if(key === '닫기' || key === 'CLOSE'){
+    if(state.penPoints.length < 2 || state.penCur < 0){
+      skCmdLog('  ⚠ 닫기: 점이 부족합니다', 'err'); return;
+    }
+    const cur = _penCurPt(), p0 = state.penPoints[0];
+    pushHistory();
+    state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:p0.x, y2:p0.y, color:col(), lineWidth:lw()});
+    state.penCur = 0;
+    redrawSketch(); updateInfo();
+    skCmdLog('  ▶◀ 닫기: P' + (state.penPoints.length-1) + ' → P0', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ── 점 ... ──
+  if(key === '점' && toks.length >= 2){
+    // 점 N (N번 선택)
+    if(toks.length === 2){
+      const t1 = toks[1];
+      // 쉼표 좌표? "점 -100,100"
+      if(t1.indexOf(',') >= 0){
+        const xy = t1.split(',').map(t => evalSk3Expr(t));
+        if(xy.length >= 2 && xy.every(isFinite)){
+          pushHistory();
+          _penAddPt(xy[0], xy[1]);
+          redrawSketch(); updateInfo();
+          skCmdLog('  · 점 P' + state.penCur + ' (' + xy[0] + ',' + xy[1] + ')mm', 'sys');
+          _lastCmd = raw; return;
+        }
+      }
+      const idx = _parsePenIdx(t1);
+      if(idx != null && _penGetPt(idx)){
+        state.penCur = idx;
+        redrawSketch();
+        skCmdLog('  → 현재점 = P' + idx, 'sys'); _lastCmd = raw; return;
+      }
+      skCmdLog('  ⚠ 점 ' + t1 + ': 번호가 없거나 좌표 형식 오류', 'err'); return;
+    }
+    // 점 X Y (공백 구분)
+    if(toks.length >= 3 && isFinite(evalSk3Expr(toks[1])) && isFinite(evalSk3Expr(toks[2])) && !_isDir(toks[1])){
+      const x = evalSk3Expr(toks[1]), y = evalSk3Expr(toks[2]);
+      pushHistory();
+      _penAddPt(x, y);
+      redrawSketch(); updateInfo();
+      skCmdLog('  · 점 P' + state.penCur + ' (' + x + ',' + y + ')mm', 'sys');
+      _lastCmd = raw; return;
+    }
+    // 점 우/좌/상/하 D [방향 D ...] (선 없이 독립 점)
+    if(_isDir(toks[1])){
+      _penEnsureStart();
+      let cx = _penCurPt().x, cy = _penCurPt().y;
+      let i = 1;
+      while(i < toks.length){
+        if(!_isDir(toks[i])) break;
+        const u = _penDir(toks[i]);
+        const D = evalSk3Expr(toks[i+1]);
+        if(!isFinite(D)){ skCmdLog('  ⚠ 거리 오류', 'err'); return; }
+        cx += u.x*D; cy += u.y*D;
+        i += 2;
+      }
+      pushHistory();
+      _penAddPt(cx, cy);
+      redrawSketch(); updateInfo();
+      skCmdLog('  · 점 P' + state.penCur + ' (' + cx.toFixed(1) + ',' + cy.toFixed(1) + ')mm (독립)', 'sys');
+      _lastCmd = raw; return;
+    }
+  }
+
+  // ── 선택 N (현재점 이동) ──
+  if((key === '선택' || key === 'SEL') && toks.length >= 2 && _parsePenIdx(toks[1]) != null){
+    const idx = _parsePenIdx(toks[1]);
+    if(_penGetPt(idx) == null){ skCmdLog('  ⚠ 선택: P' + idx + ' 없음', 'err'); return; }
+    state.penCur = idx;
+    redrawSketch();
+    skCmdLog('  → 현재점 = P' + idx, 'sys'); _lastCmd = raw; return;
+  }
+
+  // ── 시작 X Y (0번 점 좌표 설정) ──
+  if(key === '시작' && toks.length >= 3){
+    const x = evalSk3Expr(toks[1]), y = evalSk3Expr(toks[2]);
+    if(!isFinite(x) || !isFinite(y)){ skCmdLog('  ⚠ 좌표 오류', 'err'); return; }
+    pushHistory();
+    if(state.penPoints.length === 0){
+      state.penPoints.push({x:x, y:y});
+    } else {
+      state.penPoints[0].x = x; state.penPoints[0].y = y;
+    }
+    state.penCur = 0;
+    redrawSketch(); updateInfo();
+    skCmdLog('  ▶ 시작점 P0 = (' + x + ',' + y + ')mm', 'sys'); _lastCmd = raw; return;
+  }
+
+  // ── 백 (UNDO 별칭) ──
+  if(key === '백' || key === 'BACK'){
+    undo(); skCmdLog('  ↶ 백', 'sys'); return;
+  }
+
+  // ── 점초기화 / 리셋 ──
+  if(key === '점초기화' || key === 'PRESET' || key === '리셋'){
+    pushHistory();
+    state.penPoints = [];
+    state.penCur = -1;
+    redrawSketch();
+    skCmdLog('  🔄 점 번호 초기화', 'sys'); _lastCmd = raw; return;
+  }
+
+  // ── 각 A D | 각 A 교점 ──
+  if(key === '각' && toks.length >= 3){
+    _penEnsureStart();
+    const cur = _penCurPt();
+    const A = evalSk3Expr(toks[1]);
+    if(!isFinite(A)){ skCmdLog('  ⚠ 각도 오류', 'err'); return; }
+    const rad = A * Math.PI / 180;
+    const ux = Math.cos(rad), uy = Math.sin(rad); // Y+가 위
+    if(toks[2] === '교점' || toks[2].toUpperCase() === 'IX'){
+      const hit = _penRayFirstHit(cur.x, cur.y, ux, uy);
+      if(!hit){ skCmdLog('  ⚠ 각 ' + A + '° 교점 없음', 'err'); return; }
+      pushHistory();
+      state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:hit.x, y2:hit.y, color:col(), lineWidth:lw()});
+      _penAddPt(hit.x, hit.y);
+      redrawSketch(); updateInfo();
+      skCmdLog('  ∠ 각 ' + A + '° 교점 → P' + state.penCur, 'sys');
+      _lastCmd = raw; return;
+    }
+    const D = evalSk3Expr(toks[2]);
+    if(!isFinite(D)){ skCmdLog('  ⚠ 거리 오류', 'err'); return; }
+    const nx = cur.x + ux*D, ny = cur.y + uy*D;
+    pushHistory();
+    state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:nx, y2:ny, color:col(), lineWidth:lw()});
+    _penAddPt(nx, ny);
+    redrawSketch(); updateInfo();
+    skCmdLog('  ∠ 각 ' + A + '° ' + D + 'mm → P' + state.penCur, 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ── 라벨토글 (점 번호 표시 ON/OFF) ──
+  if(key === '라벨토글' || key === 'LABELTOGGLE'){
+    state.penShowLabels = !state.penShowLabels;
+    redrawSketch();
+    skCmdLog('  라벨 표시 ' + (state.penShowLabels ? 'ON' : 'OFF'), 'sys'); return;
+  }
+
+
+  // ─── 헬퍼: 좌표 일치로 선 찾기/이동 ────────────────────
+  function _penPtTol(){ return 0.01; }
+  function _penLinesAtCoord(x, y){
+    const tol = _penPtTol();
+    return state.shapes.filter(s => s.type === 'line' &&
+      ((Math.abs(s.x1-x)<tol && Math.abs(s.y1-y)<tol) ||
+       (Math.abs(s.x2-x)<tol && Math.abs(s.y2-y)<tol)));
+  }
+  function _penMoveCoord(oldX, oldY, newX, newY){
+    const tol = _penPtTol();
+    state.shapes.forEach(s => {
+      if(s.type !== 'line') return;
+      if(Math.abs(s.x1-oldX)<tol && Math.abs(s.y1-oldY)<tol){ s.x1=newX; s.y1=newY; }
+      if(Math.abs(s.x2-oldX)<tol && Math.abs(s.y2-oldY)<tol){ s.x2=newX; s.y2=newY; }
+    });
+  }
+  function _segIxRaw(ax,ay,bx,by, cx,cy,dx,dy){
+    const d1x=bx-ax,d1y=by-ay, d2x=dx-cx,d2y=dy-cy;
+    const cr = d1x*d2y - d1y*d2x;
+    if(Math.abs(cr)<1e-10) return null;
+    const t = ((cx-ax)*d2y - (cy-ay)*d2x) / cr;
+    const u = ((cx-ax)*d1y - (cy-ay)*d1x) / cr;
+    return {x:ax+t*d1x, y:ay+t*d1y, t, u};
+  }
+
+  // ─── 기준 X Y / 기준 방향 D / 기준 지름 D1 D2 ──────────
+  if(key === '기준' && toks.length >= 2){
+    // 기준 지름 D1 D2 → (-D1/2, D2)
+    if((toks[1] === '지' || toks[1] === '지름' || toks[1].toUpperCase() === 'DIA') && toks.length >= 4){
+      const D1 = evalSk3Expr(toks[2]), D2 = evalSk3Expr(toks[3]);
+      if(!isFinite(D1) || !isFinite(D2)){ skCmdLog('  ⚠ 기준 지름 D1 D2', 'err'); return; }
+      pushHistory();
+      state.penOrigin = {x:-D1/2, y:D2};
+      redrawSketch();
+      skCmdLog('  ⊕ 기준점 (' + (-D1/2).toFixed(2) + ',' + D2 + ')mm', 'sys');
+      _lastCmd = raw; return;
+    }
+    // 기준 방향 D
+    if(_isDir(toks[1]) && toks.length >= 3){
+      const u = _penDir(toks[1]);
+      const D = evalSk3Expr(toks[2]);
+      if(!isFinite(D)){ skCmdLog('  ⚠ 거리 오류', 'err'); return; }
+      pushHistory();
+      const base = state.penOrigin || {x:0,y:0};
+      state.penOrigin = {x:base.x + u.x*D, y:base.y + u.y*D};
+      redrawSketch();
+      skCmdLog('  ⊕ 기준점 → (' + state.penOrigin.x.toFixed(1) + ',' + state.penOrigin.y.toFixed(1) + ')mm', 'sys');
+      _lastCmd = raw; return;
+    }
+    // 기준 X Y
+    if(toks.length >= 3){
+      const x = evalSk3Expr(toks[1]), y = evalSk3Expr(toks[2]);
+      if(!isFinite(x) || !isFinite(y)){ skCmdLog('  ⚠ 좌표 오류', 'err'); return; }
+      pushHistory();
+      state.penOrigin = {x:x, y:y};
+      redrawSketch();
+      skCmdLog('  ⊕ 기준점 (' + x + ',' + y + ')mm', 'sys');
+      _lastCmd = raw; return;
+    }
+  }
+  // 기준 초기화
+  if(key === '기준해제' || key === 'BASEOFF'){
+    pushHistory();
+    state.penOrigin = null;
+    redrawSketch();
+    skCmdLog('  ⊖ 기준점 해제', 'sys'); _lastCmd = raw; return;
+  }
+
+  // ─── 이동 N 우 D | 이동 우 D (현재점) ──────────────────
+  if(key === '이동' && toks.length >= 3){
+    let idx, dirTok, D;
+    if(_isDir(toks[1]) && toks.length >= 3){
+      idx = state.penCur;
+      dirTok = toks[1];
+      D = evalSk3Expr(toks[2]);
+    } else if(_parsePenIdx(toks[1]) != null && toks.length >= 4){
+      idx = _parsePenIdx(toks[1]);
+      dirTok = toks[2];
+      D = evalSk3Expr(toks[3]);
+    }
+    if(idx == null || idx < 0 || !_penGetPt(idx) || !_isDir(dirTok) || !isFinite(D)){
+      skCmdLog('  ⚠ 이동 형식: 이동 N 방향 D  또는  이동 방향 D', 'err'); return;
+    }
+    const p = _penGetPt(idx);
+    const u = _penDir(dirTok);
+    const nx = p.x + u.x*D, ny = p.y + u.y*D;
+    pushHistory();
+    _penMoveCoord(p.x, p.y, nx, ny);
+    p.x = nx; p.y = ny;
+    redrawSketch(); updateInfo();
+    skCmdLog('  → 이동 P' + idx + ' ' + dirTok + ' ' + D + 'mm', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 거리두기 N1 N2 좌/우 D (평행 복제) ────────────────
+  if(key === '거리두기' && toks.length >= 5){
+    const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
+    const side = toks[3];
+    const D = evalSk3Expr(toks[4]);
+    if(i1==null || i2==null || !_penGetPt(i1) || !_penGetPt(i2) || !isFinite(D)){
+      skCmdLog('  ⚠ 거리두기 형식 오류', 'err'); return;
+    }
+    if(side !== '좌' && side !== '우' && side !== 'L' && side !== 'R'){
+      skCmdLog('  ⚠ 거리두기 방향은 좌/우', 'err'); return;
+    }
+    const p1 = _penGetPt(i1), p2 = _penGetPt(i2);
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const ln = Math.hypot(dx, dy);
+    if(ln < 1e-6){ skCmdLog('  ⚠ 두 점이 일치', 'err'); return; }
+    // 진행방향 좌측 법선 = (-dy, dx)/ln (Y+가 위 기준)
+    let nx, ny;
+    if(side === '좌' || side === 'L'){ nx = -dy/ln; ny = dx/ln; }
+    else                              { nx =  dy/ln; ny = -dx/ln; }
+    const ox = nx*D, oy = ny*D;
+    pushHistory();
+    state.shapes.push({type:'line', x1:p1.x+ox, y1:p1.y+oy, x2:p2.x+ox, y2:p2.y+oy,
+      color:col(), lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    skCmdLog('  ‖ 거리두기 P' + i1 + '–P' + i2 + ' ' + side + ' ' + D + 'mm', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 알(필렛) N R | 알 N1 N2 R ──────────────────────────
+  if((key === '알' || key === 'FILLETN') && toks.length >= 3){
+    let R, lines;
+    // 알 N1 N2 R: N1번 점과 N2번 점이 같은 위치에 있어야 (교점)
+    if(toks.length >= 4 && _parsePenIdx(toks[1])!=null && _parsePenIdx(toks[2])!=null){
+      const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
+      const p1 = _penGetPt(i1), p2 = _penGetPt(i2);
+      R = evalSk3Expr(toks[3]);
+      if(!p1 || !p2 || !isFinite(R)){ skCmdLog('  ⚠ 알 형식 오류', 'err'); return; }
+      // 두 점 좌표로 두 점 위치에 연결된 선 각각 찾기
+      const l1 = _penLinesAtCoord(p1.x, p1.y);
+      const l2 = _penLinesAtCoord(p2.x, p2.y);
+      if(l1.length === 0 || l2.length === 0){ skCmdLog('  ⚠ 알: 점에 연결된 선이 없음', 'err'); return; }
+      lines = [l1[0], l2[0]];
+    } else {
+      // 알 N R: N번 교점에 연결된 두 선
+      const idx = _parsePenIdx(toks[1]);
+      R = evalSk3Expr(toks[2]);
+      const p = _penGetPt(idx);
+      if(!p || !isFinite(R)){ skCmdLog('  ⚠ 알 형식 오류', 'err'); return; }
+      lines = _penLinesAtCoord(p.x, p.y);
+      if(lines.length < 2){ skCmdLog('  ⚠ 알: P' + idx + '에 두 선이 만나야 함', 'err'); return; }
+    }
+    // 교점 계산
+    const ix = _segIxRaw(lines[0].x1,lines[0].y1,lines[0].x2,lines[0].y2,
+                         lines[1].x1,lines[1].y1,lines[1].x2,lines[1].y2);
+    if(!ix){ skCmdLog('  ⚠ 알: 두 선이 평행', 'err'); return; }
+    pushHistory();
+    applyFillet({s:lines[0]}, {s:lines[1]}, ix, R);
+    redrawSketch(); updateInfo();
+    skCmdLog('  ⌣ 알 R' + R + 'mm 적용', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 모따기 N R (N번 교점, 두 선을 R만큼 트림 후 직선 연결) ──
+  if((key === '모따기' || key === 'CHAMFER') && toks.length >= 3){
+    const idx = _parsePenIdx(toks[1]);
+    const R = evalSk3Expr(toks[2]);
+    const p = _penGetPt(idx);
+    if(!p || !isFinite(R)){ skCmdLog('  ⚠ 모따기 형식 오류', 'err'); return; }
+    const lines = _penLinesAtCoord(p.x, p.y);
+    if(lines.length < 2){ skCmdLog('  ⚠ 모따기: P' + idx + '에 두 선 필요', 'err'); return; }
+    const L1 = lines[0], L2 = lines[1];
+    // 각 선에서 교점 측 끝점을 R만큼 안쪽(반대편)으로 이동
+    function trimToward(L, px, py, dist){
+      const tol = _penPtTol();
+      const dx = L.x2 - L.x1, dy = L.y2 - L.y1;
+      const ln = Math.hypot(dx, dy);
+      const ux = dx/ln, uy = dy/ln;
+      if(Math.abs(L.x1-px)<tol && Math.abs(L.y1-py)<tol){
+        // x1쪽이 교점 → x1을 +방향(반대편 안쪽)으로 dist
+        return {newX: L.x1 + ux*dist, newY: L.y1 + uy*dist, side:1};
+      } else {
+        return {newX: L.x2 - ux*dist, newY: L.y2 - uy*dist, side:2};
+      }
+    }
+    const t1 = trimToward(L1, p.x, p.y, R);
+    const t2 = trimToward(L2, p.x, p.y, R);
+    pushHistory();
+    if(t1.side === 1){ L1.x1 = t1.newX; L1.y1 = t1.newY; } else { L1.x2 = t1.newX; L1.y2 = t1.newY; }
+    if(t2.side === 1){ L2.x1 = t2.newX; L2.y1 = t2.newY; } else { L2.x2 = t2.newX; L2.y2 = t2.newY; }
+    // 새로운 모따기 직선
+    state.shapes.push({type:'line', x1:t1.newX, y1:t1.newY, x2:t2.newX, y2:t2.newY,
+      color:col(), lineWidth:lw()});
+    redrawSketch(); updateInfo();
+    skCmdLog('  ◢ 모따기 P' + idx + ' C' + R + 'mm', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 연장 N1 N2 D | 연장 N1 N2 교점 ─────────────────────
+  if(key === '연장' && toks.length >= 3){
+    const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
+    const p1 = _penGetPt(i1), p2 = _penGetPt(i2);
+    if(!p1 || !p2){ skCmdLog('  ⚠ 연장: 점 번호 오류', 'err'); return; }
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const ln = Math.hypot(dx, dy);
+    if(ln < 1e-6){ skCmdLog('  ⚠ 두 점 일치', 'err'); return; }
+    const ux = dx/ln, uy = dy/ln;
+    let nx, ny;
+    if(toks[3] === '교점' || (toks[3]||'').toUpperCase() === 'IX'){
+      const hit = _penRayFirstHit(p2.x, p2.y, ux, uy);
+      if(!hit){ skCmdLog('  ⚠ 연장 교점 없음', 'err'); return; }
+      nx = hit.x; ny = hit.y;
+    } else {
+      const D = evalSk3Expr(toks[3]);
+      if(!isFinite(D)){ skCmdLog('  ⚠ 거리 오류', 'err'); return; }
+      nx = p2.x + ux*D; ny = p2.y + uy*D;
+    }
+    pushHistory();
+    _penMoveCoord(p2.x, p2.y, nx, ny);
+    p2.x = nx; p2.y = ny;
+    redrawSketch(); updateInfo();
+    skCmdLog('  ↦ 연장 P' + i1 + '→P' + i2 + ' → (' + nx.toFixed(1) + ',' + ny.toFixed(1) + ')', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 줄이기 N1 N2 D (N2쪽에서 D만큼 축소) ───────────────
+  if((key === '줄이기' || key === 'SHRINK') && toks.length >= 4){
+    const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
+    const D = evalSk3Expr(toks[3]);
+    const p1 = _penGetPt(i1), p2 = _penGetPt(i2);
+    if(!p1 || !p2 || !isFinite(D)){ skCmdLog('  ⚠ 줄이기 형식 오류', 'err'); return; }
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const ln = Math.hypot(dx, dy);
+    if(ln < D + 1e-6){ skCmdLog('  ⚠ 줄이기: 거리가 선보다 김', 'err'); return; }
+    const ux = dx/ln, uy = dy/ln;
+    const nx = p2.x - ux*D, ny = p2.y - uy*D;
+    pushHistory();
+    _penMoveCoord(p2.x, p2.y, nx, ny);
+    p2.x = nx; p2.y = ny;
+    redrawSketch(); updateInfo();
+    skCmdLog('  ↤ 줄이기 P' + i2 + '쪽 ' + D + 'mm 축소', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 절교 N1 N2 N3 수직/수평 ─────────────────────────────
+  if(key === '절교' && toks.length >= 5){
+    // 방향 절교: 절교 N 방향 수평/수직 N2
+    if(_isDir(toks[2]) && (toks[3]==='수평' || toks[3]==='수직') && _parsePenIdx(toks[4])!=null){
+      const i = _parsePenIdx(toks[1]);
+      const u = _penDir(toks[2]);
+      const targetIdx = _parsePenIdx(toks[4]);
+      const p = _penGetPt(i), tgt = _penGetPt(targetIdx);
+      if(!p || !tgt){ skCmdLog('  ⚠ 절교 점 오류', 'err'); return; }
+      let nx, ny;
+      if(toks[3] === '수평'){
+        // y = tgt.y 직선과 교차
+        if(Math.abs(u.y) < 1e-9){ skCmdLog('  ⚠ 방향이 수평이라 수평선과 만날 수 없음', 'err'); return; }
+        const t = (tgt.y - p.y) / u.y;
+        nx = p.x + u.x*t; ny = tgt.y;
+      } else {
+        if(Math.abs(u.x) < 1e-9){ skCmdLog('  ⚠ 방향이 수직이라 수직선과 만날 수 없음', 'err'); return; }
+        const t = (tgt.x - p.x) / u.x;
+        nx = tgt.x; ny = p.y + u.y*t;
+      }
+      pushHistory();
+      state.shapes.push({type:'line', x1:p.x, y1:p.y, x2:nx, y2:ny, color:col(), lineWidth:lw()});
+      _penAddPt(nx, ny);
+      redrawSketch(); updateInfo();
+      skCmdLog('  ⊥ 절교 P' + i + ' ' + toks[2] + ' ' + toks[3] + ' P' + targetIdx + ' → P' + state.penCur, 'sys');
+      _lastCmd = raw; return;
+    }
+    // 두 점 절교: 절교 N1 N2 N3 수직/수평
+    const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]), i3 = _parsePenIdx(toks[3]);
+    const mode = toks[4];
+    const p1 = _penGetPt(i1), p2 = _penGetPt(i2), p3 = _penGetPt(i3);
+    if(!p1 || !p2 || !p3){ skCmdLog('  ⚠ 절교 점 번호 오류', 'err'); return; }
+    if(mode !== '수직' && mode !== '수평'){ skCmdLog('  ⚠ 수직/수평 지정', 'err'); return; }
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    let nx, ny;
+    if(mode === '수직'){ // x = p3.x
+      if(Math.abs(dx) < 1e-9){ skCmdLog('  ⚠ 연장선이 수직이라 만남 없음', 'err'); return; }
+      const t = (p3.x - p1.x) / dx;
+      nx = p3.x; ny = p1.y + dy*t;
+    } else { // 수평: y = p3.y
+      if(Math.abs(dy) < 1e-9){ skCmdLog('  ⚠ 연장선이 수평이라 만남 없음', 'err'); return; }
+      const t = (p3.y - p1.y) / dy;
+      nx = p1.x + dx*t; ny = p3.y;
+    }
+    pushHistory();
+    _penMoveCoord(p2.x, p2.y, nx, ny);
+    p2.x = nx; p2.y = ny;
+    redrawSketch(); updateInfo();
+    skCmdLog('  ⊥ 절교 P' + i1 + '→P' + i2 + ' P' + i3 + ' ' + mode, 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 절각 N A N2 수직/수평 ───────────────────────────────
+  if(key === '절각' && toks.length >= 5){
+    const i = _parsePenIdx(toks[1]);
+    const A = evalSk3Expr(toks[2]);
+    const i2 = _parsePenIdx(toks[3]);
+    const mode = toks[4];
+    const p = _penGetPt(i), p2 = _penGetPt(i2);
+    if(!p || !p2 || !isFinite(A)){ skCmdLog('  ⚠ 절각 형식 오류', 'err'); return; }
+    if(mode !== '수직' && mode !== '수평'){ skCmdLog('  ⚠ 수직/수평 지정', 'err'); return; }
+    const rad = A * Math.PI / 180;
+    const ux = Math.cos(rad), uy = Math.sin(rad);
+    let nx, ny;
+    if(mode === '수직'){
+      if(Math.abs(ux) < 1e-9){ skCmdLog('  ⚠ 각도가 수직이라 만남 없음', 'err'); return; }
+      const t = (p2.x - p.x) / ux;
+      nx = p2.x; ny = p.y + uy*t;
+    } else {
+      if(Math.abs(uy) < 1e-9){ skCmdLog('  ⚠ 각도가 수평이라 만남 없음', 'err'); return; }
+      const t = (p2.y - p.y) / uy;
+      nx = p.x + ux*t; ny = p2.y;
+    }
+    pushHistory();
+    state.shapes.push({type:'line', x1:p.x, y1:p.y, x2:nx, y2:ny, color:col(), lineWidth:lw()});
+    _penAddPt(nx, ny);
+    redrawSketch(); updateInfo();
+    skCmdLog('  ∠⊥ 절각 P' + i + ' ' + A + '° P' + i2 + ' ' + mode + ' → P' + state.penCur, 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 교점 (모든 도형 교차점 자동 번호) ───────────────────
+  if(key === '교점' || key === 'IX' || key === 'INTERSECT'){
+    const lines = state.shapes.filter(s => s.type === 'line');
+    const pts = [];
+    for(let i=0; i<lines.length; i++){
+      for(let j=i+1; j<lines.length; j++){
+        const ix = _segIxRaw(lines[i].x1,lines[i].y1,lines[i].x2,lines[i].y2,
+                             lines[j].x1,lines[j].y1,lines[j].x2,lines[j].y2);
+        if(ix && ix.t>=-0.01 && ix.t<=1.01 && ix.u>=-0.01 && ix.u<=1.01){
+          pts.push({x:ix.x, y:ix.y});
+        }
+      }
+    }
+    // 중복 제거 (0.1mm 이내)
+    const uniq = [];
+    pts.forEach(p => {
+      if(!uniq.some(q => Math.hypot(q.x-p.x, q.y-p.y) < 0.1) &&
+         !state.penPoints.some(q => Math.hypot(q.x-p.x, q.y-p.y) < 0.1)){
+        uniq.push(p);
+      }
+    });
+    if(uniq.length === 0){ skCmdLog('  교점: 새 교점 없음', 'sys'); return; }
+    pushHistory();
+    uniq.forEach(p => state.penPoints.push(p));
+    state.penCur = state.penPoints.length - 1;
+    redrawSketch(); updateInfo();
+    skCmdLog('  ✕ 교점 ' + uniq.length + '개 → P0..P' + state.penCur, 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 만남 N1 N2 (두 점이 끝점인 선들의 무한직선 교점) ────
+  if(key === '만남' && toks.length >= 3){
+    const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
+    const p1 = _penGetPt(i1), p2 = _penGetPt(i2);
+    if(!p1 || !p2){ skCmdLog('  ⚠ 만남 점 오류', 'err'); return; }
+    const ll1 = _penLinesAtCoord(p1.x, p1.y);
+    const ll2 = _penLinesAtCoord(p2.x, p2.y);
+    if(ll1.length === 0 || ll2.length === 0){ skCmdLog('  ⚠ 만남: 점에 선이 없음', 'err'); return; }
+    const L1 = ll1[0], L2 = ll2[0];
+    // 무한직선 교점
+    const ix = _segIxRaw(L1.x1,L1.y1,L1.x2,L1.y2, L2.x1,L2.y1,L2.x2,L2.y2);
+    if(!ix){ skCmdLog('  ⚠ 만남: 두 선이 평행', 'err'); return; }
+    pushHistory();
+    _penAddPt(ix.x, ix.y);
+    redrawSketch(); updateInfo();
+    skCmdLog('  ⨯ 만남 → P' + state.penCur + ' (' + ix.x.toFixed(1) + ',' + ix.y.toFixed(1) + ')', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 라벨 / 번호 (모든 선 끝점에 자동 번호 부여) ─────────
+  if(key === '라벨' || key === '번호' || key === 'LABEL'){
+    const tol = _penPtTol();
+    const added = [];
+    state.shapes.forEach(s => {
+      if(s.type !== 'line') return;
+      [{x:s.x1,y:s.y1}, {x:s.x2,y:s.y2}].forEach(pt => {
+        if(!state.penPoints.some(p => Math.hypot(p.x-pt.x, p.y-pt.y) < 0.1) &&
+           !added.some(p => Math.hypot(p.x-pt.x, p.y-pt.y) < 0.1)){
+          added.push(pt);
+        }
+      });
+    });
+    if(added.length === 0){ skCmdLog('  라벨: 새 점 없음', 'sys'); return; }
+    pushHistory();
+    added.forEach(p => state.penPoints.push(p));
+    state.penCur = state.penPoints.length - 1;
+    redrawSketch(); updateInfo();
+    skCmdLog('  🏷 라벨 ' + added.length + '개 추가', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 정리 [N] (점 전체 + N mm 이하 짧은 선 삭제) ─────────
+  if((key === '정리' || key === 'CLEANUP')){
+    let tolMm = 0.1;
+    if(toks.length >= 2 && isFinite(evalSk3Expr(toks[1]))) tolMm = evalSk3Expr(toks[1]);
+    pushHistory();
+    const beforeShapes = state.shapes.length;
+    const beforePts = state.penPoints.length;
+    state.shapes = state.shapes.filter(s => {
+      if(s.type === 'line'){
+        const L = Math.hypot(s.x2-s.x1, s.y2-s.y1);
+        return L > tolMm;
+      }
+      return true;
+    });
+    state.penPoints = [];
+    state.penCur = -1;
+    redrawSketch(); updateInfo();
+    skCmdLog('  🧹 정리: 선 ' + (beforeShapes - state.shapes.length) + '개, 점 ' + beforePts + '개 삭제 (≤' + tolMm + 'mm)', 'sys');
+    _lastCmd = raw; return;
+  }
+
+
+  // ─── 호 N R [시계|반시계] 각 A | 교점 ──────────────────
+  if(key === '호' && toks.length >= 3){
+    const idx = _parsePenIdx(toks[1]);
+    const R = evalSk3Expr(toks[2]);
+    const cp = _penGetPt(idx);
+    if(!cp || !isFinite(R)){ skCmdLog('  ⚠ 호: 호 N R [시계] 각 A | 교점', 'err'); return; }
+    const cur = _penCurPt();
+    if(!cur){ skCmdLog('  ⚠ 현재점 필요', 'err'); return; }
+    // 시작각 = 현재점→중심으로부터 각도
+    const sa = Math.atan2(cur.y - cp.y, cur.x - cp.x);
+    let ti = 3;
+    let cw = false;
+    if(toks[ti] === '시계' || toks[ti] === 'CW'){ cw = true; ti++; }
+    else if(toks[ti] === '반시계' || toks[ti] === 'CCW'){ cw = false; ti++; }
+    // 각 A
+    if(toks[ti] === '각' && toks.length > ti+1){
+      const A = evalSk3Expr(toks[ti+1]);
+      if(!isFinite(A)){ skCmdLog('  ⚠ 각도 오류', 'err'); return; }
+      const Arad = A * Math.PI / 180;
+      const ea = sa + (cw ? -Arad : Arad);
+      const ex = cp.x + R*Math.cos(ea), ey = cp.y + R*Math.sin(ea);
+      pushHistory();
+      // canvas는 -endAngle→-startAngle로 그림(반시계). world 기준 sa→ea CCW가 되도록 정리
+      const aStart = cw ? ea : sa;
+      const aEnd   = cw ? sa : ea;
+      state.shapes.push({type:'arc', cx:cp.x, cy:cp.y, r:R,
+        startAngle: aStart, endAngle: aEnd,
+        color:col(), lineWidth:lw()});
+      _penAddPt(ex, ey);
+      redrawSketch(); updateInfo();
+      skCmdLog('  ⌒ 호 P' + idx + ' R' + R + ' ' + (cw?'시계':'반시계') + ' ' + A + '° → P' + state.penCur, 'sys');
+      _lastCmd = raw; return;
+    }
+    if(toks[ti] === '교점' || (toks[ti]||'').toUpperCase() === 'IX'){
+      // 호 위를 1° 씩 회전하며 ray 교차 첫번째 찾기
+      const stepRad = (cw ? -1 : 1) * Math.PI / 180;
+      let found = null;
+      for(let a = sa + stepRad; Math.abs(a - sa) < 2*Math.PI; a += stepRad){
+        const px = cp.x + R*Math.cos(a), py = cp.y + R*Math.sin(a);
+        // 점 위에 다른 선이 닿는지 검사
+        let hit = false;
+        for(const s of state.shapes){
+          if(s.type !== 'line') continue;
+          // 점이 선분에 매우 가까운가
+          const dx = s.x2-s.x1, dy = s.y2-s.y1, ln2 = dx*dx+dy*dy;
+          if(ln2 < 1e-9) continue;
+          let t = ((px-s.x1)*dx + (py-s.y1)*dy)/ln2;
+          if(t < 0 || t > 1) continue;
+          const cx2 = s.x1+dx*t, cy2 = s.y1+dy*t;
+          if(Math.hypot(px-cx2, py-cy2) < 0.3){ hit = true; break; }
+        }
+        if(hit){ found = {x:px, y:py, a}; break; }
+      }
+      if(!found){ skCmdLog('  ⚠ 호 ' + (cw?'시계':'반시계') + ' 교점 없음', 'err'); return; }
+      pushHistory();
+      const aStart = cw ? found.a : sa;
+      const aEnd   = cw ? sa : found.a;
+      state.shapes.push({type:'arc', cx:cp.x, cy:cp.y, r:R,
+        startAngle:aStart, endAngle:aEnd, color:col(), lineWidth:lw()});
+      _penAddPt(found.x, found.y);
+      redrawSketch(); updateInfo();
+      skCmdLog('  ⌒ 호 ' + (cw?'시계':'반시계') + ' 교점 → P' + state.penCur, 'sys');
+      _lastCmd = raw; return;
+    }
+  }
+
+  // ─── 교차 / 분할 (모든 선 교차점에서 분할) ───────────────
+  if(key === '교차' || key === '분할' || key === 'BREAK'){
+    const lines = state.shapes.filter(s => s.type === 'line');
+    const nonLines = state.shapes.filter(s => s.type !== 'line');
+    if(lines.length < 2){ skCmdLog('  ⚠ 분할할 선이 부족', 'err'); return; }
+    // 각 선의 교차점 t값 수집
+    const meta = lines.map(L => ({L, ts:[0, 1]}));
+    for(let i=0; i<lines.length; i++){
+      for(let j=i+1; j<lines.length; j++){
+        const a = lines[i], b = lines[j];
+        const ix = _segIxRaw(a.x1,a.y1,a.x2,a.y2, b.x1,b.y1,b.x2,b.y2);
+        if(ix && ix.t > 0.001 && ix.t < 0.999 && ix.u > 0.001 && ix.u < 0.999){
+          meta[i].ts.push(ix.t);
+          meta[j].ts.push(ix.u);
+        }
+      }
+    }
+    pushHistory();
+    const newShapes = nonLines.slice();
+    let totalSegs = 0;
+    meta.forEach(({L, ts}) => {
+      const uts = [...new Set(ts.map(t => Math.round(t*1e6)/1e6))].sort((a,b)=>a-b);
+      for(let i=0; i<uts.length-1; i++){
+        const t1 = uts[i], t2 = uts[i+1];
+        if(t2 - t1 < 1e-4) continue;
+        const x1 = L.x1 + (L.x2-L.x1)*t1, y1 = L.y1 + (L.y2-L.y1)*t1;
+        const x2 = L.x1 + (L.x2-L.x1)*t2, y2 = L.y1 + (L.y2-L.y1)*t2;
+        newShapes.push({type:'line', x1, y1, x2, y2,
+          color: L.color, lineWidth: L.lineWidth, fillColor: L.fillColor});
+        totalSegs++;
+      }
+    });
+    state.shapes = newShapes;
+    redrawSketch(); updateInfo();
+    skCmdLog('  ⊞ 교차 분할 → ' + totalSegs + '개 선 조각', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 채움 [색상] (선택된 도형에 채움색 적용) ─────────────
+  if((key === '채움' || key === 'FILL' || key === 'HATCH')){
+    if(state.selectedShapes.size === 0){
+      skCmdLog('  ⚠ 채움: 먼저 도형을 선택하세요(S키)', 'err'); return;
+    }
+    let color = toks[1];
+    if(!color){
+      color = prompt('채움 색상 (#hex 또는 색이름)', '#ffd54a');
+      if(!color) return;
+    }
+    pushHistory();
+    state.selectedShapes.forEach(idx => {
+      if(state.shapes[idx]) state.shapes[idx].fillColor = color;
+    });
+    redrawSketch(); updateInfo();
+    skCmdLog('  🎨 채움 ' + color + ' · ' + state.selectedShapes.size + '개 도형', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 외곽선 (선택된 line들의 끝점을 따라 폴리라인) ──────
+  if(key === '외곽선' || key === 'OUTLINE'){
+    const selLines = [...state.selectedShapes]
+      .map(i => state.shapes[i])
+      .filter(s => s && s.type === 'line');
+    if(selLines.length < 2){
+      skCmdLog('  ⚠ 외곽선: 선 2개 이상 선택 필요(S키 다중선택)', 'err'); return;
+    }
+    // 끝점 좌표를 펜포인트로 등록 (라벨 효과)
+    const tol = _penPtTol();
+    let added = 0;
+    selLines.forEach(L => {
+      [{x:L.x1,y:L.y1}, {x:L.x2,y:L.y2}].forEach(pt => {
+        if(!state.penPoints.some(p => Math.hypot(p.x-pt.x, p.y-pt.y) < 0.1)){
+          state.penPoints.push(pt); added++;
+        }
+      });
+    });
+    if(added > 0){
+      pushHistory();
+      state.penCur = state.penPoints.length - 1;
+      redrawSketch();
+    }
+    skCmdLog('  🖊 외곽선 끝점 ' + added + '개 라벨 추가 (선택 선 ' + selLines.length + '개)', 'sys');
+    skCmdLog('     ℹ 닫힌 영역 자동 추출은 미지원 — 끝점 번호로 다음 작업 진행', 'help');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 쓸어지우기 (wipe 도구 활성화) ───────────────────────
+  if(key === '쓸어지우기' || key === 'WIPE'){
+    setTool('wipe');
+    skCmdLog('  🧽 쓸어지우기 모드 — 드래그로 박스 안 도형 일괄 삭제', 'sys');
+    toast('드래그로 박스 안 도형 삭제');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 삼각형 W [X Y rot°] (정삼각형) ──────────────────────
+  if((key === '삼각형' || key === 'TRI' || key === 'TRIANGLE') && toks.length >= 2 && isFinite(evalSk3Expr(toks[1]))){
+    const side = evalSk3Expr(toks[1]);
+    let cx=0, cy=0, rot=0;
+    if(toks.length >= 4){ cx = evalSk3Expr(toks[2]); cy = evalSk3Expr(toks[3]); }
+    if(toks.length >= 5){ rot = evalSk3Expr(toks[4]); }
+    if(side<=0 || !isFinite(side)){ skCmdLog('  ⚠ 변 길이 오류', 'err'); return; }
+    const R = side / Math.sqrt(3);
+    const rad = rot * Math.PI / 180;
+    const verts = [0, 2*Math.PI/3, 4*Math.PI/3].map(a => ({
+      x: cx + R*Math.cos(Math.PI/2 + rad + a),
+      y: cy + R*Math.sin(Math.PI/2 + rad + a)
+    }));
+    pushHistory();
+    for(let i=0; i<3; i++){
+      const p1 = verts[i], p2 = verts[(i+1)%3];
+      state.shapes.push({type:'line', x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y,
+        color:col(), lineWidth:lw()});
+    }
+    redrawSketch(); updateInfo();
+    skCmdLog('  △ 정삼각형 변' + side + 'mm (' + cx + ',' + cy + ') ' + rot + '°', 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 선 좌/우 지[름] D1 D2 (지름차/2 만큼 방향선) ────────
+  if(key === '선' && toks.length >= 5 && (toks[1]==='좌'||toks[1]==='우') &&
+     (toks[2]==='지'||toks[2]==='지름'||toks[2].toUpperCase()==='DIA')){
+    _penEnsureStart();
+    const cur = _penCurPt();
+    const D1 = evalSk3Expr(toks[3]), D2 = evalSk3Expr(toks[4]);
+    if(!isFinite(D1) || !isFinite(D2)){ skCmdLog('  ⚠ 지름 D1 D2', 'err'); return; }
+    const dist = Math.abs(D2 - D1) / 2;
+    const u = _penDir(toks[1]);
+    const nx = cur.x + u.x*dist, ny = cur.y + u.y*dist;
+    pushHistory();
+    state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:nx, y2:ny, color:col(), lineWidth:lw()});
+    _penAddPt(nx, ny);
+    redrawSketch(); updateInfo();
+    skCmdLog('  ⊘ 선 ' + toks[1] + ' 지름 ' + D1 + ' ' + D2 + ' = ' + dist.toFixed(2) + 'mm → P' + state.penCur, 'sys');
+    _lastCmd = raw; return;
+  }
+
+  // ─── 점 좌/우 지[름] D1 D2 (지름차/2만큼 독립점) ─────────
+  if(key === '점' && toks.length >= 5 && (toks[1]==='좌'||toks[1]==='우') &&
+     (toks[2]==='지'||toks[2]==='지름'||toks[2].toUpperCase()==='DIA')){
+    _penEnsureStart();
+    const cur = _penCurPt();
+    const D1 = evalSk3Expr(toks[3]), D2 = evalSk3Expr(toks[4]);
+    if(!isFinite(D1) || !isFinite(D2)){ skCmdLog('  ⚠ 지름 D1 D2', 'err'); return; }
+    const dist = Math.abs(D2 - D1) / 2;
+    const u = _penDir(toks[1]);
+    const nx = cur.x + u.x*dist, ny = cur.y + u.y*dist;
+    pushHistory();
+    _penAddPt(nx, ny);
+    redrawSketch(); updateInfo();
+    skCmdLog('  · 점 ' + toks[1] + ' 지름 ' + D1 + ' ' + D2 + ' (독립) → P' + state.penCur, 'sys');
+    _lastCmd = raw; return;
+  }
+
+  skCmdLog("  ⚠ '" + raw + "' 알 수 없는 명령 — ? 입력으로 도움말", 'err');
+}
+
+function initCmdBar() {
+  if (document.getElementById('sk3CmdBar')) return;
+
+  const style = document.createElement('style');
+  style.textContent = `
+    #sk3CmdBar {
+      position:fixed; left:0; right:0; bottom:0; z-index:8000;
+      background:rgba(12,16,20,0.97);
+      border-top:1px solid #2e3a45;
+      padding:5px 10px 7px;
+      display:flex; flex-direction:column; gap:3px;
+      font-family:'Malgun Gothic',monospace,sans-serif;
+    }
+    #sk3CmdBar.sk3-collapsed #sk3CmdHistory { display:none; }
+    #sk3CmdHistory {
+      max-height:72px; overflow-y:auto;
+      font-size:11px; line-height:1.55; font-family:monospace;
+    }
+    #sk3CmdHistory .sk3-cmd-line { padding:0 2px; color:#7ecb85; }
+    #sk3CmdHistory .user  { color:#f0c040; }
+    #sk3CmdHistory .sys   { color:#7ecb85; }
+    #sk3CmdHistory .help  { color:#7ab8e8; }
+    #sk3CmdHistory .err   { color:#ff7070; }
+    #sk3CmdInputRow { display:flex; align-items:center; gap:6px; }
+    #sk3CmdPrompt {
+      color:#f39c12; font-weight:bold; font-size:12px;
+      white-space:nowrap; user-select:none;
+    }
+    #sk3CmdInput {
+      flex:1; background:#070b0f; color:#e8edf2;
+      border:1px solid #3a4450; border-radius:4px;
+      padding:5px 9px; font-size:13px; font-family:monospace; outline:none;
+    }
+    #sk3CmdInput:focus { border-color:#3a9bdc; box-shadow:0 0 0 1px #3a9bdc44; }
+    #sk3CmdHelp, #sk3CmdToggle {
+      background:#1e2530; color:#7ab8e8;
+      border:1px solid #3a4450; border-radius:4px;
+      padding:4px 10px; font-size:11px; cursor:pointer;
+    }
+    #sk3CmdHelp:hover, #sk3CmdToggle:hover { border-color:#3a9bdc; color:#3a9bdc; }
+    #sk3CmdHint { font-size:10px; color:#5a6675; white-space:nowrap; }
+  `;
+  document.head.appendChild(style);
+
+  const bar = document.createElement('div');
+  bar.id = 'sk3CmdBar';
+  bar.innerHTML =
+    '<div id="sk3CmdHistory"></div>' +
+    '<div id="sk3CmdInputRow">' +
+      '<span id="sk3CmdPrompt">스케치 명령:</span>' +
+      '<input id="sk3CmdInput" type="text" autocomplete="off" spellcheck="false"' +
+        ' placeholder="예: RECT 40 25  ·  CIRCLE 30  ·  LINE 0 0 50 0  ·  ? 도움말">' +
+      '<button id="sk3CmdHelp">? 도움말</button>' +
+      '<button id="sk3CmdToggle">▲</button>' +
+      '<span id="sk3CmdHint">↑↓ 이력  Enter 실행  :/ 포커스</span>' +
+    '</div>';
+  document.body.appendChild(bar);
+
+  const inp = document.getElementById('sk3CmdInput');
+
+  inp.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      sk3ExecuteCmd(inp.value);
+      inp.value = '';
+      _cmdHistIdx = -1;
+      e.preventDefault();
+    } else if (e.key === 'Escape') {
+      inp.value = ''; _cmdHistIdx = -1; inp.blur();
+    } else if (e.key === 'ArrowUp') {
+      _cmdHistIdx = Math.min(_cmdHistIdx + 1, _cmdHistory.length - 1);
+      inp.value = _cmdHistory[_cmdHistIdx] || '';
+      e.preventDefault();
+    } else if (e.key === 'ArrowDown') {
+      _cmdHistIdx = Math.max(_cmdHistIdx - 1, -1);
+      inp.value = _cmdHistIdx >= 0 ? (_cmdHistory[_cmdHistIdx] || '') : '';
+      e.preventDefault();
+    }
+  });
+
+  document.getElementById('sk3CmdHelp').addEventListener('click', function() {
+    sk3ExecuteCmd('?');
+  });
+
+  document.getElementById('sk3CmdToggle').addEventListener('click', function() {
+    const b = document.getElementById('sk3CmdBar');
+    const collapsed = b.classList.toggle('sk3-collapsed');
+    document.getElementById('sk3CmdToggle').textContent = collapsed ? '▼' : '▲';
+  });
+
+  window.addEventListener('keydown', function(e) {
+    const tag = document.activeElement ? document.activeElement.tagName : '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === ':' || e.key === '/') { e.preventDefault(); inp.focus(); }
+  });
+
+  skCmdLog('▶ draw_tool3 커맨드바 준비 (v1.0) · ? 도움말  : 또는 / 로 포커스', 'sys');
+  initCmdKeyboard();
+}
+
+
+/* ============================================================
+   draw_tool3 명령 키보드 패널  v1.0
+   ============================================================ */
+// 기본도형 입력 모달 (단순 prompt 체인)
+function sk3OpenShapeModal(type){
+  try {
+    if(type === 'arc'){
+      const cxs = prompt('원/호 중심 X (mm)', '0');
+      if(cxs === null) return;
+      const cys = prompt('원/호 중심 Y (mm)', '0');
+      if(cys === null) return;
+      const ds = prompt('지름 D (mm)', '20');
+      if(ds === null) return;
+      const cx = parseFloat(cxs), cy = parseFloat(cys), d = parseFloat(ds);
+      if(![cx,cy,d].every(isFinite) || d<=0){ toast('숫자 입력 오류'); return; }
+      const wantArc = confirm('호로 그리시겠습니까?\n(확인=호 / 취소=완전한 원)');
+      if(wantArc){
+        const ss = prompt('시작 각도 (°, 0=오른쪽, 반시계+)', '0');
+        if(ss === null) return;
+        const es = prompt('끝 각도 (°)', '90');
+        if(es === null) return;
+        const s = parseFloat(ss), e = parseFloat(es);
+        if(!isFinite(s) || !isFinite(e)){ toast('각도 오류'); return; }
+        sk3ExecuteCmd('ARC ' + cx + ' ' + cy + ' ' + (d/2) + ' ' + s + ' ' + e);
+      } else {
+        sk3ExecuteCmd('CIRCLE ' + cx + ' ' + cy + ' ' + d);
+      }
+    } else if(type === 'rect'){
+      const xs = prompt('중심 X (mm)', '0');
+      if(xs === null) return;
+      const ys = prompt('중심 Y (mm)', '0');
+      if(ys === null) return;
+      const ws = prompt('가로 W (mm)', '40');
+      if(ws === null) return;
+      const hs = prompt('세로 H (mm)', '25');
+      if(hs === null) return;
+      const x = parseFloat(xs), y = parseFloat(ys), w = parseFloat(ws), h = parseFloat(hs);
+      if(![x,y,w,h].every(isFinite) || w<=0 || h<=0){ toast('숫자 입력 오류'); return; }
+      sk3ExecuteCmd('RECT ' + x + ' ' + y + ' ' + w + ' ' + h);
+    } else if(type === 'tri'){
+      const cxs = prompt('중심 X (mm)', '0');
+      if(cxs === null) return;
+      const cys = prompt('중심 Y (mm)', '0');
+      if(cys === null) return;
+      const ss = prompt('변 길이 (mm)', '50');
+      if(ss === null) return;
+      const rs = prompt('회전° (반시계+, 기본 0=꼭짓점 위)', '0');
+      if(rs === null) return;
+      const cx = parseFloat(cxs), cy = parseFloat(cys), side = parseFloat(ss), rot = parseFloat(rs);
+      if(![cx,cy,side,rot].every(isFinite) || side<=0){ toast('숫자 입력 오류'); return; }
+      sk3ExecuteCmd('삼각형 ' + side + ' ' + cx + ' ' + cy + ' ' + rot);
+    }
+  } catch(e){ toast('모달 오류: ' + e.message); }
+}
+
+function initCmdKeyboard() {
+  if (document.getElementById('sk3KbPanel')) return;
+
+  // ── 카테고리/버튼 정의 ─────────────────────────────────
+  const CMD_CATS = {
+    '점': [
+      { l:'점 X,Y',     t:'점 ',         ex:'점 -100,100 → 좌표(mm)에 점' },
+      { l:'점 N',       t:'점 ',         ex:'점 5 → 5번 점을 현재점으로 선택' },
+      { l:'점',         t:'점 ',         ex:'점 우 3 → 현재점서 우3mm 독립점 · 점 우 3 하 5 대각 가능' },
+      { l:'점 좌 지름', t:'점 좌 지름 ', ex:'점 좌 지름 110 130 → 지름차/2 만큼 좌측 독립점 (지=지름)' },
+    ],
+    '선': [
+      { l:'우/좌/상/하', cycle:['우','좌','상','하'], ex:'그 방향 D mm 선. 클릭마다 방향 순환' },
+      { l:'선 방향 교점',t:'선 좌 교점',  ex:'선 좌 교점 → 좌로 첫 교점까지 선' },
+      { l:'선 좌 지름', t:'선 좌 지름 ', ex:'선 좌 지름 110 130 → 지름차/2 만큼 좌측 선' },
+      { l:'연결',       t:'연결 ',       ex:'연결 1 4 → 1번·4번 직선 연결' },
+      { l:'각 A 거리',  t:'각 ',         ex:'각 45 100 → 45°로 100mm 선 / 각 45 교점' },
+      { l:'호',         t:'호 ',         ex:'호 2 3 시계 각 45 / 호 2 3 시계 교점' },
+    ],
+    '기준': [
+      { l:'기준 X Y',   t:'기준 ',       ex:'기준 -50 30 → 빈공간에 기준점(노란⊕)' },
+      { l:'기준 지름',  t:'기준 지름 ',  ex:'기준 지름 130 110 → (-D1/2, D2) 기준점' },
+      { l:'기준 방향',  t:'기준 상 ',    ex:'기준 상 50 → 현 기준점에서 방향D 이동' },
+    ],
+    '기본도형': [
+      { l:'⭕ 원/호',   action: () => sk3OpenShapeModal('arc'),  ex:'⭕ 원/호 입력 모달 (중심X,Y · 지름 · [호 각도])' },
+      { l:'▭ 사각형',   action: () => sk3OpenShapeModal('rect'), ex:'▭ 사각형 입력 모달 (중심X,Y · W,H)' },
+      { l:'△ 삼각형',   action: () => sk3OpenShapeModal('tri'),  ex:'△ 정삼각형 입력 모달 (중심X,Y · 변 · 회전°)' },
+    ],
+    '연장/절교': [
+      { l:'연장',       t:'연장 ',       ex:'연장 1 2 30 → P2 방향으로 30mm 연장 / 교점' },
+      { l:'줄이기',     t:'줄이기 ',     ex:'줄이기 1 2 30 → P2쪽에서 30mm 축소' },
+      { l:'절교 두점',  t:'절교 ',       ex:'절교 9 10 3 수직 → P9→P10 연장↔P3 수직/수평선까지' },
+      { l:'절교 방향',  t:'절교 ',       ex:'절교 1 하 수평 0 → P1에서 하방향, P0 수평선까지' },
+      { l:'절각',       t:'절각 ',       ex:'절각 3 45 5 수직 → P3에서 45°, P5 수직/수평선까지' },
+    ],
+    '편집': [
+      { l:'이동',         t:'이동 ',      ex:'이동 1 우 10 → P1을 우10mm (선도 함께) / 이동 상 3=현재점' },
+      { l:'거리두기',     t:'거리두기 ',  ex:'거리두기 2 3 좌 0.6 → P2→P3 진행기준 좌측 0.6mm 평행복제' },
+      { l:'삭제',         t:'삭제 ',      ex:'삭제 1 2 (선) / 삭제 3 (점)' },
+      { l:'⊞ 교차(분할)', action: () => sk3ExecuteCmd('교차'),        ex:'⊞ 모든 선 교차점에서 자동 분할 → 클릭/선택 가능한 조각들' },
+      { l:'🗑 삭제(선택)',action: () => { if(typeof deleteSelected==='function') deleteSelected(); }, ex:'🗑 마우스로 선택한 도형 삭제 (Delete 키와 동일)' },
+      { l:'닫기',         t:'닫기',       ex:'닫기 → 현재점 → P0 자동 직선 연결' },
+      { l:'백(취소)',     t:'백',         ex:'백 → 직전 작업 1회 취소' },
+      { l:'교점',         t:'교점',       ex:'교점 → 모든 선 교차점에 자동 번호부여' },
+      { l:'만남',         t:'만남 ',      ex:'만남 N1 N2 → 두 선을 무한연장한 교점에 번호' },
+      { l:'🏷 라벨 자동', action: () => sk3ExecuteCmd('라벨'), ex:'🏷 라벨없는 모든 선 끝점에 자동 P번호 부여' },
+      { l:'🧹 정리',      t:'정리 ',      ex:'🧹 정리 0.1 → 점 전체 + ≤0.1mm 짧은 선 일괄 삭제' },
+      { l:'🖊 외곽선',    action: () => sk3ExecuteCmd('외곽선'), ex:'🖊 선택된 선들의 끝점에 자동 라벨 (선택후 클릭)' },
+      { l:'🎨 채움',      action: () => sk3ExecuteCmd('채움'),    ex:'🎨 선택된 도형(사각형/원)에 채움 색상 입력 (선택후 클릭)' },
+      { l:'🧽 쓸어지우기',action: () => sk3ExecuteCmd('쓸어지우기'), ex:'🧽 도구 활성화 → 캔버스 드래그로 박스 안 도형 일괄 삭제' },
+    ],
+  };
+
+  // ── CSS ────────────────────────────────────────────────
+  const style = document.createElement('style');
+  style.textContent = `
+    #sk3KbPanel {
+      position:fixed; right:14px; bottom:96px; z-index:8500;
+      width:270px;
+      background:rgba(14,18,24,0.97); border:1px solid #2e3a45;
+      border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.5);
+      font-family:'Malgun Gothic',sans-serif; color:#e8edf2;
+      display:none; flex-direction:column; font-size:12px;
+      user-select:none;
+    }
+    #sk3KbHead {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:8px 12px 6px;
+      border-bottom:1px solid #2e3a45;
+      cursor:move;
+      border-radius:10px 10px 0 0;
+      background:rgba(30,36,44,0.7);
+    }
+    #sk3KbHead span { font-weight:700; font-size:13px; border-left:3px solid #3a9bdc; padding-left:8px; }
+    #sk3KbClose { background:none; border:none; color:#7ab8e8; cursor:pointer; font-size:16px; padding:0 4px; }
+    #sk3KbTabs {
+      display:flex; flex-wrap:wrap; gap:4px; padding:8px 10px 4px;
+      border-bottom:1px solid #1e2530;
+    }
+    .sk3-kbtab {
+      background:#1e2530; color:#9bbfd4;
+      border:1px solid #3a4450; border-radius:5px;
+      padding:4px 9px; font-size:11px; cursor:pointer;
+      font-family:inherit;
+    }
+    .sk3-kbtab:hover { border-color:#3a9bdc; color:#3a9bdc; }
+    .sk3-kbtab.active { background:#3a9bdc; color:#08121a; font-weight:700; border-color:#3a9bdc; }
+    #sk3KbHint {
+      font-size:10px; color:#5a8a9a; padding:5px 10px 3px;
+      min-height:28px; line-height:1.4; word-break:keep-all;
+    }
+    #sk3KbBtns {
+      display:flex; flex-wrap:wrap; gap:5px; padding:6px 10px 4px;
+    }
+    .sk3-kbbtn {
+      background:#1e2530; color:#c8dde8;
+      border:1px solid #3a4450; border-radius:5px;
+      padding:5px 8px; font-size:11px; cursor:pointer;
+      font-family:inherit; white-space:nowrap;
+    }
+    .sk3-kbbtn:hover { border-color:#3a9bdc; color:#3a9bdc; }
+    .sk3-kbbtn.cycle { background:#1e3530; border-color:#2a5545; }
+    .sk3-kbbtn.action { background:#2a3040; border-color:#3a4860; }
+    #sk3KbInput {
+      background:#070b0f; color:#e8edf2;
+      border:1px solid #3a4450; border-radius:4px;
+      padding:5px 9px; font-size:13px; font-family:monospace;
+      margin:4px 10px; width:calc(100% - 20px); box-sizing:border-box;
+      outline:none;
+    }
+    #sk3KbInput:focus { border-color:#3a9bdc; }
+    #sk3KbNumpad {
+      display:grid; grid-template-columns:repeat(4,1fr); gap:4px;
+      padding:6px 10px;
+    }
+    .sk3-kbnum {
+      background:#1a2230; color:#c8dde8;
+      border:1px solid #2e3a45; border-radius:5px;
+      padding:8px 0; font-size:13px; cursor:pointer;
+      text-align:center; font-family:monospace;
+    }
+    .sk3-kbnum:hover { border-color:#3a9bdc; color:#3a9bdc; }
+    #sk3KbActions {
+      display:flex; gap:5px; padding:6px 10px 8px;
+    }
+    #sk3KbBack  { flex:1; background:#2a3040; color:#ccc; border:1px solid #3a4450; border-radius:5px; padding:7px 0; cursor:pointer; font-family:inherit; font-size:12px; }
+    #sk3KbClear { flex:1; background:#3a2020; color:#ff9090; border:1px solid #6a3030; border-radius:5px; padding:7px 0; cursor:pointer; font-family:inherit; font-size:12px; }
+    #sk3KbRun   { flex:2; background:#1a5a1a; color:#90ff90; border:1px solid #2a8a2a; border-radius:5px; padding:7px 0; cursor:pointer; font-family:inherit; font-size:13px; font-weight:bold; }
+    #sk3KbBack:hover  { border-color:#5a6aaa; }
+    #sk3KbClear:hover { border-color:#ff5050; }
+    #sk3KbRun:hover   { background:#2a7a2a; }
+    #sk3KbOpenBtn {
+      position:fixed; right:14px; bottom:96px; z-index:8400;
+      background:rgba(30,60,100,0.92); color:#7ab8e8;
+      border:1px solid #3a5a80; border-radius:8px;
+      padding:7px 12px; font-size:12px; cursor:pointer;
+      font-family:'Malgun Gothic',sans-serif;
+      box-shadow:0 2px 8px rgba(0,0,0,.4);
+    }
+    #sk3KbOpenBtn:hover { background:rgba(40,80,130,0.95); border-color:#3a9bdc; color:#3a9bdc; }
+  `;
+  document.head.appendChild(style);
+
+  // ── 열기 버튼 ──────────────────────────────────────────
+  const openBtn = document.createElement('button');
+  openBtn.id = 'sk3KbOpenBtn';
+  openBtn.textContent = '⌨ 명령 키보드';
+  document.body.appendChild(openBtn);
+
+  // ── 패널 HTML ─────────────────────────────────────────
+  const panel = document.createElement('div');
+  panel.id = 'sk3KbPanel';
+  panel.innerHTML =
+    '<div id="sk3KbHead">' +
+      '<span>⌨ 명령 키보드</span>' +
+      '<button id="sk3KbClose">✕</button>' +
+    '</div>' +
+    '<div id="sk3KbTabs"></div>' +
+    '<div id="sk3KbHint">명령 버튼을 누르면 사용법이 여기에 표시됩니다.</div>' +
+    '<div id="sk3KbBtns"></div>' +
+    '<input id="sk3KbInput" type="text" autocomplete="off" spellcheck="false" placeholder="여기에 명령이 조립됩니다">' +
+    '<div id="sk3KbNumpad">' +
+      '<div class="sk3-kbnum" data-k="7">7</div>' +
+      '<div class="sk3-kbnum" data-k="8">8</div>' +
+      '<div class="sk3-kbnum" data-k="9">9</div>' +
+      '<div class="sk3-kbnum" data-k="좌">좌</div>' +
+      '<div class="sk3-kbnum" data-k="4">4</div>' +
+      '<div class="sk3-kbnum" data-k="5">5</div>' +
+      '<div class="sk3-kbnum" data-k="6">6</div>' +
+      '<div class="sk3-kbnum" data-k="우">우</div>' +
+      '<div class="sk3-kbnum" data-k="1">1</div>' +
+      '<div class="sk3-kbnum" data-k="2">2</div>' +
+      '<div class="sk3-kbnum" data-k="3">3</div>' +
+      '<div class="sk3-kbnum" data-k="상">상</div>' +
+      '<div class="sk3-kbnum" data-k="0">0</div>' +
+      '<div class="sk3-kbnum" data-k=".">.</div>' +
+      '<div class="sk3-kbnum" data-k=" ">_</div>' +
+      '<div class="sk3-kbnum" data-k="하">하</div>' +
+      '<div class="sk3-kbnum" data-k="수직">수직</div>' +
+      '<div class="sk3-kbnum" data-k="수평">수평</div>' +
+      '<div class="sk3-kbnum" data-k="지름">지름</div>' +
+      '<div class="sk3-kbnum" data-k="교점">교점</div>' +
+    '</div>' +
+    '<div id="sk3KbActions">' +
+      '<button id="sk3KbBack">⌫ 지움</button>' +
+      '<button id="sk3KbClear">전체삭제</button>' +
+      '<button id="sk3KbRun">▶ 실행</button>' +
+    '</div>';
+  document.body.appendChild(panel);
+
+  // ── 탭/버튼 렌더 ───────────────────────────────────────
+  const tabsEl  = document.getElementById('sk3KbTabs');
+  const btnsEl  = document.getElementById('sk3KbBtns');
+  const hintEl  = document.getElementById('sk3KbHint');
+  const kbInput = document.getElementById('sk3KbInput');
+  const mainInp = document.getElementById('sk3CmdInput'); // 커맨드바 입력창
+
+  function setBuf(v){ kbInput.value = v; if(mainInp) mainInp.value = v; }
+  function appendBuf(s){
+    let cur = kbInput.value;
+    const keywords = ['좌','우','상','하','수직','수평','지름','교점'];
+    if(keywords.includes(s.trim())){
+      if(cur && !cur.endsWith(' ')) s = ' ' + s;
+      s = s + ' ';
+    }
+    setBuf(cur + s);
+  }
+
+  function renderTab(cat){
+    btnsEl.innerHTML = '';
+    (CMD_CATS[cat]||[]).forEach(c => {
+      const b = document.createElement('button');
+      b.className = 'sk3-kbbtn';
+      b.textContent = c.l;
+      if(Array.isArray(c.cycle)){
+        b.classList.add('cycle');
+        b.dataset.cycleIdx = '0';
+        b.addEventListener('click', () => {
+          const idx = parseInt(b.dataset.cycleIdx||'0', 10);
+          const dir = c.cycle[idx];
+          const cur = kbInput.value;
+          const firstTok = cur.trim().split(/\s+/)[0];
+          let newBuf;
+          if(c.cycle.includes(firstTok)){ newBuf = cur.replace(/^\s*\S+/, dir); }
+          else { newBuf = dir + ' '; }
+          setBuf(newBuf);
+          b.textContent = dir + ' (다음: ' + c.cycle[(idx+1)%c.cycle.length] + ')';
+          b.dataset.cycleIdx = String((idx+1) % c.cycle.length);
+          hintEl.textContent = '🔁 ' + c.ex;
+        });
+      } else if(typeof c.action === 'function'){
+        b.classList.add('action');
+        b.addEventListener('click', () => {
+          hintEl.textContent = '▶ ' + c.ex;
+          try{ c.action(); }catch(e){ hintEl.textContent = '✗ 오류: '+(e.message||e); }
+        });
+      } else {
+        b.addEventListener('click', () => {
+          setBuf(c.t);
+          hintEl.textContent = '📝 ' + c.ex;
+          kbInput.focus();
+        });
+      }
+      btnsEl.appendChild(b);
+    });
+    tabsEl.querySelectorAll('.sk3-kbtab').forEach(t =>
+      t.classList.toggle('active', t.dataset.cat === cat));
+  }
+
+  Object.keys(CMD_CATS).forEach((cat, i) => {
+    const t = document.createElement('button');
+    t.className = 'sk3-kbtab' + (i===0?' active':'');
+    t.textContent = cat; t.dataset.cat = cat;
+    t.addEventListener('click', () => renderTab(cat));
+    tabsEl.appendChild(t);
+  });
+  renderTab(Object.keys(CMD_CATS)[0]);
+
+  // ── 숫자패드 ──────────────────────────────────────────
+  document.querySelectorAll('#sk3KbNumpad .sk3-kbnum').forEach(k => {
+    k.addEventListener('click', () => { appendBuf(k.dataset.k); kbInput.focus(); });
+  });
+
+  // ── 실행 버튼들 ───────────────────────────────────────
+  document.getElementById('sk3KbBack').addEventListener('click', () =>
+    setBuf(kbInput.value.slice(0,-1)));
+  document.getElementById('sk3KbClear').addEventListener('click', () => setBuf(''));
+  document.getElementById('sk3KbRun').addEventListener('click', () => {
+    const v = kbInput.value.trim();
+    if(!v) return;
+    sk3ExecuteCmd(v);
+    setBuf('');
+  });
+
+  kbInput.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){
+      const v = kbInput.value.trim();
+      if(v){ sk3ExecuteCmd(v); setBuf(''); }
+      e.preventDefault();
+    }
+  });
+
+  // ── 열기/닫기 ─────────────────────────────────────────
+  openBtn.addEventListener('click', () => {
+    const vis = panel.style.display === 'flex';
+    panel.style.display = vis ? 'none' : 'flex';
+    openBtn.style.display = vis ? '' : 'none';
+  });
+  document.getElementById('sk3KbClose').addEventListener('click', () => {
+    panel.style.display = 'none';
+    openBtn.style.display = '';
+  });
+
+  // ── 드래그 이동 ───────────────────────────────────────
+  const head = document.getElementById('sk3KbHead');
+  let drag=false, ox=0, oy=0;
+  head.addEventListener('mousedown', e => {
+    drag=true; const r=panel.getBoundingClientRect(); ox=e.clientX-r.left; oy=e.clientY-r.top; e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if(!drag) return;
+    panel.style.left=(e.clientX-ox)+'px'; panel.style.top=(e.clientY-oy)+'px';
+    panel.style.right='auto'; panel.style.bottom='auto';
+  });
+  window.addEventListener('mouseup', () => { drag=false; });
+}

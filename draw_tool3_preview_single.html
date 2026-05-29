@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.4 (단일본) - 텍스트모드 통합 (커맨드바 + 명령 키보드 + 한붓그리기)</title>
+<title>tool3 v8.7 (단일본) - 텍스트모드 통합 (커맨드바 + 명령 키보드 + 한붓그리기)</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.4</h1>
+  <h1>📐 tool3 v8.7</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -1344,6 +1344,7 @@ const state = {
   // v2.6: 워크플레인 (W 키)
   workPlanePickMode: false,   // true면 다음 면 클릭이 워크플레인 지정
   workPlane: null,            // {origin: Vector3, normal: Vector3, partId: number, mesh: THREE.Group}
+  boxSelect: null,            // v8.5: 우클릭 박스 선택 진행 상태 {sx,sy,ex,ey,wpStart,wpEnd,addToSel}
 };
 
 const skCanvas = document.getElementById('sketchCanvas');
@@ -1384,6 +1385,8 @@ function redrawSketch(){
   state.shapes.forEach((s, idx)=> drawShape(s, state.selectedShapes.has(idx)));
   if(state.drawing) drawPreview();
   drawPenLabels();
+  // v8.5: 박스 선택 미리보기
+  if(state.boxSelect) sk3DrawBoxSelectPreview(state.boxSelect);
 }
 
 // 한붓그리기 점·번호 라벨 그리기
@@ -1855,12 +1858,19 @@ skCanvas.addEventListener('mousedown', (e)=>{
     sk3HandleWheelConnectClick(wp);
     return;
   }
-  // 휠클릭(중간버튼) 또는 우클릭으로 화면 이동 (CAD 표준)
-  if(e.button === 1 || e.button === 2){
+  // 휠클릭(중간버튼)만 화면 이동 (v8.5: 우클릭은 박스 선택으로 변경)
+  if(e.button === 1){
     e.preventDefault();
     isPanning = true;
     panStart = {x: sx, y: sy, panX: state.panX, panY: state.panY};
     skCanvas.style.cursor = 'grabbing';
+    return;
+  }
+  // v8.5: 우클릭 드래그 = 박스 선택
+  if(e.button === 2){
+    e.preventDefault();
+    state.boxSelect = {sx, sy, ex:sx, ey:sy, wpStart:wp, wpEnd:wp, addToSel:e.shiftKey};
+    skCanvas.style.cursor = 'crosshair';
     return;
   }
   
@@ -2001,6 +2011,14 @@ skCanvas.addEventListener('mousemove', (e)=>{
     redrawSketch();
     return;
   }
+  // v8.5: 박스 선택 진행 중 — 박스 갱신 + 미리보기 그리기
+  if(state.boxSelect){
+    state.boxSelect.ex = sx;
+    state.boxSelect.ey = sy;
+    state.boxSelect.wpEnd = snapPoint(screenToWorld(sx, sy));
+    redrawSketch();
+    return;
+  }
   
   if(state.mode !== 'sketch') return;
   let wp = screenToWorld(sx, sy);
@@ -2014,6 +2032,14 @@ skCanvas.addEventListener('mousemove', (e)=>{
 
 skCanvas.addEventListener('mouseup', (e)=>{
   if(isPanning){isPanning = false; panStart = null; skCanvas.style.cursor = ''; return;}
+  // v8.5: 우클릭 드래그 마침 → 박스 안 도형들 선택
+  if(state.boxSelect && e.button === 2){
+    sk3FinishBoxSelect(state.boxSelect);
+    state.boxSelect = null;
+    skCanvas.style.cursor = '';
+    redrawSketch(); updateInfo();
+    return;
+  }
   if(state.mode === 'sketch' && state.tool === 'fillet' && state.drawing && state.drawing.type === 'fillet'){
     const d = state.drawing;
     state.drawing = null;
@@ -2225,17 +2251,23 @@ skCanvas.addEventListener('contextmenu', (e)=>e.preventDefault());
 // v7.2: 브라우저 기본 dblclick 대신 click + 300ms 간격 직접 판정 (사용자 더블클릭 어려움 개선)
 let _skLastClickTime = 0;
 let _skLastClickPos = null;
-const _SK_DBL_INTERVAL = 300;   // ms
-const _SK_DBL_DIST = 8;          // px
+const _SK_DBL_INTERVAL = 300;        // ms (도형·빈 곳 기본)
+const _SK_DBL_INTERVAL_POINT = 500;  // v8.7: 점 위 더블클릭만 500ms (실수 트리거 방지)
+const _SK_DBL_DIST = 8;              // px
 skCanvas.addEventListener('click', (e)=>{
   if(state.mode !== 'sketch') return;
   const now = Date.now();
   const rect = skCanvas.getBoundingClientRect();
   const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  // v8.7: hit 종류에 따라 임계값 동적 적용 (점=500ms, 그 외=300ms)
+  const wp = snapPoint(screenToWorld(sx, sy));
+  const onShape = sk3FindShapeAt(wp);
+  const onPoint = (!onShape) && sk3FindNearestPenPoint(wp) >= 0;
+  const interval = onPoint ? _SK_DBL_INTERVAL_POINT : _SK_DBL_INTERVAL;
   // 직전 클릭과 시각·위치 비교
   const dt = now - _skLastClickTime;
   const dd = _skLastClickPos ? Math.hypot(sx - _skLastClickPos.x, sy - _skLastClickPos.y) : Infinity;
-  if(dt <= _SK_DBL_INTERVAL && dd <= _SK_DBL_DIST){
+  if(dt <= interval && dd <= _SK_DBL_DIST){
     // 더블클릭 확정 → 기존 dblclick 핸들러 호출
     _skLastClickTime = 0; _skLastClickPos = null;
     _skHandleDblClick(e);
@@ -2249,13 +2281,35 @@ function _skHandleDblClick(e){
   const rect = skCanvas.getBoundingClientRect();
   const sx = e.clientX - rect.left;
   const sy = e.clientY - rect.top;
-  const wp = screenToWorld(sx, sy);
+  const wp = snapPoint(screenToWorld(sx, sy));
   const hit = sk3FindShapeAt(wp);
   if(hit){
     sk3OpenShapeEditor(hit);
-  } else {
-    // 점 위 더블클릭 → 점 좌표 변경
-    const pidx = sk3FindNearestPenPoint(wp);
+    return;
+  }
+  // 점 위 더블클릭 → 점 좌표 변경
+  const pidx = sk3FindNearestPenPoint(wp);
+  if(pidx < 0){
+    // v8.5: 빈 곳 더블클릭 = 펜 도구 자동 ON + 그 위치에 점 찍기
+    if(state.tool !== 'pen' && typeof setTool === 'function') setTool('pen');
+    pushHistory();
+    let tx = wp.x, ty = wp.y;
+    if(state.penCur >= 0 && state.penPoints[state.penCur]){
+      const cur = state.penPoints[state.penCur];
+      state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:tx, y2:ty,
+        color: document.getElementById('sketchColor').value || '#000000',
+        lineWidth: parseInt(document.getElementById('lineWidth').value)||2});
+    }
+    state.penPoints.push({x:tx, y:ty});
+    state.penCur = state.penPoints.length - 1;
+    redrawSketch(); updateInfo();
+    setStat('✎ P' + state.penCur + ' 더블클릭으로 추가: (' + tx.toFixed(2) + ', ' + ty.toFixed(2) + ')mm');
+    return;
+  }
+  // 점 위 더블클릭 → 좌표 변경 (기존 동작 유지)
+  {
+    const pidx_local = pidx;
+    const pidx = pidx_local;
     if(pidx >= 0){
       const p = state.penPoints[pidx];
       const newX = parseFloat(prompt('P' + pidx + ' X (mm)', String(p.x.toFixed(3))));
@@ -2292,6 +2346,44 @@ skCanvas.addEventListener('wheel', (e)=>{
   state.panY -= (wpAfter.y - wpBefore.y) * state.pixelsPerMm;
   redrawSketch();
 }, {passive: false});
+
+// v8.5: 박스 선택 미리보기 (점선 박스)
+function sk3DrawBoxSelectPreview(box){
+  if(!box) return;
+  const x = Math.min(box.sx, box.ex), y = Math.min(box.sy, box.ey);
+  const w = Math.abs(box.ex - box.sx), h = Math.abs(box.ey - box.sy);
+  skCtx.save();
+  skCtx.strokeStyle = '#3498db';
+  skCtx.fillStyle = 'rgba(52, 152, 219, 0.15)';
+  skCtx.lineWidth = 1.5;
+  skCtx.setLineDash([6, 4]);
+  skCtx.fillRect(x, y, w, h);
+  skCtx.strokeRect(x, y, w, h);
+  skCtx.setLineDash([]);
+  skCtx.restore();
+}
+
+function sk3FinishBoxSelect(box){
+  if(!box) return;
+  if(!box.addToSel) state.selectedShapes.clear();
+  const minX = Math.min(box.wpStart.x, box.wpEnd.x);
+  const maxX = Math.max(box.wpStart.x, box.wpEnd.x);
+  const minY = Math.min(box.wpStart.y, box.wpEnd.y);
+  const maxY = Math.max(box.wpStart.y, box.wpEnd.y);
+  // 도형의 대표점이 박스 안에 들어가면 선택
+  state.shapes.forEach((s, i) => {
+    let cx = 0, cy = 0;
+    if(s.type === 'line'){ cx=(s.x1+s.x2)/2; cy=(s.y1+s.y2)/2; }
+    else if(s.type === 'rect'){ cx=(s.x1+s.x2)/2; cy=(s.y1+s.y2)/2; }
+    else if(s.type === 'circle' || s.type === 'arc'){ cx=s.cx; cy=s.cy; }
+    else return;
+    if(cx >= minX && cx <= maxX && cy >= minY && cy <= maxY){
+      state.selectedShapes.add(i);
+    }
+  });
+  const n = state.selectedShapes.size;
+  setStat('📦 박스 선택: ' + n + '개 도형');
+}
 
 function selectShapeAt(wp, addToSel){
   if(!addToSel) state.selectedShapes.clear();
@@ -7091,6 +7183,13 @@ function switchMode(m){
     document.getElementById('footMode').textContent = '3D';
     document.getElementById('btnSketchMode').classList.remove('active');
     document.getElementById('btnModelMode').classList.add('active');
+    // v8.6: 3D로 넘어갈 때 스케치 도형을 바닥(XZ 평면) 미리보기로 자동 표시
+    if(state.shapes && state.shapes.length > 0){
+      drawShapesOnFloor();
+      if(floorSketchGroup){
+        toast('👁️ 스케치 ' + state.shapes.length + '개 도형 바닥 미리보기 · 돌출/회전체 명령으로 3D화');
+      }
+    }
     setTimeout(onThreeResize, 50);
   }
 }

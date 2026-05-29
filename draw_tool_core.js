@@ -1194,8 +1194,6 @@ drawCanvas.addEventListener('mousemove', e => {
   const unit = calibSet ? `${mmX}, ${mmY} mm` : `${p.x}, ${p.y} px`;
   document.getElementById('statusCoord').textContent = unit + (p.snapped ? ' 🧲' : '');
 
-  // Rev.19.53: 배경 맞춤 mousemove 우선
-  if (typeof bgAdjustMouseMove === 'function' && bgAdjustMouseMove(e)) return;
   // Rev.19.43: 박스선택/이동 미리보기 우선
   if (typeof penTxtMouseMove === 'function' && penTxtMouseMove(e)) return;
   // Rev.19.26: 텍스트모드 마우스 드로잉 미리보기 (Shift=직선/45°)
@@ -1579,8 +1577,6 @@ drawCanvas.addEventListener('mousemove', e => {
 });
 
 drawCanvas.addEventListener('mousedown', e => {
-  // Rev.19.53: 배경 맞춤 모드 mousedown — 다른 처리보다 최우선
-  if (typeof bgAdjustMouseDown === 'function' && bgAdjustMouseDown(e)) return;
   // Rev.19.43: 텍스트모드 박스선택(우클릭) / 좌클릭 드래그 이동 우선 처리
   if (typeof penTxtMouseDown === 'function' && penTxtMouseDown(e)) return;
   // Rev.19.42: 휠 클릭 + 연결 모드면 점 연결 처리 (패닝 차단)
@@ -2232,11 +2228,6 @@ window.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Escape') {
-    // Rev.19.53: 배경 맞춤 모드 우선 취소
-    if (typeof bgAdjustMode !== 'undefined' && bgAdjustMode){
-      bgAdjustCancel();
-      return;
-    }
     // Rev.19.32: 좌표수정 팝업이 열려 있으면 우선 닫기
     const _coordPop = document.getElementById('penCoordEditPop');
     if (_coordPop && _coordPop.style.display !== 'none'){
@@ -8234,14 +8225,10 @@ function redrawAll() { redrawBg(); redrawFills(); redrawDraw(); }
 function redrawBg() {
   bgCtx.clearRect(0,0,baseW,baseH);
   if (bgImage) {
+    // Rev.19.55: 배경 이미지를 캔버스 작업영역에 자동으로 꽉 채워서 그림 (offset/scale 무시)
     bgCtx.save();
     bgCtx.globalAlpha = bgImageOpacity;
-    // Rev.11.10: 배경 이미지 중심을 기준으로 스케일 + 오프셋 적용
-    const dw = baseW * bgImageScale;
-    const dh = baseH * bgImageScale;
-    const dx = bgImageOffsetX + (baseW - dw) / 2; // 중심 유지하며 스케일
-    const dy = bgImageOffsetY + (baseH - dh) / 2;
-    bgCtx.drawImage(bgImage, dx, dy, dw, dh);
+    bgCtx.drawImage(bgImage, 0, 0, baseW, baseH);
     bgCtx.restore();
     bgCtx.globalAlpha = 1;
   }

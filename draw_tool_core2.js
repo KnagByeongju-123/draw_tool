@@ -25,7 +25,8 @@ function penPxToMm(px, py){
 }
 // Rev.16.46: 가장 가까운 한붓그리기 점 찾기
 function penFindNearestPoint(p){
-  const tolPx = Math.max(12/(zoom||1), 1/mmPerPixel*0.3);
+  // Rev.19.55: hit 범위 축소 — 화면 기준 4px, 최대 0.3mm 캡 (정밀 작업용)
+  const tolPx = Math.min(4 / (zoom || 1), 0.3 / mmPerPixel);
   let best=-1, bestD=Infinity;
   for (let i=0;i<penPoints.length;i++){ const pt=penPoints[i]; if(!pt)continue;
     const d=Math.hypot(pt.x-p.x,pt.y-p.y); if(d<tolPx&&d<bestD){bestD=d;best=i;} }
@@ -2137,93 +2138,6 @@ function penFindShapeAt(p){
   return null;
 }
 
-// ===== Rev.19.53: 배경 이미지 마우스 드래그·휠 조정 모드 =====
-let bgAdjustMode = false;
-let bgAdjustDragStart = null;
-let bgAdjustOffsetStart = null;
-
-function bgAdjustToggle(){
-  if (typeof bgImage === 'undefined' || !bgImage){
-    document.getElementById('statusHint').textContent = '⚠ 먼저 📷 배경 도면을 열어주세요';
-    return;
-  }
-  bgAdjustMode = !bgAdjustMode;
-  bgAdjustDragStart = null; bgAdjustOffsetStart = null;
-  if (bgAdjustMode){
-    if (typeof cancelPenDraw === 'function') cancelPenDraw();
-    document.getElementById('statusHint').textContent =
-      '🎯 배경 맞춤 ON: 좌클릭 드래그 = 이동 · 휠 스크롤 = 크기 (Shift+휠 = 미세) · ESC = 종료';
-    cmdLog('🎯 배경 맞춤 ON', 'system');
-  } else {
-    document.getElementById('statusHint').textContent = '🎯 배경 맞춤 OFF';
-    cmdLog('🎯 배경 맞춤 OFF', 'system');
-  }
-}
-
-function bgAdjustMouseDown(e){
-  if (!bgAdjustMode) return false;
-  if (e.button !== 0) return false;
-  const p = getCanvasPoint(e);
-  bgAdjustDragStart = { x: p.x, y: p.y };
-  bgAdjustOffsetStart = { x: (typeof bgImageOffsetX === 'number' ? bgImageOffsetX : 0),
-                          y: (typeof bgImageOffsetY === 'number' ? bgImageOffsetY : 0) };
-  e.preventDefault();
-  return true;
-}
-
-function bgAdjustMouseMove(e){
-  if (!bgAdjustMode || !bgAdjustDragStart) return false;
-  const p = getCanvasPoint(e);
-  const dx = p.x - bgAdjustDragStart.x;
-  const dy = p.y - bgAdjustDragStart.y;
-  bgImageOffsetX = bgAdjustOffsetStart.x + dx;
-  bgImageOffsetY = bgAdjustOffsetStart.y + dy;
-  // 슬라이더 동기화
-  const sx = document.getElementById('bgOffsetX'), vx = document.getElementById('bgOffsetXVal');
-  if (sx) sx.value = Math.round(bgImageOffsetX);
-  if (vx) vx.textContent = Math.round(bgImageOffsetX);
-  const sy = document.getElementById('bgOffsetY'), vy = document.getElementById('bgOffsetYVal');
-  if (sy) sy.value = Math.round(bgImageOffsetY);
-  if (vy) vy.textContent = Math.round(bgImageOffsetY);
-  if (typeof redrawBg === 'function') redrawBg();
-  document.getElementById('statusHint').textContent =
-    `🎯 위치: X=${Math.round(bgImageOffsetX)}, Y=${Math.round(bgImageOffsetY)} · 휠=크기`;
-  return true;
-}
-
-function bgAdjustMouseUp(e){
-  if (!bgAdjustMode) return false;
-  if (!bgAdjustDragStart) return false;
-  bgAdjustDragStart = null;
-  bgAdjustOffsetStart = null;
-  return true;
-}
-
-function bgAdjustWheelHandler(e){
-  if (!bgAdjustMode) return false;
-  const step = e.shiftKey ? 0.01 : 0.05;     // Shift+휠 = 미세
-  const delta = e.deltaY > 0 ? -step : +step; // 위로 굴리면 키움
-  let s = (typeof bgImageScale === 'number' ? bgImageScale : 1) + delta;
-  s = Math.max(0.1, Math.min(4.0, s));
-  bgImageScale = s;
-  const ss = document.getElementById('bgScale'), vs = document.getElementById('bgScaleVal');
-  if (ss) ss.value = Math.round(bgImageScale * 100);
-  if (vs) vs.textContent = Math.round(bgImageScale * 100) + '%';
-  if (typeof redrawBg === 'function') redrawBg();
-  document.getElementById('statusHint').textContent =
-    `🎯 크기: ${Math.round(bgImageScale*100)}% · 드래그=이동`;
-  e.preventDefault(); e.stopPropagation();
-  return true;
-}
-
-function bgAdjustCancel(){
-  if (bgAdjustMode){
-    bgAdjustMode = false;
-    bgAdjustDragStart = null; bgAdjustOffsetStart = null;
-    document.getElementById('statusHint').textContent = '🎯 배경 맞춤 모드 종료';
-  }
-}
-
 // ===== Rev.19.43: 텍스트모드 박스 선택(우클릭) + 좌클릭 드래그 이동 + 삭제 =====
 let penTxtBoxStart = null;      // 우클릭 박스 시작점(px)
 let penTxtBoxDragging = false;
@@ -3021,12 +2935,6 @@ function startNormalMode(){
   if (bCon) bCon.addEventListener('click', penToggleConnectByWheel);
   if (typeof drawCanvas !== 'undefined' && drawCanvas){
     drawCanvas.addEventListener('mouseup', e => {
-      // Rev.19.53: 배경 맞춤 mouseup 우선
-      if (typeof bgAdjustMouseUp === 'function' && bgAdjustMouseUp(e)){
-        e.preventDefault();
-        return;
-      }
-      // Rev.19.43: 박스선택/이동 mouseup (우클릭은 button=2, 좌클릭=0)
       if (typeof penTxtMouseUp === 'function' && penTxtMouseUp(e)){
         e.preventDefault();
         return;
@@ -3042,11 +2950,6 @@ function startNormalMode(){
     drawCanvas.addEventListener('contextmenu', e => {
       if (penPickMode){ e.preventDefault(); }
     });
-    // Rev.19.53: 배경 맞춤 모드 휠 (캡처 단계로 줌 차단 우선)
-    const _bgWheelTarget = (typeof wrap !== 'undefined' && wrap) || drawCanvas;
-    _bgWheelTarget.addEventListener('wheel', e => {
-      if (typeof bgAdjustWheelHandler === 'function') bgAdjustWheelHandler(e);
-    }, { capture: true, passive: false });
   }
 
   // Rev.19.40: 단순화 토글 비활성화 — localStorage 복원도 비활성, 저장값도 제거
@@ -3166,18 +3069,8 @@ function tryDimCommand(cmdStr){
           const f = document.getElementById('imgFile');
           if (f) f.click();
           const sh = document.getElementById('statusHint');
-          if (sh) sh.textContent = '📷 배경 이미지 선택 후 [🎯 배경 맞춤]으로 마우스 조정';
-        }, ex:'📷 배경 도면 열기: 이미지 파일 선택 → 사각형(베이스)에 맞춰 배경으로 깔림 · 이후 [🎯 배경 맞춤]으로 마우스 드래그 조정' },
-      // Rev.19.53: 마우스 드래그/휠로 배경 이미지 조정
-      { l:'🎯 배경 맞춤', action: () => {
-          if (typeof bgAdjustToggle === 'function') bgAdjustToggle();
-        }, ex:'🎯 배경 맞춤 토글: 좌클릭 드래그 = 위치 이동 · 휠 스크롤 = 크기 (Shift+휠 = 미세) · ESC = 종료. 슬라이더 값과 자동 동기화' },
-      { l:'↩️ 배경 초기화', action: () => {
-          const m = document.getElementById('menuBgReset');
-          if (m) m.click();
-          const sh = document.getElementById('statusHint');
-          if (sh) sh.textContent = '↩️ 배경 이미지 위치·크기 초기화';
-        }, ex:'↩️ 배경 위치/크기 초기화 (이미지는 유지)' },
+          if (sh) sh.textContent = '📷 배경 이미지 선택: 캔버스에 자동으로 채워집니다';
+        }, ex:'📷 배경 도면 열기: 이미지 파일 선택 → 캔버스 작업영역에 자동으로 꽉 채워 표시' },
       { l:'❌ 배경 제거', action: () => {
           const m = document.getElementById('menuClearBg');
           if (m) m.click();

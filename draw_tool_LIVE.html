@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.46 (라이브 단일본)</title>
+<title>도면 작도기 Rev.19.47 (라이브 단일본)</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -366,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.46</h1>
+  <h1>📐 도면 작도기 Rev.19.47</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -15346,6 +15346,236 @@ function penUserCoordToPx(ux, uy){
   };
 }
 
+// ===== Rev.19.47: 기본 도형 입력 모달 (원/호·사각형·삼각형) =====
+let penShapeEditId = -1;     // 수정 모드면 도형 id, 신규=-1
+let penShapeCurType = 'arc';
+
+// mm 좌표 → px 좌표 (직경좌표 모드면 그 좌표계 반영)
+function penUserMmToPx(ux, uy){
+  if (typeof penUserCoordToPx === 'function' && penOriginUserCoord){
+    return penUserCoordToPx(ux, uy);
+  }
+  // 단순 모드: 원점(penOriginPx) 기준 + Y 뒤집기
+  return { x: penOriginPx.x + ux/mmPerPixel, y: penOriginPx.y - uy/mmPerPixel };
+}
+// px → mm (역변환)
+function penPxToUserMm(px, py){
+  if (penOriginUserCoord){
+    // 직경좌표 모드: 표시X = Cx − 2×dxMm
+    const Cx = penOriginUserCoord.x || 0, Cy = penOriginUserCoord.y || 0;
+    const dxMm = (px - penOriginPx.x) * mmPerPixel;
+    const dyMm = -(py - penOriginPx.y) * mmPerPixel;
+    return { x: Cx - 2*dxMm, y: Cy + dyMm };
+  }
+  return { x: (px - penOriginPx.x) * mmPerPixel, y: -(py - penOriginPx.y) * mmPerPixel };
+}
+// 길이(mm) → px (스케일만, 위치 변환 없음). 직경모드면 ×2 비율은 안 적용 (반지름은 절댓값)
+function penMmLenToPx(mm){ return mm / mmPerPixel; }
+
+function openPenShapeModal(type, existingShape){
+  type = type || 'arc';
+  penShapeCurType = type;
+  penShapeEditId = existingShape ? existingShape.id : -1;
+  const modal = document.getElementById('penShapeModal');
+  if (!modal) return;
+  modal.style.display = 'block';
+  // 탭 활성화
+  document.querySelectorAll('#penShapeTabs .ps-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.type === type);
+    b.onclick = () => { if (penShapeEditId < 0) { penShapeCurType = b.dataset.type;
+      document.querySelectorAll('#penShapeTabs .ps-tab').forEach(x => x.classList.toggle('active', x.dataset.type === b.dataset.type));
+      renderPenShapeFields(b.dataset.type, null); } };
+  });
+  // 수정 모드면 탭 고정
+  if (existingShape){
+    document.querySelectorAll('#penShapeTabs .ps-tab').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+  } else {
+    document.querySelectorAll('#penShapeTabs .ps-tab').forEach(b => { b.disabled = false; b.style.opacity = '1'; });
+  }
+  renderPenShapeFields(type, existingShape);
+}
+
+function closePenShapeModal(){
+  const m = document.getElementById('penShapeModal');
+  if (m) m.style.display = 'none';
+  penShapeEditId = -1;
+}
+window.closePenShapeModal = closePenShapeModal;
+
+function renderPenShapeFields(type, ex){
+  const div = document.getElementById('penShapeFields');
+  const hint = document.getElementById('penShapeHint');
+  const title = document.getElementById('penShapeModalTitle');
+  if (!div) return;
+  if (type === 'arc'){
+    title.textContent = ex ? '⭕ 원/호 수정' : '⭕ 원/호 (신규)';
+    let cx=0, cy=0, dia=10, sd=0, ed=0;
+    if (ex){
+      const m = penPxToUserMm(ex.cx, ex.cy);
+      cx = m.x; cy = m.y;
+      dia = ex.r * 2 * mmPerPixel;
+      // canvasRad = -userDeg*π/180  →  userDeg = -canvasRad*180/π
+      if (ex.startAngle != null) sd = -ex.startAngle * 180 / Math.PI;
+      if (ex.endAngle != null)   ed = -ex.endAngle * 180 / Math.PI;
+    } else if (penOriginUserCoord){
+      cx = penOriginUserCoord.x; cy = penOriginUserCoord.y;
+    }
+    div.innerHTML = `
+      <label>중심 X (mm) <input id="psf-cx" type="text" value="${cx.toFixed(2)}"></label>
+      <label>중심 Y (mm) <input id="psf-cy" type="text" value="${cy.toFixed(2)}"></label>
+      <label>직경 (mm) <input id="psf-d" type="text" value="${dia.toFixed(2)}"></label>
+      <label>시작 각도 (°) <input id="psf-sd" type="text" value="${sd.toFixed(1)}"></label>
+      <label>끝 각도 (°) <input id="psf-ed" type="text" value="${ed.toFixed(1)}"></label>`;
+    hint.textContent = '반시계방향, 0°=오른쪽, 90°=위, 180°=왼쪽, 270°=아래 · 시작=끝이면 완전 원 · X/Y는 직경좌표 모드 ON시 그 좌표계';
+  } else if (type === 'rect'){
+    title.textContent = ex ? '▭ 사각형 수정' : '▭ 사각형 (신규)';
+    let x=0, y=0, w=10, h=5;
+    if (ex){
+      const m1 = penPxToUserMm(ex.p1.x, ex.p1.y), m2 = penPxToUserMm(ex.p2.x, ex.p2.y);
+      x = Math.min(m1.x, m2.x); y = Math.max(m1.y, m2.y);  // 좌상단 (Y up)
+      w = Math.abs(m2.x - m1.x); h = Math.abs(m2.y - m1.y);
+    } else if (penOriginUserCoord){
+      x = penOriginUserCoord.x; y = penOriginUserCoord.y;
+    }
+    div.innerHTML = `
+      <label>좌상단 X (mm) <input id="psf-x" type="text" value="${x.toFixed(2)}"></label>
+      <label>좌상단 Y (mm) <input id="psf-y" type="text" value="${y.toFixed(2)}"></label>
+      <label>너비 W (mm) <input id="psf-w" type="text" value="${w.toFixed(2)}"></label>
+      <label>높이 H (mm) <input id="psf-h" type="text" value="${h.toFixed(2)}"></label>`;
+    hint.textContent = 'X,Y = 좌상단 모서리 좌표 · W=가로, H=세로 (Y는 위쪽 양수)';
+  } else if (type === 'triangle'){
+    title.textContent = ex ? '△ 삼각형 수정' : '△ 삼각형 (신규)';
+    let cx=0, cy=0, side=10, rot=0;
+    if (ex && Array.isArray(ex.points) && ex.points.length>=3){
+      // 무게중심·변길이·회전 추출
+      const ps = ex.points.slice(0,3).map(p => penPxToUserMm(p.x, p.y));
+      cx = (ps[0].x + ps[1].x + ps[2].x)/3;
+      cy = (ps[0].y + ps[1].y + ps[2].y)/3;
+      side = Math.hypot(ps[1].x-ps[0].x, ps[1].y-ps[0].y);
+      // 첫 꼭짓점 방향 (중심→p0)
+      rot = Math.atan2(ps[0].y - cy, ps[0].x - cx) * 180/Math.PI;
+    } else if (penOriginUserCoord){
+      cx = penOriginUserCoord.x; cy = penOriginUserCoord.y;
+    }
+    div.innerHTML = `
+      <label>중심 X (mm) <input id="psf-cx" type="text" value="${cx.toFixed(2)}"></label>
+      <label>중심 Y (mm) <input id="psf-cy" type="text" value="${cy.toFixed(2)}"></label>
+      <label>한 변 길이 (mm) <input id="psf-side" type="text" value="${side.toFixed(2)}"></label>
+      <label>회전 (°) <input id="psf-rot" type="text" value="${rot.toFixed(1)}"></label>`;
+    hint.textContent = '정삼각형 · 중심 기준 / 회전 0°=첫 꼭짓점이 오른쪽, 90°=위 · 반시계';
+  }
+}
+
+function _parseNum(id){ const v = parseFloat((document.getElementById(id)||{}).value); return isFinite(v) ? v : 0; }
+
+function applyPenShape(){
+  const type = penShapeCurType;
+  const sw = parseInt((document.getElementById('strokeWidth')||{}).value) || 1;
+  const stroke = (document.getElementById('strokeColor')||{}).value || '#ffffff';
+  const layer = (currentLayer||'default');
+  let newShape = null;
+  if (type === 'arc'){
+    const cx = _parseNum('psf-cx'), cy = _parseNum('psf-cy');
+    const dia = _parseNum('psf-d'), sd = _parseNum('psf-sd'), ed = _parseNum('psf-ed');
+    if (dia <= 0){ alert('직경은 0보다 커야 합니다'); return; }
+    const cp = penUserMmToPx(cx, cy);
+    const rPx = penMmLenToPx(dia/2);
+    const isFull = (Math.abs(sd - ed) < 1e-3) || (Math.abs(Math.abs(sd-ed) - 360) < 1e-3);
+    if (isFull){
+      newShape = { id:++shapeIdSeq, type:'circle',
+        p1:{x:cp.x, y:cp.y}, p2:{x:cp.x + rPx, y:cp.y},
+        stroke, strokeWidth:sw, layer };
+    } else {
+      newShape = { id:++shapeIdSeq, type:'arc',
+        cx:cp.x, cy:cp.y, r:rPx,
+        startAngle: -sd * Math.PI / 180,
+        endAngle:   -ed * Math.PI / 180,
+        ccw: true,
+        stroke, strokeWidth:sw, layer };
+    }
+  } else if (type === 'rect'){
+    const x = _parseNum('psf-x'), y = _parseNum('psf-y');
+    const w = _parseNum('psf-w'), h = _parseNum('psf-h');
+    if (w <= 0 || h <= 0){ alert('너비/높이는 0보다 커야 합니다'); return; }
+    const p1 = penUserMmToPx(x, y);
+    const p2 = penUserMmToPx(x + w, y - h);  // Y up = 화면 아래로
+    newShape = { id:++shapeIdSeq, type:'rect',
+      p1:{x:p1.x, y:p1.y}, p2:{x:p2.x, y:p2.y},
+      stroke, strokeWidth:sw, layer };
+  } else if (type === 'triangle'){
+    const cx = _parseNum('psf-cx'), cy = _parseNum('psf-cy');
+    const side = _parseNum('psf-side'), rot = _parseNum('psf-rot');
+    if (side <= 0){ alert('변 길이는 0보다 커야 합니다'); return; }
+    // 외접원 반지름 = side / √3
+    const R = side / Math.sqrt(3);
+    const cp = penUserMmToPx(cx, cy);
+    const Rpx = penMmLenToPx(R);
+    const pts = [];
+    for (let k=0;k<3;k++){
+      const deg = rot + k*120;
+      const rad = -deg * Math.PI / 180;  // Y down 변환
+      pts.push({ x: cp.x + Rpx*Math.cos(rad), y: cp.y + Rpx*Math.sin(rad) });
+    }
+    newShape = { id:++shapeIdSeq, type:'polyline',
+      points: pts, closed:true,
+      stroke, strokeWidth:sw, layer };
+  }
+  if (!newShape){ closePenShapeModal(); return; }
+  if (penShapeEditId > 0){
+    // 수정: 기존 도형 교체
+    const idx = shapes.findIndex(s => s.id === penShapeEditId);
+    if (idx >= 0){
+      newShape.id = penShapeEditId;
+      shapes[idx] = newShape;
+    } else {
+      shapes.push(newShape);
+    }
+  } else {
+    shapes.push(newShape);
+  }
+  redoStack = []; pushHistory(); redrawDraw(); updateCount();
+  cmdLog(`◆ ${type} ${penShapeEditId>0?'수정':'추가'}`, 'user');
+  document.getElementById('statusHint').textContent =
+    `◆ ${type==='arc'?'원/호':type==='rect'?'사각형':'삼각형'} ${penShapeEditId>0?'수정 적용':'추가됨'}`;
+  closePenShapeModal();
+}
+window.applyPenShape = applyPenShape;
+
+// 도형 hit 테스트 (더블클릭 수정용) — 점은 제외, 기본도형만
+function penFindShapeAt(p){
+  const tolPx = 8 / (zoom||1);
+  for (let i = shapes.length-1; i >= 0; i--){
+    const s = shapes[i];
+    if (s.type === 'circle' && s.p1 && s.p2){
+      const r = Math.hypot(s.p2.x-s.p1.x, s.p2.y-s.p1.y);
+      const d = Math.hypot(p.x-s.p1.x, p.y-s.p1.y);
+      if (Math.abs(d - r) < tolPx) return s;
+    } else if (s.type === 'arc' && s.cx != null){
+      const d = Math.hypot(p.x-s.cx, p.y-s.cy);
+      if (Math.abs(d - s.r) < tolPx) return s;
+    } else if (s.type === 'rect' && s.p1 && s.p2){
+      const xmin = Math.min(s.p1.x, s.p2.x), xmax = Math.max(s.p1.x, s.p2.x);
+      const ymin = Math.min(s.p1.y, s.p2.y), ymax = Math.max(s.p1.y, s.p2.y);
+      // 경계 위에 있는지
+      const onLR = (Math.abs(p.x-xmin)<tolPx || Math.abs(p.x-xmax)<tolPx) && p.y>=ymin-tolPx && p.y<=ymax+tolPx;
+      const onTB = (Math.abs(p.y-ymin)<tolPx || Math.abs(p.y-ymax)<tolPx) && p.x>=xmin-tolPx && p.x<=xmax+tolPx;
+      if (onLR || onTB) return s;
+    } else if (s.type === 'polyline' && Array.isArray(s.points) && s.points.length >= 3){
+      // 삼각형으로 간주 — 변 위 hit
+      for (let k=0; k<s.points.length; k++){
+        const a = s.points[k], b = s.points[(k+1)%s.points.length];
+        if (!s.closed && k === s.points.length-1) break;
+        const dx = b.x-a.x, dy = b.y-a.y, len = Math.hypot(dx,dy);
+        if (len < 1e-6) continue;
+        const t = Math.max(0, Math.min(1, ((p.x-a.x)*dx + (p.y-a.y)*dy)/(len*len)));
+        const px = a.x + t*dx, py = a.y + t*dy;
+        if (Math.hypot(p.x-px, p.y-py) < tolPx) return s;
+      }
+    }
+  }
+  return null;
+}
+
 // ===== Rev.19.43: 텍스트모드 박스 선택(우클릭) + 좌클릭 드래그 이동 + 삭제 =====
 let penTxtBoxStart = null;      // 우클릭 박스 시작점(px)
 let penTxtBoxDragging = false;
@@ -16116,9 +16346,22 @@ function startNormalMode(){
       if (penAwaitOrigin) return;  // 원점 지정 전엔 의미 없음
       const p = getCanvasPoint(e);
       const near = (typeof penFindNearestPoint === 'function') ? penFindNearestPoint(p) : -1;
-      if (near < 0) return;
-      e.preventDefault();
-      openPenCoordEdit(near, e);
+      if (near >= 0){
+        e.preventDefault();
+        openPenCoordEdit(near, e);
+        return;
+      }
+      // Rev.19.47: 점이 아니면 도형 hit → 기본도형 수정 모달
+      const sh = (typeof penFindShapeAt === 'function') ? penFindShapeAt(p) : null;
+      if (sh){
+        e.preventDefault();
+        let t = sh.type;
+        if (t === 'circle') t = 'arc';  // 완전원도 arc 모달
+        else if (t === 'polyline') t = 'triangle';
+        if (t === 'arc' || t === 'rect' || t === 'triangle'){
+          openPenShapeModal(t, sh);
+        }
+      }
     });
   }
 
@@ -16245,6 +16488,21 @@ function tryDimCommand(cmdStr){
       { l:'기준 X Y', t:'기준 ', ex:'기준 -50 30 → 빈공간 기준점' },
       { l:'기준 지름', t:'기준 지름 ', ex:'기준 지름 130 110 → 지름 좌측반지름,Y (지=지름)' },
       { l:'기준 방향', t:'기준 상 ', ex:'기준 상 50 / 기준 좌 지름 79.44 85.7' },
+    ],
+    '기본도형': [
+      // Rev.19.47: 도형 입력 모달
+      { l:'⭕ 원/호', action: () => {
+          if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
+          if (typeof openPenShapeModal === 'function') openPenShapeModal('arc', null);
+        }, ex:'⭕ 원/호: 중심X,Y · 직경 · 시작°~끝° (반시계, 시작=끝이면 완전 원) · 적용 → 도형 추가' },
+      { l:'▭ 사각형', action: () => {
+          if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
+          if (typeof openPenShapeModal === 'function') openPenShapeModal('rect', null);
+        }, ex:'▭ 사각형: 좌상단X,Y · W,H 입력 → 도형 추가' },
+      { l:'△ 삼각형', action: () => {
+          if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
+          if (typeof openPenShapeModal === 'function') openPenShapeModal('triangle', null);
+        }, ex:'△ 정삼각형: 중심X,Y · 변 길이 · 회전° 입력 → 도형 추가' },
     ],
     '연장/절교': [
       { l:'연장', t:'연장 ', ex:'연장 1 2 30 / 교점 / X 50 / Y 30' },
@@ -18601,5 +18859,28 @@ try { updateLayerStatus(); } catch(e) {}
 })();
 </script>
 
+<!-- Rev.19.47: 기본 도형 입력 모달 -->
+<div id="penShapeModal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#1a1a1a; border:2px solid #3498db; border-radius:8px; padding:14px 18px; min-width:340px; z-index:10000; box-shadow:0 10px 40px rgba(0,0,0,0.7); color:#fff; font-family:sans-serif;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <span id="penShapeModalTitle" style="font-weight:bold; font-size:14px;">⭕ 기본 도형</span>
+    <button onclick="closePenShapeModal()" style="background:none; border:none; color:#aaa; font-size:18px; cursor:pointer;">✕</button>
+  </div>
+  <div id="penShapeTabs" style="display:flex; gap:4px; margin-bottom:10px;">
+    <button class="ps-tab" data-type="arc" style="flex:1; padding:6px; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:4px; cursor:pointer; font-size:12px;">⭕ 원/호</button>
+    <button class="ps-tab" data-type="rect" style="flex:1; padding:6px; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:4px; cursor:pointer; font-size:12px;">▭ 사각형</button>
+    <button class="ps-tab" data-type="triangle" style="flex:1; padding:6px; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:4px; cursor:pointer; font-size:12px;">△ 삼각형</button>
+  </div>
+  <div id="penShapeFields" style="display:flex; flex-direction:column; gap:6px; font-size:12px;"></div>
+  <div id="penShapeHint" style="font-size:10px; color:#888; margin-top:8px; line-height:1.4;"></div>
+  <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+    <button onclick="closePenShapeModal()" style="padding:6px 14px; background:#3a3a3a; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:12px;">취소</button>
+    <button onclick="applyPenShape()" style="padding:6px 14px; background:#27ae60; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:bold; font-size:12px;">적용</button>
+  </div>
+</div>
+<style>
+  .ps-tab.active { background:#3498db !important; border-color:#5dade2 !important; }
+  #penShapeFields input { background:#1f1f1f; color:#fff; border:1px solid #555; border-radius:3px; padding:4px 6px; font-size:12px; width:120px; text-align:right; }
+  #penShapeFields label { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+</style>
 </body>
 </html>

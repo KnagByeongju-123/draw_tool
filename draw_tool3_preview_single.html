@@ -1730,59 +1730,64 @@ function lineInfiniteIntersect(L1,L2){
   return {x:L1.x1+t*d1x, y:L1.y1+t*d1y, t, u:0};
 }
 
+// 필렛 실제 적용
 function applyFillet(h1, h2, ix, R){
   const L1=h1.s, L2=h2.s;
+  // 각 선의 방향벡터 단위화
   const ux1=L1.x2-L1.x1, uy1=L1.y2-L1.y1, len1=Math.hypot(ux1,uy1);
   const ux2=L2.x2-L2.x1, uy2=L2.y2-L2.y1, len2=Math.hypot(ux2,uy2);
   if(len1<1e-6||len2<1e-6) return;
-
-  const dot = (ux1*ux2+uy1*uy2)/(len1*len2);
-  const ang = Math.acos(Math.max(-1,Math.min(1,dot)));
-  const halfAng = ang/2;
-  if(Math.abs(Math.sin(halfAng))<1e-6) return;
-  const dist = R / Math.tan(halfAng);
+  // 교점에서 각 선 방향으로 트리밍 거리 d = R/tan(θ/2)
+  const dot=(ux1*ux2+uy1*uy2)/(len1*len2);
+  const ang=Math.acos(Math.max(-1,Math.min(1,Math.abs(dot))));
+  const halfAng=Math.PI/2 - ang/2;
+  if(Math.abs(Math.tan(halfAng))<1e-6) return;
+  const dist=R/Math.tan(Math.PI/2-ang/2);
   if(isNaN(dist)||!isFinite(dist)||dist<1e-6) return;
 
+  // 교점에서 각 선 위의 트리밍 점 (교점 쪽을 향한 방향으로 dist만큼)
+  // → 각 선의 끝점 중 교점에 더 가까운 쪽을 기준으로 방향 결정
   function trimPt(L, ix, d){
     const dx=L.x2-L.x1, dy=L.y2-L.y1, ln=Math.hypot(dx,dy);
     const udx=dx/ln, udy=dy/ln;
+    // 교점이 선의 어느 방향에 가까운지: 끝점 중 교점에 더 가까운 쪽
     const d1=Math.hypot(ix.x-L.x1,ix.y-L.y1);
     const d2=Math.hypot(ix.x-L.x2,ix.y-L.y2);
-    if(d1<d2){ return {x:ix.x+udx*d, y:ix.y+udy*d}; }
-    else      { return {x:ix.x-udx*d, y:ix.y-udy*d}; }
+    // 교점 방향으로 d만큼 이동
+    if(d1<d2){ // x1쪽이 교점에 가까움 → x1방향(음수)
+      return {x:ix.x+udx*d, y:ix.y+udy*d};
+    } else {
+      return {x:ix.x-udx*d, y:ix.y-udy*d};
+    }
   }
   const T1=trimPt(L1,ix,dist);
   const T2=trimPt(L2,ix,dist);
 
-  function unitAwayFromIx(L, ix){
-    const dx=L.x2-L.x1, dy=L.y2-L.y1, ln=Math.hypot(dx,dy);
-    const d1=Math.hypot(ix.x-L.x1,ix.y-L.y1);
-    const d2=Math.hypot(ix.x-L.x2,ix.y-L.y2);
-    if(d1<d2) return {x: dx/ln, y: dy/ln};
-    else      return {x:-dx/ln, y:-dy/ln};
+  // 필렛 호의 중심 계산: T1, T2에서 각 선의 법선 방향으로 R만큼
+  // 중심 = T1에서 L1의 법선방향 R, T2에서 L2의 법선방향 R → 교점 찾기
+  const n1x=-(L1.y2-L1.y1)/len1, n1y=(L1.x2-L1.x1)/len1;
+  const n2x=-(L2.y2-L2.y1)/len2, n2y=(L2.x2-L2.x1)/len2;
+  // 두 후보 (±R) 중 교점에 가까운 방향 선택
+  function findCenter(T1,n1x,n1y,T2,n2x,n2y,R){
+    const candidates=[[1,1],[1,-1],[-1,1],[-1,-1]];
+    let best=null, bestD=Infinity;
+    candidates.forEach(([s1,s2])=>{
+      const cx1=T1.x+s1*n1x*R, cy1=T1.y+s1*n1y*R;
+      const cx2=T2.x+s2*n2x*R, cy2=T2.y+s2*n2y*R;
+      const d=Math.hypot(cx1-cx2,cy1-cy2);
+      if(d<bestD){bestD=d; best={x:(cx1+cx2)/2,y:(cy1+cy2)/2};}
+    });
+    return best;
   }
-  const u1=unitAwayFromIx(L1,ix);
-  const u2=unitAwayFromIx(L2,ix);
-  const bx=u1.x+u2.x, by=u1.y+u2.y;
-  const blen=Math.hypot(bx,by);
-  if(blen<1e-6) return;
-  const centerDist = R / Math.sin(halfAng);
-  const C = {x: ix.x + (bx/blen)*centerDist, y: ix.y + (by/blen)*centerDist};
+  const C=findCenter(T1,n1x,n1y,T2,n2x,n2y,R);
+  if(!C) return;
 
-  const aStart=Math.atan2(T1.y-C.y, T1.x-C.x);
-  const aEnd  =Math.atan2(T2.y-C.y, T2.x-C.x);
+  // 호 시작/끝 각도
+  const aStart=Math.atan2(T1.y-C.y,T1.x-C.x);
+  const aEnd  =Math.atan2(T2.y-C.y,T2.x-C.x);
 
-  const ixAngle = Math.atan2(ix.y-C.y, ix.x-C.x);
-  function angleBetween(a, s, e){
-    let ds = e - s; while(ds<0) ds+=2*Math.PI;
-    let da = a - s; while(da<0) da+=2*Math.PI;
-    return da <= ds;
-  }
-  let finalStart=aStart, finalEnd=aEnd;
-  if(angleBetween(ixAngle, aStart, aEnd)){
-    finalStart=aEnd; finalEnd=aStart;
-  }
-
+  // 선 트리밍: 교점 대신 T1, T2 까지만
+  // L1의 교점에 더 가까운 끝을 T1로 교체
   function trimLine(L, ix, Tnew){
     const d1=Math.hypot(ix.x-L.x1,ix.y-L.y1);
     const d2=Math.hypot(ix.x-L.x2,ix.y-L.y2);
@@ -1792,9 +1797,11 @@ function applyFillet(h1, h2, ix, R){
   pushHistory();
   trimLine(L1,ix,T1);
   trimLine(L2,ix,T2);
+
+  // 호 추가
   state.shapes.push({
     type:'arc', cx:C.x, cy:C.y, r:R,
-    startAngle:finalStart, endAngle:finalEnd,
+    startAngle:aStart, endAngle:aEnd,
     color: L1.color||'#000000',
     lineWidth: L1.lineWidth||2
   });

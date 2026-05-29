@@ -2336,8 +2336,12 @@ window.addEventListener('keydown', e => {
     if (typeof closeMoveDeltaPanel === 'function') closeMoveDeltaPanel(); // Rev.11.14
     preCtx.clearRect(0,0,baseW,baseH);
     redrawDraw();
-  } else if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
-  else if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
+  } else if (e.ctrlKey && e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    // Rev.19.56: Shift+Ctrl+Z = 재실행 (텍스트모드 사용자 친화)
+    e.preventDefault(); redo();
+  }
+  else if (e.ctrlKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
+  else if (e.ctrlKey && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); }
   else if (e.ctrlKey && e.shiftKey && (e.key === 'e' || e.key === 'E')) {
     // Rev.11.13: Shift+Ctrl+E = 제자리 복제 (동일 좌표에 복제 후 드래그 이동 가능)
     e.preventDefault();
@@ -10857,6 +10861,14 @@ const cmdInput = document.getElementById('cmdInput');
 cmdInput.addEventListener('keydown', e => {
   // Rev.16.41: 한글(IME) 조합 중에는 명령 처리 안 함 (조합 깨짐 방지)
   if (e.isComposing || e.keyCode === 229) return;
+  // Rev.19.56: 명령 입력칸에 포커스가 있어도 Ctrl+Z/Shift+Ctrl+Z/Ctrl+Y로 도형 취소·재실행
+  // (입력값이 비어있을 때만 도형 undo로 위임 — 입력 중이면 브라우저 기본 텍스트 undo 우선)
+  if (e.ctrlKey && !cmdInput.value && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y')){
+    e.preventDefault();
+    if (e.shiftKey || e.key === 'y' || e.key === 'Y'){ if (typeof redo === 'function') redo(); }
+    else { if (typeof undo === 'function') undo(); }
+    return;
+  }
   if (e.key === 'Enter') {
     // Rev.16.41: 한글 명령은 공백을 포함하므로 스페이스 실행 제거, Enter로만 실행
     e.preventDefault();

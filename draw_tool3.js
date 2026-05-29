@@ -316,7 +316,8 @@ const state = {
   workPlane: null,            // {origin: Vector3, normal: Vector3, partId: number, mesh: THREE.Group}
   boxSelect: null,            // v8.5: 우클릭 박스 선택 진행 상태 {sx,sy,ex,ey,wpStart,wpEnd,addToSel}
   continuousMode: false,      // v8.9: 연속선 토글 OFF=점만, ON=점+이전점과 자동 선
-  dragPoint: null,            // v8.11: 점 드래그 진행 상태 {idx, origX, origY, startWp}
+  dragPoint: null,            // v8.11~v8.12: 점 드래그 진행 상태
+  _penPreviewWp: null,        // v8.12: 펜 도구 실시간 미리보기 — 마우스 현재 위치 (snapped)
 };
 
 const skCanvas = document.getElementById('sketchCanvas');
@@ -361,35 +362,135 @@ function snapPoint(p){
   };
   // (A) 한붓그리기 점들
   state.penPoints.forEach(pt => consider(pt.x, pt.y, 'point'));
-  // (B) 도형의 끝점·중점·중심
+  // (B) 도형의 끝점·중점·중심 + line 목록 수집 (수선/평행/교점용)
+  const lines = [];
   state.shapes.forEach(s => {
     if(s.type === 'line'){
       consider(s.x1, s.y1, 'endpoint');
       consider(s.x2, s.y2, 'endpoint');
       consider((s.x1+s.x2)/2, (s.y1+s.y2)/2, 'midpoint');
+      lines.push({x1:s.x1, y1:s.y1, x2:s.x2, y2:s.y2});
     } else if(s.type === 'rect'){
       const xs = [s.x1, s.x2], ys = [s.y1, s.y2];
       xs.forEach(x => ys.forEach(y => consider(x, y, 'endpoint')));
       consider((s.x1+s.x2)/2, (s.y1+s.y2)/2, 'center');
+      consider((s.x1+s.x2)/2, s.y1, 'midpoint');
+      consider((s.x1+s.x2)/2, s.y2, 'midpoint');
+      consider(s.x1, (s.y1+s.y2)/2, 'midpoint');
+      consider(s.x2, (s.y1+s.y2)/2, 'midpoint');
+      lines.push({x1:s.x1,y1:s.y1, x2:s.x2,y2:s.y1});
+      lines.push({x1:s.x2,y1:s.y1, x2:s.x2,y2:s.y2});
+      lines.push({x1:s.x2,y1:s.y2, x2:s.x1,y2:s.y2});
+      lines.push({x1:s.x1,y1:s.y2, x2:s.x1,y2:s.y1});
     } else if(s.type === 'circle' || s.type === 'arc'){
       consider(s.cx, s.cy, 'center');
-      // 사분점(4시 방향) — 원의 N/E/S/W
       consider(s.cx + s.r, s.cy, 'quadrant');
       consider(s.cx - s.r, s.cy, 'quadrant');
       consider(s.cx, s.cy + s.r, 'quadrant');
       consider(s.cx, s.cy - s.r, 'quadrant');
     }
   });
-  // (C) 현재 penCur 기준 수평·수직 가이드 — 같은 X 또는 같은 Y 라인
+  // (C) 선 위 가장 가까운 점 (nearest)
+  lines.forEach(L => {
+    const dx = L.x2 - L.x1, dy = L.y2 - L.y1;
+    const len2 = dx*dx + dy*dy;
+    if(len2 < 1e-9) return;
+    const t = ((p.x - L.x1)*dx + (p.y - L.y1)*dy) / len2;
+    if(t < -0.0001 || t > 1.0001) return;
+    const nx = L.x1 + t*dx, ny = L.y1 + t*dy;
+    consider(nx, ny, 'nearest');
+  });
+  // (D) penCur 기준 수평/수직 가이드 + 그 라인 위 다른 점 (h-aligned/v-aligned)
   if(state.penCur >= 0 && state.penPoints[state.penCur]){
     const ref = state.penPoints[state.penCur];
-    // 수평선 (같은 Y): 마우스가 같은 높이에 있으면 X 자유, Y는 ref.y
-    if(Math.abs(p.y - ref.y) < tol){ consider(p.x, ref.y, 'horizontal'); }
-    // 수직선 (같은 X)
-    if(Math.abs(p.x - ref.x) < tol){ consider(ref.x, p.y, 'vertical'); }
+    // 수평선
+    if(Math.abs(p.y - ref.y) < tol){
+      consider(p.x, ref.y, 'horizontal');
+      // 수평선 위 다른 점 — 마우스 X가 그 점 X와 가까우면 정확히 그 점에 스냅
+      state.penPoints.forEach(pt => {
+        if(Math.abs(p.x - pt.x) < tol) consider(pt.x, ref.y, 'h-aligned');
+      });
+      lines.forEach(L => {
+        [{x:L.x1,y:L.y1},{x:L.x2,y:L.y2}].forEach(ep => {
+          if(Math.abs(p.x - ep.x) < tol) consider(ep.x, ref.y, 'h-aligned');
+        });
+      });
+    }
+    // 수직선
+    if(Math.abs(p.x - ref.x) < tol){
+      consider(ref.x, p.y, 'vertical');
+      state.penPoints.forEach(pt => {
+        if(Math.abs(p.y - pt.y) < tol) consider(ref.x, pt.y, 'v-aligned');
+      });
+      lines.forEach(L => {
+        [{x:L.x1,y:L.y1},{x:L.x2,y:L.y2}].forEach(ep => {
+          if(Math.abs(p.y - ep.y) < tol) consider(ref.x, ep.y, 'v-aligned');
+        });
+      });
+    }
+    // (E) 수선 — penCur에서 line에 내린 수선의 발
+    lines.forEach(L => {
+      const dx = L.x2 - L.x1, dy = L.y2 - L.y1;
+      const len2 = dx*dx + dy*dy;
+      if(len2 < 1e-9) return;
+      const t = ((ref.x - L.x1)*dx + (ref.y - L.y1)*dy) / len2;
+      if(t < -0.0001 || t > 1.0001) return;
+      const fx = L.x1 + t*dx, fy = L.y1 + t*dy;
+      consider(fx, fy, 'perpendicular');
+    });
+    // (F) 평행 라인 + 그 라인 위 다른 점 (p-aligned)
+    lines.forEach(L => {
+      const dx = L.x2 - L.x1, dy = L.y2 - L.y1;
+      const len = Math.hypot(dx, dy);
+      if(len < 1e-6) return;
+      const ux = dx/len, uy = dy/len;
+      const nxn = -uy, nyn = ux;  // 법선
+      const offset = (p.x - ref.x)*nxn + (p.y - ref.y)*nyn;  // 법선 거리(부호)
+      if(Math.abs(offset) < tol){
+        const t = (p.x - ref.x)*ux + (p.y - ref.y)*uy;
+        const px = ref.x + t*ux, py = ref.y + t*uy;
+        consider(px, py, 'parallel');
+        // 평행 라인 위에 있는 다른 점에도 스냅
+        state.penPoints.forEach(pt => {
+          const td = (pt.x - ref.x)*ux + (pt.y - ref.y)*uy;
+          const offPt = (pt.x - ref.x)*nxn + (pt.y - ref.y)*nyn;
+          if(Math.abs(offPt) < tol*2 && Math.abs(t - td) < tol){
+            consider(pt.x, pt.y, 'p-aligned');
+          }
+        });
+        lines.forEach(L2 => {
+          [{x:L2.x1,y:L2.y1},{x:L2.x2,y:L2.y2}].forEach(ep => {
+            const td = (ep.x - ref.x)*ux + (ep.y - ref.y)*uy;
+            const offEp = (ep.x - ref.x)*nxn + (ep.y - ref.y)*nyn;
+            if(Math.abs(offEp) < tol*2 && Math.abs(t - td) < tol){
+              consider(ep.x, ep.y, 'p-aligned');
+            }
+          });
+        });
+      }
+    });
+  }
+  // (G) 선-선 교점 (intersection)
+  for(let i=0;i<lines.length;i++){
+    for(let j=i+1;j<lines.length;j++){
+      const ix = _sk3LineIntersect(lines[i], lines[j]);
+      if(ix) consider(ix.x, ix.y, 'intersection');
+    }
   }
   state._lastSnapKind = best ? kind : null;
   return best || result;
+}
+
+// 두 선분의 교점 (선분 안만)
+function _sk3LineIntersect(A, B){
+  const x1=A.x1, y1=A.y1, x2=A.x2, y2=A.y2;
+  const x3=B.x1, y3=B.y1, x4=B.x2, y4=B.y2;
+  const den = (x1-x2)*(y3-y4) - (y1-y2)*(x3-x4);
+  if(Math.abs(den) < 1e-9) return null;
+  const t = ((x1-x3)*(y3-y4) - (y1-y3)*(x3-x4)) / den;
+  const u = -((x1-x2)*(y1-y3) - (y1-y2)*(x1-x3)) / den;
+  if(t < -0.0001 || t > 1.0001 || u < -0.0001 || u > 1.0001) return null;
+  return {x: x1 + t*(x2-x1), y: y1 + t*(y2-y1)};
 }
 
 function redrawSketch(){
@@ -403,8 +504,90 @@ function redrawSketch(){
   drawPenLabels();
   // v8.5: 박스 선택 미리보기
   if(state.boxSelect) sk3DrawBoxSelectPreview(state.boxSelect);
+  // v8.12: OSNAP 마커 — 현재 마우스가 스냅된 곳에 종류별 아이콘 표시
+  if(state._lastSnapKind && state._penPreviewWp){
+    sk3DrawSnapMarker(state._penPreviewWp.x, state._penPreviewWp.y, state._lastSnapKind);
+  }
   // v8.10: 선택 속성 패널 자동 갱신
   if(typeof sk3UpdateSelProp === 'function') sk3UpdateSelProp();
+}
+
+// v8.12: OSNAP 종류별 시각 마커
+function sk3DrawSnapMarker(wx, wy, kind){
+  const sp = worldToScreen(wx, wy);
+  const size = 7;
+  skCtx.save();
+  skCtx.strokeStyle = '#f1c40f';
+  skCtx.lineWidth = 2;
+  skCtx.fillStyle = 'rgba(241, 196, 15, 0.25)';
+  skCtx.beginPath();
+  if(kind === 'point' || kind === 'endpoint'){
+    skCtx.rect(sp.x - size, sp.y - size, size*2, size*2);  // 사각형
+  } else if(kind === 'midpoint'){
+    // 삼각형
+    skCtx.moveTo(sp.x, sp.y - size);
+    skCtx.lineTo(sp.x + size, sp.y + size);
+    skCtx.lineTo(sp.x - size, sp.y + size);
+    skCtx.closePath();
+  } else if(kind === 'center'){
+    skCtx.arc(sp.x, sp.y, size, 0, Math.PI*2);  // 원
+  } else if(kind === 'quadrant'){
+    // 마름모
+    skCtx.moveTo(sp.x, sp.y - size);
+    skCtx.lineTo(sp.x + size, sp.y);
+    skCtx.lineTo(sp.x, sp.y + size);
+    skCtx.lineTo(sp.x - size, sp.y);
+    skCtx.closePath();
+  } else if(kind === 'perpendicular'){
+    // 수선 마커: ⊥
+    skCtx.rect(sp.x - size, sp.y - size, size*2, size*2);
+    skCtx.moveTo(sp.x - size, sp.y);
+    skCtx.lineTo(sp.x + size, sp.y);
+    skCtx.moveTo(sp.x, sp.y - size);
+    skCtx.lineTo(sp.x, sp.y + size);
+  } else if(kind === 'parallel'){
+    // 평행 마커: ∥ (두 짧은 선)
+    skCtx.moveTo(sp.x - size/2, sp.y - size);
+    skCtx.lineTo(sp.x - size/2, sp.y + size);
+    skCtx.moveTo(sp.x + size/2, sp.y - size);
+    skCtx.lineTo(sp.x + size/2, sp.y + size);
+  } else if(kind === 'intersection'){
+    // 교점 마커: ×
+    skCtx.moveTo(sp.x - size, sp.y - size);
+    skCtx.lineTo(sp.x + size, sp.y + size);
+    skCtx.moveTo(sp.x + size, sp.y - size);
+    skCtx.lineTo(sp.x - size, sp.y + size);
+  } else if(kind === 'nearest'){
+    // 근점 마커: 작은 X
+    skCtx.moveTo(sp.x - size/2, sp.y - size/2);
+    skCtx.lineTo(sp.x + size/2, sp.y + size/2);
+    skCtx.moveTo(sp.x + size/2, sp.y - size/2);
+    skCtx.lineTo(sp.x - size/2, sp.y + size/2);
+  } else if(kind === 'horizontal' || kind === 'vertical'){
+    if(kind === 'horizontal'){
+      skCtx.moveTo(sp.x - size, sp.y);
+      skCtx.lineTo(sp.x + size, sp.y);
+    } else {
+      skCtx.moveTo(sp.x, sp.y - size);
+      skCtx.lineTo(sp.x, sp.y + size);
+    }
+  } else if(kind === 'h-aligned' || kind === 'v-aligned' || kind === 'p-aligned'){
+    // 정렬된 점 — 사각형 (채움)
+    skCtx.rect(sp.x - size, sp.y - size, size*2, size*2);
+  } else {
+    skCtx.rect(sp.x - size, sp.y - size, size*2, size*2);
+  }
+  if(['point','endpoint','center','quadrant','midpoint','h-aligned','v-aligned','p-aligned'].indexOf(kind) >= 0){
+    skCtx.fill();
+  }
+  skCtx.stroke();
+  // 종류 라벨
+  skCtx.fillStyle = '#f1c40f';
+  skCtx.font = '10px sans-serif';
+  skCtx.textAlign = 'left';
+  skCtx.textBaseline = 'middle';
+  skCtx.fillText(kind, sp.x + size + 4, sp.y - size - 4);
+  skCtx.restore();
 }
 
 // 한붓그리기 점·번호 라벨 그리기
@@ -803,7 +986,36 @@ function drawHandle(x, y){
 
 function drawPreview(){
   const d = state.drawing;
-  if(!d || !d.current) return;
+  if(!d || !d.current){
+    // v8.12: 펜 도구 실시간 미리보기 — 마우스가 다음 점을 가리킬 때 선 미리보기 (연속선 ON 시)
+    if(state.tool === 'pen' && state.continuousMode && state.penCur >= 0 && state.penPoints[state.penCur] && state._penPreviewWp){
+      const cur = state.penPoints[state.penCur];
+      const np = state._penPreviewWp;
+      const p1 = worldToScreen(cur.x, cur.y);
+      const p2 = worldToScreen(np.x, np.y);
+      skCtx.save();
+      skCtx.strokeStyle = '#3498db';
+      skCtx.lineWidth = 1;
+      skCtx.setLineDash([4, 4]);
+      skCtx.beginPath();
+      skCtx.moveTo(p1.x, p1.y);
+      skCtx.lineTo(p2.x, p2.y);
+      skCtx.stroke();
+      skCtx.setLineDash([]);
+      const len = Math.hypot(np.x-cur.x, np.y-cur.y);
+      const deg = Math.atan2(np.y-cur.y, np.x-cur.x) * 180 / Math.PI;
+      const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+      skCtx.fillStyle = 'rgba(52,152,219,0.9)';
+      skCtx.fillRect(mx-55, my-22, 110, 18);
+      skCtx.fillStyle = '#fff';
+      skCtx.font = '11px monospace';
+      skCtx.textAlign = 'center';
+      skCtx.textBaseline = 'middle';
+      skCtx.fillText(len.toFixed(2)+'mm · '+deg.toFixed(1)+'°', mx, my-13);
+      skCtx.restore();
+    }
+    return;
+  }
   skCtx.strokeStyle = '#0066cc';
   skCtx.lineWidth = 1;
   skCtx.setLineDash([4, 4]);
@@ -899,6 +1111,24 @@ skCanvas.addEventListener('mousedown', (e)=>{
     state.boxSelect = {sx, sy, ex:sx, ey:sy, wpStart:wp, wpEnd:wp, addToSel:e.shiftKey};
     skCanvas.style.cursor = 'crosshair';
     return;
+  }
+  // v8.12: 좌클릭 + 점 위 = 드래그 준비 (도구 무관) — mouseup에서 이동량으로 클릭/드래그 분기
+  if(e.button === 0){
+    const hp = sk3FindNearestPenPoint(wp);
+    if(hp >= 0){
+      state.dragPoint = {
+        idx: hp,
+        origX: state.penPoints[hp].x,
+        origY: state.penPoints[hp].y,
+        startSx: sx, startSy: sy,
+        moved: false,
+        prevTool: state.tool
+      };
+      state.penCur = hp;
+      skCanvas.style.cursor = 'move';
+      redrawSketch();
+      return;
+    }
   }
   
   if(state.tool === 'fillet'){
@@ -1071,22 +1301,29 @@ skCanvas.addEventListener('mousemove', (e)=>{
     redrawSketch();
     return;
   }
-  // v8.11: 점 드래그 진행 중 — 점과 연결된 선 미리보기 이동
+  // v8.11~v8.12: 점 드래그 진행 — 일정 거리 이동했을 때만 실제로 점 이동
   if(state.dragPoint){
+    const dp = state.dragPoint;
+    const dist = Math.hypot(sx - dp.startSx, sy - dp.startSy);
+    if(!dp.moved && dist < 3){
+      // 아직 의미있는 이동이 아님 — 무시 (실수 클릭 허용)
+      return;
+    }
+    dp.moved = true;
     let wp = screenToWorld(sx, sy);
-    wp = snapPoint(wp);  // OSNAP 적용 — 다른 점에 붙기
-    const p = state.penPoints[state.dragPoint.idx];
+    wp = snapPoint(wp);  // OSNAP 적용
+    const p = state.penPoints[dp.idx];
     const oldX = p.x, oldY = p.y;
     p.x = wp.x; p.y = wp.y;
-    // 연결된 선도 임시 갱신
     const tol = 0.01;
     state.shapes.forEach(s => {
       if(s.type !== 'line') return;
       if(Math.abs(s.x1-oldX)<tol && Math.abs(s.y1-oldY)<tol){ s.x1=wp.x; s.y1=wp.y; }
       if(Math.abs(s.x2-oldX)<tol && Math.abs(s.y2-oldY)<tol){ s.x2=wp.x; s.y2=wp.y; }
     });
+    state._penPreviewWp = wp;  // 마커 표시용
     redrawSketch();
-    document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(2)}  Y: ${wp.y.toFixed(2)}` + (state._lastSnapKind?' ['+state._lastSnapKind+']':'');
+    document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(2)}  Y: ${wp.y.toFixed(2)}` + (state._lastSnapKind?' ['+state._lastSnapKind+']':'') + ' · 🤚드래그';
     return;
   }
   // v8.5: 박스 선택 진행 중 — 박스 갱신 + 미리보기 그리기
@@ -1101,25 +1338,31 @@ skCanvas.addEventListener('mousemove', (e)=>{
   if(state.mode !== 'sketch') return;
   let wp = screenToWorld(sx, sy);
   wp = snapPoint(wp);
-  document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(1)}  Y: ${wp.y.toFixed(1)}`;
+  document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(2)}  Y: ${wp.y.toFixed(2)}` + (state._lastSnapKind?' ['+state._lastSnapKind+']':'');
   if(state.drawing){
     state.drawing.current = wp;
+    redrawSketch();
+  } else if(state.tool === 'pen' && state.continuousMode && state.penCur >= 0){
+    // v8.12: 펜 도구 + 연속선 ON 시 실시간 미리보기
+    state._penPreviewWp = wp;
+    redrawSketch();
+  } else if(state._penPreviewWp){
+    state._penPreviewWp = null;
     redrawSketch();
   }
 });
 
 skCanvas.addEventListener('mouseup', (e)=>{
   if(isPanning){isPanning = false; panStart = null; skCanvas.style.cursor = ''; return;}
-  // v8.11: 점 드래그 마침 → 변경 확정 + 히스토리
+  // v8.11~v8.12: 점 드래그 마침
   if(state.dragPoint){
     const dp = state.dragPoint;
     const p = state.penPoints[dp.idx];
-    // 실제 이동이 일어났는지 확인
-    if(Math.abs(p.x - dp.origX) > 0.01 || Math.abs(p.y - dp.origY) > 0.01){
-      // 임시 변경을 되돌리고 pushHistory 후 다시 적용
+    if(dp.moved && (Math.abs(p.x - dp.origX) > 0.01 || Math.abs(p.y - dp.origY) > 0.01)){
+      // 진짜 드래그 → 히스토리 기록
       const finalX = p.x, finalY = p.y;
-      // 원위치 복원
       const tol = 0.01;
+      // 원위치 복원
       state.shapes.forEach(s => {
         if(s.type !== 'line') return;
         if(Math.abs(s.x1-finalX)<tol && Math.abs(s.y1-finalY)<tol){ s.x1=dp.origX; s.y1=dp.origY; }
@@ -1134,9 +1377,14 @@ skCanvas.addEventListener('mouseup', (e)=>{
         if(Math.abs(s.x2-dp.origX)<tol && Math.abs(s.y2-dp.origY)<tol){ s.x2=finalX; s.y2=finalY; }
       });
       p.x = finalX; p.y = finalY;
-      setStat('✓ P' + dp.idx + ' 이동 (' + finalX.toFixed(2) + ', ' + finalY.toFixed(2) + ')');
+      setStat('✓ P' + dp.idx + ' 이동 (' + finalX.toFixed(2) + ', ' + finalY.toFixed(2) + ')mm');
+    } else {
+      // 안 움직임 — 단일 클릭으로 처리 (penCur만 이동, 선택 도구 동작도 보존)
+      setStat('▸ P' + dp.idx + ' 선택 (penCur로 설정)');
     }
     state.dragPoint = null;
+    state._penPreviewWp = null;
+    state._lastSnapKind = null;
     skCanvas.style.cursor = '';
     redrawSketch(); updateInfo();
     return;

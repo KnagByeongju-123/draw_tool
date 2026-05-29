@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.47 (라이브 단일본)</title>
+<title>도면 작도기 Rev.19.48 (라이브 단일본)</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -366,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.47</h1>
+  <h1>📐 도면 작도기 Rev.19.48</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -15429,20 +15429,38 @@ function renderPenShapeFields(type, ex){
     hint.textContent = '반시계방향, 0°=오른쪽, 90°=위, 180°=왼쪽, 270°=아래 · 시작=끝이면 완전 원 · X/Y는 직경좌표 모드 ON시 그 좌표계';
   } else if (type === 'rect'){
     title.textContent = ex ? '▭ 사각형 수정' : '▭ 사각형 (신규)';
+    // Rev.19.48: 기준점 위치 옵션 (좌상/우상/좌하/우하/중심)
+    const anchor = (ex && ex._anchor) || 'br';  // 베이스용 기본값: 우하단
     let x=0, y=0, w=10, h=5;
     if (ex){
       const m1 = penPxToUserMm(ex.p1.x, ex.p1.y), m2 = penPxToUserMm(ex.p2.x, ex.p2.y);
-      x = Math.min(m1.x, m2.x); y = Math.max(m1.y, m2.y);  // 좌상단 (Y up)
-      w = Math.abs(m2.x - m1.x); h = Math.abs(m2.y - m1.y);
+      const xMin = Math.min(m1.x, m2.x), xMax = Math.max(m1.x, m2.x);
+      const yMin = Math.min(m1.y, m2.y), yMax = Math.max(m1.y, m2.y);
+      w = xMax - xMin; h = yMax - yMin;
+      if      (anchor === 'tl'){ x = xMin; y = yMax; }
+      else if (anchor === 'tr'){ x = xMax; y = yMax; }
+      else if (anchor === 'bl'){ x = xMin; y = yMin; }
+      else if (anchor === 'br'){ x = xMax; y = yMin; }
+      else if (anchor === 'c' ){ x = (xMin+xMax)/2; y = (yMin+yMax)/2; }
     } else if (penOriginUserCoord){
       x = penOriginUserCoord.x; y = penOriginUserCoord.y;
     }
+    const selStyle = 'background:#1f1f1f; color:#fff; border:1px solid #555; border-radius:3px; padding:4px 6px; font-size:12px; width:140px;';
     div.innerHTML = `
-      <label>좌상단 X (mm) <input id="psf-x" type="text" value="${x.toFixed(2)}"></label>
-      <label>좌상단 Y (mm) <input id="psf-y" type="text" value="${y.toFixed(2)}"></label>
+      <label>기준점 위치
+        <select id="psf-anchor" style="${selStyle}">
+          <option value="tl"${anchor==='tl'?' selected':''}>┌ 좌상단</option>
+          <option value="tr"${anchor==='tr'?' selected':''}>┐ 우상단</option>
+          <option value="bl"${anchor==='bl'?' selected':''}>└ 좌하단</option>
+          <option value="br"${anchor==='br'?' selected':''}>┘ 우하단 (베이스)</option>
+          <option value="c"${anchor==='c' ?' selected':''}>＋ 중심</option>
+        </select>
+      </label>
+      <label>기준점 X (mm) <input id="psf-x" type="text" value="${x.toFixed(2)}"></label>
+      <label>기준점 Y (mm) <input id="psf-y" type="text" value="${y.toFixed(2)}"></label>
       <label>너비 W (mm) <input id="psf-w" type="text" value="${w.toFixed(2)}"></label>
       <label>높이 H (mm) <input id="psf-h" type="text" value="${h.toFixed(2)}"></label>`;
-    hint.textContent = 'X,Y = 좌상단 모서리 좌표 · W=가로, H=세로 (Y는 위쪽 양수)';
+    hint.textContent = '기준점 위치 = 입력한 X,Y가 사각형의 어느 점인지 · 베이스용은 ┘ 우하단(직경축에 닿는 점) 사용 · Y는 위쪽 양수';
   } else if (type === 'triangle'){
     title.textContent = ex ? '△ 삼각형 수정' : '△ 삼각형 (신규)';
     let cx=0, cy=0, side=10, rot=0;
@@ -15494,13 +15512,23 @@ function applyPenShape(){
         stroke, strokeWidth:sw, layer };
     }
   } else if (type === 'rect'){
-    const x = _parseNum('psf-x'), y = _parseNum('psf-y');
+    // Rev.19.48: anchor에 따라 좌상단·우하단 계산
+    const anchor = (document.getElementById('psf-anchor')||{}).value || 'br';
+    const ax = _parseNum('psf-x'), ay = _parseNum('psf-y');
     const w = _parseNum('psf-w'), h = _parseNum('psf-h');
     if (w <= 0 || h <= 0){ alert('너비/높이는 0보다 커야 합니다'); return; }
-    const p1 = penUserMmToPx(x, y);
-    const p2 = penUserMmToPx(x + w, y - h);  // Y up = 화면 아래로
+    let xMin, yMax;
+    if      (anchor === 'tl'){ xMin = ax;     yMax = ay; }
+    else if (anchor === 'tr'){ xMin = ax - w; yMax = ay; }
+    else if (anchor === 'bl'){ xMin = ax;     yMax = ay + h; }
+    else if (anchor === 'br'){ xMin = ax - w; yMax = ay + h; }
+    else if (anchor === 'c' ){ xMin = ax - w/2; yMax = ay + h/2; }
+    const xMax = xMin + w, yMin = yMax - h;
+    const p1 = penUserMmToPx(xMin, yMax);  // 좌상단 (Y up = px 위쪽)
+    const p2 = penUserMmToPx(xMax, yMin);  // 우하단
     newShape = { id:++shapeIdSeq, type:'rect',
       p1:{x:p1.x, y:p1.y}, p2:{x:p2.x, y:p2.y},
+      _anchor: anchor,
       stroke, strokeWidth:sw, layer };
   } else if (type === 'triangle'){
     const cx = _parseNum('psf-cx'), cy = _parseNum('psf-cy');

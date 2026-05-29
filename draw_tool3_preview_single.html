@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.0 (통합본) - 텍스트모드 + 명령 키보드</title>
+<title>tool3 v8.1 (단일본) - 텍스트모드 통합 (커맨드바 + 명령 키보드 + 한붓그리기)</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.0</h1>
+  <h1>📐 tool3 v8.1</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -308,7 +308,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <button id="btn-pen" onclick="setTool('pen')" title="펜 한붓그리기 (P) - 좌클릭마다 점+선 자동 추가 · Shift=직교 · Esc=종료" style="background:#3a5530;color:#90e090;font-weight:bold">✎</button>
     <button id="btn-fillet" onclick="setTool('fillet')" title="필렛 (F) - 드래그로 선 2개 선택 후 R 입력">⌣R</button>
     <button id="btn-select" onclick="setTool('select')" title="선택 (S)">👆</button>
-    <button id="btn-cmdkb" onclick="sk3ToggleCmdKb()" title="명령 키보드 (텍스트로 도면 그리기)" style="background:#3a5a80;color:#7ab8e8;font-weight:bold">⌨</button>
+    <button id="btn-cmdkb" onclick="sk3ToggleCmdKb()" title="⌨ 명령 키보드 (텍스트로 도면 그리기)" style="background:#3a5a80;color:#7ab8e8;font-weight:bold">⌨</button>
     <button id="btn-cmdbar" onclick="sk3ToggleCmdBar()" title="하단 명령창 표시/숨김 (: 또는 / 키로 포커스)" style="background:#3a4a55">⌃_</button>
   </div>
   <div class="group sketch-only" style="border-left:1px solid #444;padding-left:8px">
@@ -1313,15 +1313,15 @@ const state = {
   selectedPartId: null,
   history: [],
   historyIdx: -1,
-  penPoints: [],
-  penCur: -1,
-  penShowLabels: true,
-  penOrigin: null,
-  penShowCoord: false,
-  penDiameterMode: null,
-  thickness: 0.6,
-  wheelConnectMode: false,
-  wheelConnectFirst: -1,
+  penPoints: [],   // 한붓그리기 점 배열 [{x,y}]
+  penCur: -1,      // 현재 점 인덱스 (-1=없음)
+  penShowLabels: true,  // 점 번호 라벨 표시
+  penOrigin: null, // 기준점 {x,y} (노란 십자)
+  penShowCoord: false,  // 점 옆에 좌표 라벨 표시
+  penDiameterMode: null, // {Cx, Cy} 직경좌표 모드 (회전체용)
+  thickness: 0.6,  // 소재 두께(mm)
+  wheelConnectMode: false, // 휠클릭 연결 모드 ON 시 true
+  wheelConnectFirst: -1,   // 휠클릭 첫번째 점 인덱스
   gridSnap: true,
   gridSize: 10,
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
@@ -1386,7 +1386,9 @@ function redrawSketch(){
   drawPenLabels();
 }
 
+// 한붓그리기 점·번호 라벨 그리기
 function drawPenLabels(){
+  // 기준점 십자 (노란 +)
   if(state.penOrigin){
     const sp = worldToScreen(state.penOrigin.x, state.penOrigin.y);
     skCtx.save();
@@ -1405,6 +1407,7 @@ function drawPenLabels(){
   skCtx.save();
   state.penPoints.forEach((p, i) => {
     const sp = worldToScreen(p.x, p.y);
+    // 점 마커 (노란 원)
     skCtx.fillStyle = '#f0c040';
     skCtx.strokeStyle = '#000';
     skCtx.lineWidth = 1;
@@ -1412,11 +1415,15 @@ function drawPenLabels(){
     skCtx.arc(sp.x, sp.y, 3.5, 0, Math.PI*2);
     skCtx.fill();
     skCtx.stroke();
+    // 번호 + (옵션) 좌표 텍스트
     let label = 'P' + i;
-    if(state.penShowCoord){ label += ' ' + sk3FormatCoord(p.x, p.y); }
+    if(state.penShowCoord){
+      label += ' ' + sk3FormatCoord(p.x, p.y);
+    }
     skCtx.font = 'bold 11px monospace';
     skCtx.textAlign = 'left';
     skCtx.textBaseline = 'middle';
+    // 라벨 배경 박스 (가독성)
     const m = skCtx.measureText(label);
     const bw = m.width + 6, bh = 14;
     skCtx.fillStyle = 'rgba(20,30,40,0.78)';
@@ -1424,9 +1431,11 @@ function drawPenLabels(){
     skCtx.lineWidth = 1;
     skCtx.fillRect(sp.x + 6, sp.y - 14, bw, bh);
     skCtx.strokeRect(sp.x + 6, sp.y - 14, bw, bh);
+    // 텍스트
     skCtx.fillStyle = '#ffe070';
     skCtx.fillText(label, sp.x + 9, sp.y - 7);
   });
+  // 현재점 강조 (오렌지 링)
   if(state.penCur >= 0 && state.penPoints[state.penCur]){
     const cp = state.penPoints[state.penCur];
     const sp = worldToScreen(cp.x, cp.y);
@@ -1438,6 +1447,7 @@ function drawPenLabels(){
   }
   skCtx.restore();
 }
+
 // 좌표 라벨 포맷 (직경좌표 모드 지원)
 function sk3FormatCoord(x, y){
   if(state.penDiameterMode){
@@ -1640,6 +1650,7 @@ function sk3OpenShapeEditor(hit){
   redrawSketch(); updateInfo();
   skCmdLog('  ✏ 도형 #' + hit.idx + ' 편집됨', 'sys');
 }
+
 
 function drawGrid(){
   const w = skCanvas.width, h = skCanvas.height;
@@ -1858,10 +1869,13 @@ skCanvas.addEventListener('mousedown', (e)=>{
   }
 
   if(state.tool === 'pen'){
+    // 한붓그리기 펜: 클릭 = 점 추가 + 이전 점과 선 연결
+    // Shift = 직교 스냅 (수직/수평/45°)
     let tx = wp.x, ty = wp.y;
     if(e.shiftKey && state.penCur >= 0 && state.penPoints[state.penCur]){
       const cur = state.penPoints[state.penCur];
       const dx = wp.x - cur.x, dy = wp.y - cur.y;
+      // 8방향 스냅
       const ang = Math.atan2(dy, dx);
       const snapAng = Math.round(ang / (Math.PI/4)) * (Math.PI/4);
       const ln = Math.hypot(dx, dy);
@@ -1869,12 +1883,14 @@ skCanvas.addEventListener('mousedown', (e)=>{
       ty = cur.y + ln*Math.sin(snapAng);
     }
     pushHistory();
+    // 이전 점이 있으면 선 자동 추가
     if(state.penCur >= 0 && state.penPoints[state.penCur]){
       const cur = state.penPoints[state.penCur];
       state.shapes.push({type:'line', x1:cur.x, y1:cur.y, x2:tx, y2:ty,
         color: document.getElementById('sketchColor').value || '#000000',
         lineWidth: parseInt(document.getElementById('lineWidth').value)||2});
     }
+    // 새 점 추가
     state.penPoints.push({x:tx, y:ty});
     state.penCur = state.penPoints.length - 1;
     redrawSketch(); updateInfo();
@@ -1886,7 +1902,7 @@ skCanvas.addEventListener('mousedown', (e)=>{
     selectShapeAt(wp, e.shiftKey);
     return;
   }
-
+  
   if(state.tool === 'line'){
     if(!state.drawing){
       state.drawing = {type:'line', start: wp, current: wp};
@@ -1991,20 +2007,16 @@ skCanvas.addEventListener('mouseup', (e)=>{
     const bx2 = Math.max(d.start.x, d.current.x);
     const by1 = Math.min(d.start.y, d.current.y);
     const by2 = Math.max(d.start.y, d.current.y);
-    // 박스에 걸친 line 형상 수집
     const hits = [];
     state.shapes.forEach((s, idx) => {
       if(s.type !== 'line') return;
       const inBox = (x,y) => x >= bx1 && x <= bx2 && y >= by1 && y <= by2;
-      if(inBox(s.x1,s.y1) || inBox(s.x2,s.y2) ||
-         segIntersectsBox(s, bx1,by1,bx2,by2)){
+      if(inBox(s.x1,s.y1) || inBox(s.x2,s.y2) || segIntersectsBox(s, bx1,by1,bx2,by2)){
         hits.push({idx, s});
       }
     });
     if(hits.length < 2){ toast('선택 박스 안에 선이 2개 이상 필요합니다'); redrawSketch(); return; }
-    // 가장 가까운 2개만 사용
-    const L1 = hits[0].s, L2 = hits[1].s;
-    const ix = lineLineIntersect(L1, L2);
+    const ix = lineLineIntersect(hits[0].s, hits[1].s);
     if(!ix){ toast('두 선이 평행하거나 교점이 없습니다'); redrawSketch(); return; }
     const rStr = prompt('필렛 반지름(mm)을 입력하세요', '5');
     if(rStr === null){ redrawSketch(); return; }
@@ -2013,6 +2025,7 @@ skCanvas.addEventListener('mouseup', (e)=>{
     applyFillet(hits[0], hits[1], ix, R);
     redrawSketch();
   }
+  // 쓸어지우기 처리
   if(state.mode === 'sketch' && state.tool === 'wipe' && state.drawing && state.drawing.type === 'wipe'){
     const d = state.drawing;
     state.drawing = null;
@@ -2038,6 +2051,7 @@ skCanvas.addEventListener('mouseup', (e)=>{
     if(toRemove.length > 0){
       pushHistory();
       toRemove.sort((a,b)=>b-a).forEach(i => state.shapes.splice(i,1));
+      // 박스 안의 한붓그리기 점도 함께 삭제
       const ptsBefore = state.penPoints.length;
       state.penPoints = state.penPoints.filter(p =>
         !(bx1<=p.x && p.x<=bx2 && by1<=p.y && p.y<=by2));
@@ -2055,17 +2069,13 @@ skCanvas.addEventListener('mouseup', (e)=>{
   }
 });
 
-// 선이 박스와 교차하는지 검사
 function segIntersectsBox(s, bx1,by1,bx2,by2){
-  // 클리핑 알고리즘 대신 간단하게: 박스의 4변과 교차하는지
   const segs = [
     {x1:bx1,y1:by1,x2:bx2,y2:by1},{x1:bx2,y1:by1,x2:bx2,y2:by2},
     {x1:bx2,y1:by2,x2:bx1,y2:by2},{x1:bx1,y1:by2,x2:bx1,y2:by1}
   ];
   return segs.some(b => segSegIntersect(s.x1,s.y1,s.x2,s.y2, b.x1,b.y1,b.x2,b.y2) !== null);
 }
-
-// 두 선분 교점 (null=없음)
 function segSegIntersect(ax,ay,bx,by, cx,cy,dx,dy){
   const d1x=bx-ax,d1y=by-ay, d2x=dx-cx,d2y=dy-cy;
   const cross = d1x*d2y - d1y*d2x;
@@ -2075,13 +2085,9 @@ function segSegIntersect(ax,ay,bx,by, cx,cy,dx,dy){
   if(t<-1e-6||t>1+1e-6||u<-1e-6||u>1+1e-6) return null;
   return {x: ax+t*d1x, y: ay+t*d1y, t, u};
 }
-
-// 두 직선(선분 무한 연장) 교점
 function lineLineIntersect(L1, L2){
-  return segSegIntersect(
-    L1.x1,L1.y1,L1.x2,L1.y2,
-    L2.x1,L2.y1,L2.x2,L2.y2
-  ) || lineInfiniteIntersect(L1,L2);
+  return segSegIntersect(L1.x1,L1.y1,L1.x2,L1.y2, L2.x1,L2.y1,L2.x2,L2.y2)
+      || lineInfiniteIntersect(L1,L2);
 }
 function lineInfiniteIntersect(L1,L2){
   const d1x=L1.x2-L1.x1, d1y=L1.y2-L1.y1;
@@ -2091,31 +2097,36 @@ function lineInfiniteIntersect(L1,L2){
   const t=((L2.x1-L1.x1)*d2y-(L2.y1-L1.y1)*d2x)/cross;
   return {x:L1.x1+t*d1x, y:L1.y1+t*d1y, t, u:0};
 }
-
 function applyFillet(h1, h2, ix, R){
   const L1=h1.s, L2=h2.s;
   const ux1=L1.x2-L1.x1, uy1=L1.y2-L1.y1, len1=Math.hypot(ux1,uy1);
   const ux2=L2.x2-L2.x1, uy2=L2.y2-L2.y1, len2=Math.hypot(ux2,uy2);
   if(len1<1e-6||len2<1e-6) return;
 
+  // 두 선 사이 각도 (실제 각도, abs 없이)
   const dot = (ux1*ux2+uy1*uy2)/(len1*len2);
-  const ang = Math.acos(Math.max(-1,Math.min(1,dot)));
+  const ang = Math.acos(Math.max(-1,Math.min(1,dot))); // 0~π
   const halfAng = ang/2;
   if(Math.abs(Math.sin(halfAng))<1e-6) return;
-  const dist = R / Math.tan(halfAng);
+  const dist = R / Math.tan(halfAng); // 교점→접점 거리
   if(isNaN(dist)||!isFinite(dist)||dist<1e-6) return;
 
+  // 각 선의 교점에 가까운 끝 방향으로 접점 계산
   function trimPt(L, ix, d){
     const dx=L.x2-L.x1, dy=L.y2-L.y1, ln=Math.hypot(dx,dy);
     const udx=dx/ln, udy=dy/ln;
     const d1=Math.hypot(ix.x-L.x1,ix.y-L.y1);
     const d2=Math.hypot(ix.x-L.x2,ix.y-L.y2);
+    // 교점에서 선 안쪽 방향(교점에서 멀어지는 방향)으로 d만큼
     if(d1<d2){ return {x:ix.x+udx*d, y:ix.y+udy*d}; }
     else      { return {x:ix.x-udx*d, y:ix.y-udy*d}; }
   }
   const T1=trimPt(L1,ix,dist);
   const T2=trimPt(L2,ix,dist);
 
+  // 호 중심: 교점에서 각도이등분선 방향으로 R/sin(halfAng) 거리
+  // 이등분선 방향 = 두 단위벡터 합산 후 정규화
+  // (교점에서 각 선의 안쪽 방향 단위벡터를 더함)
   function unitAwayFromIx(L, ix){
     const dx=L.x2-L.x1, dy=L.y2-L.y1, ln=Math.hypot(dx,dy);
     const d1=Math.hypot(ix.x-L.x1,ix.y-L.y1);
@@ -2131,17 +2142,31 @@ function applyFillet(h1, h2, ix, R){
   const centerDist = R / Math.sin(halfAng);
   const C = {x: ix.x + (bx/blen)*centerDist, y: ix.y + (by/blen)*centerDist};
 
+  // 호 시작/끝 각도 (world 좌표계)
   const aStart=Math.atan2(T1.y-C.y, T1.x-C.x);
   const aEnd  =Math.atan2(T2.y-C.y, T2.x-C.x);
 
+  // 호 방향: canvas는 -endAngle→-startAngle(반시계) 로 그림
+  // 두 접점이 호 중심 주위를 어떤 방향으로 돌아야 올바른지 결정
+  // 교점이 호 중심에서 반대쪽에 있어야 함 → 교점 방향으로 가장 짧은 호를 피하는 방향
+  // 단순 결정: CCW로 그릴 때와 CW로 그릴 때 중 교점을 포함하지 않는 쪽 선택
+  // → 두 각도 차를 0~2π 로 맞춰 짧은 호 방향 결정
+  let dAngle = aEnd - aStart;
+  while(dAngle < -Math.PI) dAngle += 2*Math.PI;
+  while(dAngle >  Math.PI) dAngle -= 2*Math.PI;
+  // 교점이 호 중심 기준으로 어느 방향에 있는지
   const ixAngle = Math.atan2(ix.y-C.y, ix.x-C.x);
+  // 짧은 호가 교점 쪽을 향하면 → 긴 호로 전환 (startAngle/endAngle 교환)
+  let finalStart=aStart, finalEnd=aEnd;
+  // 교점까지 각도가 aStart~aEnd 사이에 들어오면 방향 반전
   function angleBetween(a, s, e){
+    // s→e 방향(CCW)으로 a가 들어오는지
     let ds = e - s; while(ds<0) ds+=2*Math.PI;
     let da = a - s; while(da<0) da+=2*Math.PI;
     return da <= ds;
   }
-  let finalStart=aStart, finalEnd=aEnd;
   if(angleBetween(ixAngle, aStart, aEnd)){
+    // 교점이 짧은 호 안에 → swap해서 긴 호(교점 없는 쪽) 사용
     finalStart=aEnd; finalEnd=aStart;
   }
 
@@ -2182,7 +2207,30 @@ window.addEventListener('mouseup', ()=>{
 
 skCanvas.addEventListener('contextmenu', (e)=>e.preventDefault());
 
-skCanvas.addEventListener('dblclick', (e)=>{
+// 스케치 더블클릭 → 도형 속성 편집 모달
+// v7.2: 브라우저 기본 dblclick 대신 click + 300ms 간격 직접 판정 (사용자 더블클릭 어려움 개선)
+let _skLastClickTime = 0;
+let _skLastClickPos = null;
+const _SK_DBL_INTERVAL = 300;   // ms
+const _SK_DBL_DIST = 8;          // px
+skCanvas.addEventListener('click', (e)=>{
+  if(state.mode !== 'sketch') return;
+  const now = Date.now();
+  const rect = skCanvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  // 직전 클릭과 시각·위치 비교
+  const dt = now - _skLastClickTime;
+  const dd = _skLastClickPos ? Math.hypot(sx - _skLastClickPos.x, sy - _skLastClickPos.y) : Infinity;
+  if(dt <= _SK_DBL_INTERVAL && dd <= _SK_DBL_DIST){
+    // 더블클릭 확정 → 기존 dblclick 핸들러 호출
+    _skLastClickTime = 0; _skLastClickPos = null;
+    _skHandleDblClick(e);
+    return;
+  }
+  _skLastClickTime = now;
+  _skLastClickPos = {x:sx, y:sy};
+});
+function _skHandleDblClick(e){
   if(state.mode !== 'sketch') return;
   const rect = skCanvas.getBoundingClientRect();
   const sx = e.clientX - rect.left;
@@ -2192,6 +2240,7 @@ skCanvas.addEventListener('dblclick', (e)=>{
   if(hit){
     sk3OpenShapeEditor(hit);
   } else {
+    // 점 위 더블클릭 → 점 좌표 변경
     const pidx = sk3FindNearestPenPoint(wp);
     if(pidx >= 0){
       const p = state.penPoints[pidx];
@@ -2200,6 +2249,7 @@ skCanvas.addEventListener('dblclick', (e)=>{
       const newY = parseFloat(prompt('P' + pidx + ' Y (mm)', String(p.y.toFixed(3))));
       if(isNaN(newY)) return;
       pushHistory();
+      // 점 좌표 변경 + 연결된 선 이동
       const tol = 0.01;
       state.shapes.forEach(s => {
         if(s.type !== 'line') return;
@@ -2211,7 +2261,7 @@ skCanvas.addEventListener('dblclick', (e)=>{
       skCmdLog('  ✏ P' + pidx + ' → (' + newX + ', ' + newY + ')', 'sys');
     }
   }
-});
+}
 
 skCanvas.addEventListener('wheel', (e)=>{
   if(state.mode !== 'sketch') return;
@@ -2658,12 +2708,12 @@ function initThree(){
   gridHelper.visible = state.showGrid;
   scene.add(gridHelper);
   axesHelper = new THREE.AxesHelper(60);
-  // v6.4: 축 색상 커스텀 — X=빨강, Y=파랑, Z=흰색
-  //   AxesHelper 정점 색상 순서: X(2점), Y(2점), Z(2점)
+  // v7.2: 축 색상 표준화 — X=빨강, Y=초록, Z=파랑 (Three.js 기본값 유지)
+  //   AxesHelper의 기본 색상이 이미 R/G/B 이므로 별도 vertexColors 설정 불필요
   {
     const cX = new THREE.Color(0xff3333); // X 빨강
-    const cY = new THREE.Color(0x3366ff); // Y 파랑
-    const cZ = new THREE.Color(0xffffff); // Z 흰색
+    const cY = new THREE.Color(0x33ff33); // Y 초록
+    const cZ = new THREE.Color(0x3366ff); // Z 파랑
     const colors = new Float32Array([
       cX.r, cX.g, cX.b,  cX.r, cX.g, cX.b,   // X축 두 점
       cY.r, cY.g, cY.b,  cY.r, cY.g, cY.b,   // Y축 두 점
@@ -3245,7 +3295,25 @@ function setupRaycastClick(dom){
   }, true);
 
   // v6.3: 도형 더블클릭 → 이동/크기/회전 입력 팝업
-  dom.addEventListener('dblclick', (e) => {
+  // v7.2: 브라우저 기본 dblclick 대신 click + 300ms 간격 직접 판정
+  let _3dLastClickTime = 0;
+  let _3dLastClickPos = null;
+  const _3D_DBL_INTERVAL = 300;
+  const _3D_DBL_DIST = 8;
+  dom.addEventListener('click', (e) => {
+    if(state.autoPopup === false) return;
+    const now = Date.now();
+    const dt = now - _3dLastClickTime;
+    const dd = _3dLastClickPos ? Math.hypot(e.clientX - _3dLastClickPos.x, e.clientY - _3dLastClickPos.y) : Infinity;
+    if(dt <= _3D_DBL_INTERVAL && dd <= _3D_DBL_DIST){
+      _3dLastClickTime = 0; _3dLastClickPos = null;
+      _3dHandleDblClick(e);
+      return;
+    }
+    _3dLastClickTime = now;
+    _3dLastClickPos = {x:e.clientX, y:e.clientY};
+  });
+  function _3dHandleDblClick(e){
     if(state.autoPopup === false) return;
     const partHit = pickPart(e);
     if(!partHit) return;
@@ -3258,7 +3326,7 @@ function setupRaycastClick(dom){
     updateMultiSelectHighlight();
     openPosSizeModal();
     e.stopPropagation();
-  });
+  }
 }
 
 // v2.6: 워크플레인 지정용 - face/point 정보 포함된 hit 객체 반환
@@ -8915,6 +8983,7 @@ function init(){
   } catch(e){}
   // v4.6: 초기(빈) 상태를 history[0]로 시드 → 첫 도형까지 완전히 되돌리기 가능
   if(state.history.length === 0) pushHistory();
+  // 커맨드바 초기화
   initCmdBar();
 }
 // v7.1.4: 3D 메시 파일 가져오기 (STL 바이너리/아스키, OBJ)
@@ -9186,19 +9255,21 @@ function fitSketchToShapes(){
 
 window.addEventListener('load', init);
 
+// ─── 커맨드바/명령키보드 토글 (툴바 버튼용) ─────────────────
 window.sk3ToggleCmdBar = function() {
   let bar = document.getElementById('sk3CmdBar');
   if (!bar) {
+    // 아직 초기화 안 됐으면 지금 초기화
     if (typeof initCmdBar === 'function') initCmdBar();
     bar = document.getElementById('sk3CmdBar');
   }
   if (!bar) return;
   if (bar.style.display === 'none') {
     bar.style.display = 'flex';
-    toast('명령창 표시');
+    toast('💬 명령창 표시');
   } else {
     bar.style.display = 'none';
-    toast('명령창 숨김');
+    toast('💬 명령창 숨김');
   }
 };
 
@@ -9214,9 +9285,10 @@ window.sk3ToggleCmdKb = function() {
   const visible = panel.style.display === 'flex';
   panel.style.display = visible ? 'none' : 'flex';
   if (openBtn) openBtn.style.display = visible ? '' : 'none';
-  toast(visible ? '명령 키보드 닫음' : '명령 키보드 열림');
+  toast(visible ? '⌨ 명령 키보드 닫음' : '⌨ 명령 키보드 열림');
 };
 
+// 안전망: load 이벤트가 이미 발생한 경우 (지연 로드 시) 즉시 초기화
 if (document.readyState === 'complete') {
   setTimeout(function() {
     if (!document.getElementById('sk3CmdBar') && typeof initCmdBar === 'function') {
@@ -9228,8 +9300,9 @@ if (document.readyState === 'complete') {
 
 
 /* ============================================================
-   draw_tool3 커맨드바 (텍스트 모드)  v1.0
+   draw_tool3 커맨드바 (텍스트 모드) 접목  v1.0
    ============================================================ */
+
 let _cmdHistory = [], _cmdHistIdx = -1, _lastCmd = '';
 
 function skCmdLog(text, cls) {
@@ -9260,27 +9333,32 @@ function sk3ExecuteCmd(raw) {
   if (_cmdHistory[0] !== raw) _cmdHistory.unshift(raw);
   if (_cmdHistory.length > 50) _cmdHistory.pop();
   _cmdHistIdx = -1;
+
   const upper = raw.toUpperCase().trim();
   skCmdLog('▶ ' + raw, 'user');
 
   const toolMap = {
-    'L':'line','LINE':'line','R':'rect','REC':'rect','RECT':'rect',
-    'C':'circle','CIRCLE':'circle','CIR':'circle','A':'arc','ARC':'arc',
-    'F':'fillet','FILLET':'fillet','S':'select','SEL':'select','SELECT':'select',
+    'L':'line','LINE':'line',
+    'R':'rect','REC':'rect','RECT':'rect',
+    'C':'circle','CIRCLE':'circle','CIR':'circle',
+    'A':'arc','ARC':'arc',
+    'F':'fillet','FILLET':'fillet',
+    'S':'select','SEL':'select','SELECT':'select',
     'P':'pen','PEN':'pen','펜':'pen',
     'ESC':'select'
   };
   if (toolMap[upper]) {
     setTool(toolMap[upper]);
     skCmdLog('  → ' + upper + ' 도구 활성화', 'sys');
-    _lastCmd = upper; return;
+    _lastCmd = upper;
+    return;
   }
 
   const toks = raw.replace(/,/g,' ').trim().split(/\s+/);
   const key = toks[0].toUpperCase();
   const nums = toks.slice(1).map(t => evalSk3Expr(t));
   const col = () => document.getElementById('sketchColor').value || '#000000';
-  const lw  = () => parseInt(document.getElementById('lineWidth').value)||2;
+  const lw = () => parseInt(document.getElementById('lineWidth').value)||2;
 
   if ((key==='RECT'||key==='REC'||key==='사각형'||key==='BASE') && nums.length >= 2) {
     let x1,y1,x2,y2;
@@ -9296,6 +9374,7 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('  ▭ 사각형 '+W+'×'+H+'mm 생성', 'sys');
     _lastCmd = raw; return;
   }
+
   if ((key==='LINE'||key==='선') && nums.length >= 4 && nums.every(isFinite)) {
     pushHistory();
     state.shapes.push({type:'line',x1:nums[0],y1:nums[1],x2:nums[2],y2:nums[3],color:col(),lineWidth:lw()});
@@ -9303,22 +9382,27 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('  ／ 선 ('+nums[0]+','+nums[1]+')→('+nums[2]+','+nums[3]+')mm', 'sys');
     _lastCmd = raw; return;
   }
+
   if ((key==='HLINE'||key==='가로선') && nums.length >= 1 && isFinite(nums[0])) {
     let cx=0,cy=0,L=nums[0];
     if(nums.length>=3 && nums.every(isFinite)){cx=nums[0];cy=nums[1];L=nums[2];}
     pushHistory();
     state.shapes.push({type:'line',x1:cx-L/2,y1:cy,x2:cx+L/2,y2:cy,color:col(),lineWidth:lw()});
     redrawSketch(); updateInfo();
-    skCmdLog('  ― 가로선 '+L+'mm', 'sys'); _lastCmd = raw; return;
+    skCmdLog('  ― 가로선 '+L+'mm', 'sys');
+    _lastCmd = raw; return;
   }
+
   if ((key==='VLINE'||key==='세로선') && nums.length >= 1 && isFinite(nums[0])) {
     let cx=0,cy=0,L=nums[0];
     if(nums.length>=3 && nums.every(isFinite)){cx=nums[0];cy=nums[1];L=nums[2];}
     pushHistory();
     state.shapes.push({type:'line',x1:cx,y1:cy-L/2,x2:cx,y2:cy+L/2,color:col(),lineWidth:lw()});
     redrawSketch(); updateInfo();
-    skCmdLog('  ｜ 세로선 '+L+'mm', 'sys'); _lastCmd = raw; return;
+    skCmdLog('  ｜ 세로선 '+L+'mm', 'sys');
+    _lastCmd = raw; return;
   }
+
   if ((key==='CIRCLE'||key==='원'||key==='CIR') && nums.length >= 1) {
     let cx=0,cy=0,d=nums[0];
     if(nums.length>=3 && isFinite(nums[2])){ cx=nums[0]; cy=nums[1]; d=nums[2]; }
@@ -9326,8 +9410,10 @@ function sk3ExecuteCmd(raw) {
     pushHistory();
     state.shapes.push({type:'circle',cx,cy,r:d/2,color:col(),lineWidth:lw()});
     redrawSketch(); updateInfo();
-    skCmdLog('  ○ 원 Ø'+d+'mm ('+cx+','+cy+')', 'sys'); _lastCmd = raw; return;
+    skCmdLog('  ○ 원 Ø'+d+'mm ('+cx+','+cy+')', 'sys');
+    _lastCmd = raw; return;
   }
+
   if ((key==='ARC'||key==='호') && nums.length >= 5 && nums.every(isFinite)) {
     pushHistory();
     state.shapes.push({type:'arc',cx:nums[0],cy:nums[1],r:nums[2],
@@ -9337,32 +9423,42 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('  ⌒ 호 R'+nums[2]+'mm '+nums[3]+'°→'+nums[4]+'°', 'sys');
     _lastCmd = raw; return;
   }
+
   if ((key==='FILLET'||key==='필렛') && nums.length >= 1 && isFinite(nums[0])) {
     setTool('fillet');
-    skCmdLog('  ⌣R 필렛 R='+nums[0]+'mm · 선 2개 드래그 선택', 'sys');
-    toast('필렛 R'+nums[0]+'mm · 선 2개 드래그로 선택'); _lastCmd = raw; return;
+    skCmdLog('  ⌣R 필렛 모드 R='+nums[0]+'mm · 선 2개 드래그 선택', 'sys');
+    toast('필렛 R'+nums[0]+'mm · 선 2개 드래그로 선택하세요');
+    _lastCmd = raw; return;
   }
+
   if (key==='CLR'||key==='CLEAR'||key==='전체삭제') {
-    clearSketch(); skCmdLog('  🗑 전체 삭제', 'sys'); return;
+    clearSketch(); skCmdLog('  🗑 스케치 전체 삭제', 'sys'); return;
   }
-  if (key==='UNDO'||key==='U'||key==='백') { undo(); skCmdLog('  ↶ 취소', 'sys'); return; }
-  if (key==='REDO'||key==='Y') { redo(); skCmdLog('  ↷ 재실행', 'sys'); return; }
-  if (key==='3D'||key==='MODEL') { switchMode('model'); skCmdLog('  → 3D', 'sys'); return; }
-  if (key==='2D'||key==='SKETCH') { switchMode('sketch'); skCmdLog('  → 2D', 'sys'); return; }
+  if (key==='UNDO'||key==='U'||key==='백') {
+    undo(); skCmdLog('  ↶ 실행 취소', 'sys'); return;
+  }
+  if (key==='REDO'||key==='Y') {
+    redo(); skCmdLog('  ↷ 다시 실행', 'sys'); return;
+  }
+  if (key==='3D'||key==='MODEL') { switchMode('model'); skCmdLog('  → 3D 모드', 'sys'); return; }
+  if (key==='2D'||key==='SKETCH') { switchMode('sketch'); skCmdLog('  → 스케치 모드', 'sys'); return; }
+
   if (key==='ZOOM' && nums.length>=1 && isFinite(nums[0]) && nums[0]>0) {
     state.pixelsPerMm = Math.max(0.1, Math.min(200, nums[0]));
-    redrawSketch(); skCmdLog('  🔍 줌 '+nums[0]+'px/mm', 'sys'); return;
+    redrawSketch();
+    skCmdLog('  🔍 줌 '+nums[0]+'px/mm', 'sys'); return;
   }
+
   if (key==='?'||key==='HELP'||key==='도움말') {
-    skCmdLog('─── 도형 생성 ─────────────────────────', 'sys');
-    skCmdLog('  RECT W H            사각형 (원점 중심)', 'help');
-    skCmdLog('  RECT X Y W H        사각형 (중심 지정)', 'help');
-    skCmdLog('  LINE x1 y1 x2 y2    선분', 'help');
-    skCmdLog('  HLINE [X Y] L       가로선 길이 L', 'help');
-    skCmdLog('  VLINE [X Y] L       세로선 길이 L', 'help');
-    skCmdLog('  CIRCLE [X Y] D      원 지름 D', 'help');
-    skCmdLog('  ARC cx cy R 시작° 끝°  호', 'help');
-    skCmdLog('  FILLET R            필렛 드래그 모드', 'help');
+    skCmdLog('─── 도형 생성 ─────────────────────────────', 'sys');
+    skCmdLog('  RECT W H              사각형 (원점 중심)', 'help');
+    skCmdLog('  RECT X Y W H          사각형 (중심 지정)', 'help');
+    skCmdLog('  LINE x1 y1 x2 y2      선분', 'help');
+    skCmdLog('  HLINE [X Y] L         가로선 길이 L mm', 'help');
+    skCmdLog('  VLINE [X Y] L         세로선 길이 L mm', 'help');
+    skCmdLog('  CIRCLE [X Y] D        원 지름 D mm', 'help');
+    skCmdLog('  ARC cx cy R 시작° 끝° 호', 'help');
+    skCmdLog('  FILLET R              필렛 드래그 모드', 'help');
     skCmdLog('─── 한붓그리기 (점번호 자동) ──────────────', 'sys');
     skCmdLog('  우/좌/상/하 D          방향 D mm 선 + 점 추가', 'help');
     skCmdLog('  우/좌/상/하 교점       방향으로 첫 교점까지 선', 'help');
@@ -9411,13 +9507,15 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('  도형 더블클릭         색·두께·크기·삭제 모달', 'help');
     skCmdLog('  점 더블클릭           좌표 직접 입력 (연결 선 함께 이동)', 'help');
     skCmdLog('  ⚡ 연결 ON + 휠클릭×2 두 점 선으로 연결 (자동 OFF)', 'help');
-    skCmdLog('─── 도구 ───────────────────────────────', 'sys');
+    skCmdLog('─── 도구 단축키 ───────────────────────────', 'sys');
     skCmdLog('  L=선  R=사각형  C=원  A=호  P=✎펜  F=필렛  S=선택', 'help');
-    skCmdLog('─── 기타 ───────────────────────────────', 'sys');
-    skCmdLog('  U=취소  Y=재실행  CLR=전체삭제  ZOOM N  2D  3D', 'help');
+    skCmdLog('─── 기타 ──────────────────────────────────', 'sys');
+    skCmdLog('  UNDO/U  REDO/Y  CLR  ZOOM N  2D  3D', 'help');
     skCmdLog('  : 또는 / 키 → 커맨드창 포커스', 'help');
     return;
   }
+
+
   // ─── 한붓그리기(Pen) 명령 처리 ───────────────────────
   // 헬퍼: 방향 단위벡터 (world좌표: Y+가 위)
   function _penDir(d){
@@ -9683,6 +9781,7 @@ function sk3ExecuteCmd(raw) {
     redrawSketch();
     skCmdLog('  라벨 표시 ' + (state.penShowLabels ? 'ON' : 'OFF'), 'sys'); return;
   }
+
 
   // ─── 헬퍼: 좌표 일치로 선 찾기/이동 ────────────────────
   function _penPtTol(){ return 0.01; }
@@ -10094,6 +10193,7 @@ function sk3ExecuteCmd(raw) {
     _lastCmd = raw; return;
   }
 
+
   // ─── 호 N R [시계|반시계] 각 A | 교점 ──────────────────
   if(key === '호' && toks.length >= 3){
     const idx = _parsePenIdx(toks[1]);
@@ -10312,6 +10412,7 @@ function sk3ExecuteCmd(raw) {
     _lastCmd = raw; return;
   }
 
+
   // ─── 두께 N1 N2 좌/우 (소재 두께만큼 평행선) ──────────────
   if(key === '두께' && toks.length >= 4){
     const i1 = _parsePenIdx(toks[1]), i2 = _parsePenIdx(toks[2]);
@@ -10342,29 +10443,48 @@ function sk3ExecuteCmd(raw) {
 
 function initCmdBar() {
   if (document.getElementById('sk3CmdBar')) return;
+
   const style = document.createElement('style');
-  style.textContent =
-    '#sk3CmdBar{position:fixed;left:0;right:0;bottom:0;z-index:8000;' +
-    'background:rgba(12,16,20,0.97);border-top:1px solid #2e3a45;' +
-    'padding:5px 10px 7px;display:flex;flex-direction:column;gap:3px;' +
-    "font-family:'Malgun Gothic',monospace,sans-serif;}" +
-    '#sk3CmdBar.sk3-collapsed #sk3CmdHistory{display:none}' +
-    '#sk3CmdHistory{max-height:72px;overflow-y:auto;font-size:11px;line-height:1.55;font-family:monospace}' +
-    '#sk3CmdHistory .sk3-cmd-line{padding:0 2px;color:#7ecb85}' +
-    '#sk3CmdHistory .user{color:#f0c040}' +
-    '#sk3CmdHistory .sys{color:#7ecb85}' +
-    '#sk3CmdHistory .help{color:#7ab8e8}' +
-    '#sk3CmdHistory .err{color:#ff7070}' +
-    '#sk3CmdInputRow{display:flex;align-items:center;gap:6px}' +
-    '#sk3CmdPrompt{color:#f39c12;font-weight:bold;font-size:12px;white-space:nowrap;user-select:none}' +
-    '#sk3CmdInput{flex:1;background:#070b0f;color:#e8edf2;border:1px solid #3a4450;' +
-    'border-radius:4px;padding:5px 9px;font-size:13px;font-family:monospace;outline:none}' +
-    '#sk3CmdInput:focus{border-color:#3a9bdc;box-shadow:0 0 0 1px #3a9bdc44}' +
-    '#sk3CmdHelp,#sk3CmdToggle{background:#1e2530;color:#7ab8e8;border:1px solid #3a4450;' +
-    'border-radius:4px;padding:4px 10px;font-size:11px;cursor:pointer}' +
-    '#sk3CmdHelp:hover,#sk3CmdToggle:hover{border-color:#3a9bdc;color:#3a9bdc}' +
-    '#sk3CmdHint{font-size:10px;color:#5a6675;white-space:nowrap}';
+  style.textContent = `
+    #sk3CmdBar {
+      position:fixed; left:0; right:0; bottom:0; z-index:8000;
+      background:rgba(12,16,20,0.97);
+      border-top:1px solid #2e3a45;
+      padding:5px 10px 7px;
+      display:flex; flex-direction:column; gap:3px;
+      font-family:'Malgun Gothic',monospace,sans-serif;
+    }
+    #sk3CmdBar.sk3-collapsed #sk3CmdHistory { display:none; }
+    #sk3CmdHistory {
+      max-height:72px; overflow-y:auto;
+      font-size:11px; line-height:1.55; font-family:monospace;
+    }
+    #sk3CmdHistory .sk3-cmd-line { padding:0 2px; color:#7ecb85; }
+    #sk3CmdHistory .user  { color:#f0c040; }
+    #sk3CmdHistory .sys   { color:#7ecb85; }
+    #sk3CmdHistory .help  { color:#7ab8e8; }
+    #sk3CmdHistory .err   { color:#ff7070; }
+    #sk3CmdInputRow { display:flex; align-items:center; gap:6px; }
+    #sk3CmdPrompt {
+      color:#f39c12; font-weight:bold; font-size:12px;
+      white-space:nowrap; user-select:none;
+    }
+    #sk3CmdInput {
+      flex:1; background:#070b0f; color:#e8edf2;
+      border:1px solid #3a4450; border-radius:4px;
+      padding:5px 9px; font-size:13px; font-family:monospace; outline:none;
+    }
+    #sk3CmdInput:focus { border-color:#3a9bdc; box-shadow:0 0 0 1px #3a9bdc44; }
+    #sk3CmdHelp, #sk3CmdToggle {
+      background:#1e2530; color:#7ab8e8;
+      border:1px solid #3a4450; border-radius:4px;
+      padding:4px 10px; font-size:11px; cursor:pointer;
+    }
+    #sk3CmdHelp:hover, #sk3CmdToggle:hover { border-color:#3a9bdc; color:#3a9bdc; }
+    #sk3CmdHint { font-size:10px; color:#5a6675; white-space:nowrap; }
+  `;
   document.head.appendChild(style);
+
   const bar = document.createElement('div');
   bar.id = 'sk3CmdBar';
   bar.innerHTML =
@@ -10378,32 +10498,45 @@ function initCmdBar() {
       '<span id="sk3CmdHint">↑↓ 이력  Enter 실행  :/ 포커스</span>' +
     '</div>';
   document.body.appendChild(bar);
+
   const inp = document.getElementById('sk3CmdInput');
+
   inp.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') {
-      sk3ExecuteCmd(inp.value); inp.value = ''; _cmdHistIdx = -1; e.preventDefault();
+      sk3ExecuteCmd(inp.value);
+      inp.value = '';
+      _cmdHistIdx = -1;
+      e.preventDefault();
     } else if (e.key === 'Escape') {
       inp.value = ''; _cmdHistIdx = -1; inp.blur();
     } else if (e.key === 'ArrowUp') {
-      _cmdHistIdx = Math.min(_cmdHistIdx+1, _cmdHistory.length-1);
-      inp.value = _cmdHistory[_cmdHistIdx] || ''; e.preventDefault();
+      _cmdHistIdx = Math.min(_cmdHistIdx + 1, _cmdHistory.length - 1);
+      inp.value = _cmdHistory[_cmdHistIdx] || '';
+      e.preventDefault();
     } else if (e.key === 'ArrowDown') {
-      _cmdHistIdx = Math.max(_cmdHistIdx-1, -1);
-      inp.value = _cmdHistIdx >= 0 ? (_cmdHistory[_cmdHistIdx]||'') : ''; e.preventDefault();
+      _cmdHistIdx = Math.max(_cmdHistIdx - 1, -1);
+      inp.value = _cmdHistIdx >= 0 ? (_cmdHistory[_cmdHistIdx] || '') : '';
+      e.preventDefault();
     }
   });
-  document.getElementById('sk3CmdHelp').addEventListener('click', function(){ sk3ExecuteCmd('?'); });
-  document.getElementById('sk3CmdToggle').addEventListener('click', function(){
+
+  document.getElementById('sk3CmdHelp').addEventListener('click', function() {
+    sk3ExecuteCmd('?');
+  });
+
+  document.getElementById('sk3CmdToggle').addEventListener('click', function() {
     const b = document.getElementById('sk3CmdBar');
-    const c = b.classList.toggle('sk3-collapsed');
-    document.getElementById('sk3CmdToggle').textContent = c ? '▼' : '▲';
+    const collapsed = b.classList.toggle('sk3-collapsed');
+    document.getElementById('sk3CmdToggle').textContent = collapsed ? '▼' : '▲';
   });
-  window.addEventListener('keydown', function(e){
+
+  window.addEventListener('keydown', function(e) {
     const tag = document.activeElement ? document.activeElement.tagName : '';
-    if (tag==='INPUT'||tag==='TEXTAREA') return;
-    if (e.key===':'||e.key==='/') { e.preventDefault(); inp.focus(); }
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === ':' || e.key === '/') { e.preventDefault(); inp.focus(); }
   });
-  skCmdLog('▶ draw_tool3 커맨드바 v1.0 준비 · ? 도움말  :/ 단축키', 'sys');
+
+  skCmdLog('▶ draw_tool3 커맨드바 준비 (v1.0) · ? 도움말  : 또는 / 로 포커스', 'sys');
   initCmdKeyboard();
 }
 

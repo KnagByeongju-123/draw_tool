@@ -1176,7 +1176,29 @@ window.addEventListener('mouseup', ()=>{
 skCanvas.addEventListener('contextmenu', (e)=>e.preventDefault());
 
 // 스케치 더블클릭 → 도형 속성 편집 모달
-skCanvas.addEventListener('dblclick', (e)=>{
+// v7.2: 브라우저 기본 dblclick 대신 click + 300ms 간격 직접 판정 (사용자 더블클릭 어려움 개선)
+let _skLastClickTime = 0;
+let _skLastClickPos = null;
+const _SK_DBL_INTERVAL = 300;   // ms
+const _SK_DBL_DIST = 8;          // px
+skCanvas.addEventListener('click', (e)=>{
+  if(state.mode !== 'sketch') return;
+  const now = Date.now();
+  const rect = skCanvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+  // 직전 클릭과 시각·위치 비교
+  const dt = now - _skLastClickTime;
+  const dd = _skLastClickPos ? Math.hypot(sx - _skLastClickPos.x, sy - _skLastClickPos.y) : Infinity;
+  if(dt <= _SK_DBL_INTERVAL && dd <= _SK_DBL_DIST){
+    // 더블클릭 확정 → 기존 dblclick 핸들러 호출
+    _skLastClickTime = 0; _skLastClickPos = null;
+    _skHandleDblClick(e);
+    return;
+  }
+  _skLastClickTime = now;
+  _skLastClickPos = {x:sx, y:sy};
+});
+function _skHandleDblClick(e){
   if(state.mode !== 'sketch') return;
   const rect = skCanvas.getBoundingClientRect();
   const sx = e.clientX - rect.left;
@@ -1207,7 +1229,7 @@ skCanvas.addEventListener('dblclick', (e)=>{
       skCmdLog('  ✏ P' + pidx + ' → (' + newX + ', ' + newY + ')', 'sys');
     }
   }
-});
+}
 
 skCanvas.addEventListener('wheel', (e)=>{
   if(state.mode !== 'sketch') return;
@@ -1654,12 +1676,12 @@ function initThree(){
   gridHelper.visible = state.showGrid;
   scene.add(gridHelper);
   axesHelper = new THREE.AxesHelper(60);
-  // v6.4: 축 색상 커스텀 — X=빨강, Y=파랑, Z=흰색
-  //   AxesHelper 정점 색상 순서: X(2점), Y(2점), Z(2점)
+  // v7.2: 축 색상 표준화 — X=빨강, Y=초록, Z=파랑 (Three.js 기본값 유지)
+  //   AxesHelper의 기본 색상이 이미 R/G/B 이므로 별도 vertexColors 설정 불필요
   {
     const cX = new THREE.Color(0xff3333); // X 빨강
-    const cY = new THREE.Color(0x3366ff); // Y 파랑
-    const cZ = new THREE.Color(0xffffff); // Z 흰색
+    const cY = new THREE.Color(0x33ff33); // Y 초록
+    const cZ = new THREE.Color(0x3366ff); // Z 파랑
     const colors = new Float32Array([
       cX.r, cX.g, cX.b,  cX.r, cX.g, cX.b,   // X축 두 점
       cY.r, cY.g, cY.b,  cY.r, cY.g, cY.b,   // Y축 두 점
@@ -2241,7 +2263,25 @@ function setupRaycastClick(dom){
   }, true);
 
   // v6.3: 도형 더블클릭 → 이동/크기/회전 입력 팝업
-  dom.addEventListener('dblclick', (e) => {
+  // v7.2: 브라우저 기본 dblclick 대신 click + 300ms 간격 직접 판정
+  let _3dLastClickTime = 0;
+  let _3dLastClickPos = null;
+  const _3D_DBL_INTERVAL = 300;
+  const _3D_DBL_DIST = 8;
+  dom.addEventListener('click', (e) => {
+    if(state.autoPopup === false) return;
+    const now = Date.now();
+    const dt = now - _3dLastClickTime;
+    const dd = _3dLastClickPos ? Math.hypot(e.clientX - _3dLastClickPos.x, e.clientY - _3dLastClickPos.y) : Infinity;
+    if(dt <= _3D_DBL_INTERVAL && dd <= _3D_DBL_DIST){
+      _3dLastClickTime = 0; _3dLastClickPos = null;
+      _3dHandleDblClick(e);
+      return;
+    }
+    _3dLastClickTime = now;
+    _3dLastClickPos = {x:e.clientX, y:e.clientY};
+  });
+  function _3dHandleDblClick(e){
     if(state.autoPopup === false) return;
     const partHit = pickPart(e);
     if(!partHit) return;
@@ -2254,7 +2294,7 @@ function setupRaycastClick(dom){
     updateMultiSelectHighlight();
     openPosSizeModal();
     e.stopPropagation();
-  });
+  }
 }
 
 // v2.6: 워크플레인 지정용 - face/point 정보 포함된 hit 객체 반환

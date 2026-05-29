@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.45 (라이브 단일본)</title>
+<title>도면 작도기 Rev.19.46 (라이브 단일본)</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -366,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.45</h1>
+  <h1>📐 도면 작도기 Rev.19.46</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -6779,6 +6779,17 @@ function runBreakAllIntersections() {
       pts = [{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2}]; closed = true;
     } else if (s.type === 'polyline' && Array.isArray(s.points) && s.points.length>=2){
       pts = s.points.map(p=>({x:p.x,y:p.y})); closed = !!s.closed;
+    } else if (s.type === 'ellipse' && s.cx != null && s.rx != null && s.ry != null){
+      // Rev.19.46: 회전 타원 → polyline 64각형 근사 분해 후 분할
+      const N = 64;
+      const rot = s.rotation || 0, co = Math.cos(rot), si = Math.sin(rot);
+      pts = [];
+      for (let i=0;i<N;i++){
+        const t = (i/N) * Math.PI * 2;
+        const lx = s.rx * Math.cos(t), ly = s.ry * Math.sin(t);
+        pts.push({ x: s.cx + lx*co - ly*si, y: s.cy + lx*si + ly*co });
+      }
+      closed = true;
     }
     if (!pts) continue;
     explodeIds.push(s.id);
@@ -6871,6 +6882,31 @@ function runBreakAllIntersections() {
       const sq=Math.sqrt(disc);
       [(-B-sq)/(2*A),(-B+sq)/(2*A)].forEach(t=>{
         if(t>=-1e-6&&t<=1+1e-6){ const x=L.p1.x+t*dx,y=L.p1.y+t*dy; c._angs.push(Math.atan2(y-c.cy, x-c.cx)); }
+      });
+    }
+  }
+
+  // Rev.19.46: 원-원/원-호/호-호 교차각도 수집 → 호 분할에 사용
+  for (let i = 0; i < circs.length; i++){
+    for (let j = i+1; j < circs.length; j++){
+      const c1 = circs[i], c2 = circs[j];
+      const dx = c2.cx - c1.cx, dy = c2.cy - c1.cy;
+      const d = Math.hypot(dx, dy);
+      if (d < 1e-9) continue;                              // 동심원 → 무한 교점 무시
+      if (d > c1.r + c2.r + 1e-6) continue;                // 분리
+      if (d < Math.abs(c1.r - c2.r) - 1e-6) continue;      // 한쪽 포함
+      const a = (c1.r*c1.r - c2.r*c2.r + d*d) / (2*d);
+      const hSq = c1.r*c1.r - a*a;
+      if (hSq < 0) continue;
+      const h = Math.sqrt(hSq);
+      const mx = c1.cx + (a*dx)/d, my = c1.cy + (a*dy)/d;
+      const ipts = [
+        { x: mx + h*dy/d, y: my - h*dx/d },
+        { x: mx - h*dy/d, y: my + h*dx/d }
+      ];
+      ipts.forEach(p => {
+        if (onArc(c1, p.x, p.y)){ c1._angs.push(Math.atan2(p.y-c1.cy, p.x-c1.cx)); intersectionCount++; }
+        if (onArc(c2, p.x, p.y)){ c2._angs.push(Math.atan2(p.y-c2.cy, p.x-c2.cx)); }
       });
     }
   }

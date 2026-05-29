@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>도면 작도기 Rev.19.48</title>
+<title>도면 작도기 Rev.19.54</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Malgun Gothic', sans-serif; background: #2b2b2b; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -366,7 +366,7 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
 <body>
 
 <header>
-  <h1>📐 도면 작도기 Rev.19.48</h1>
+  <h1>📐 도면 작도기 Rev.19.54</h1>
   <span class="ver">단위 1mm=300px</span>
   <span class="cvstat" id="cvStat">OpenCV 로딩 중...</span>
   <span class="snapstat" id="snapStat">스냅: 비활성 (배경 없음)</span>
@@ -389,12 +389,9 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
   <button id="btnContinueFromSel"></button>
   <button id="btnConnectSel"></button>
   <button id="btnResetAxis"></button>
-  <button id="btnSave3D"></button>
   <!-- v11.6: 3D 메뉴 제거에 따른 JS 호환용 더미 버튼 -->
-  <button id="btnGen3D"></button>
   <button id="btnPreview3D"></button>
   <button id="menuResetAxis"></button>
-  <button id="menuSave3D"></button>
 </div>
 
 <div class="menubar">
@@ -420,7 +417,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
       <div class="menu-sep"></div>
       <div class="menu-section">내보내기</div>
       <div class="menu-item" id="btnSave"><span class="ico">💾</span> 2D 내보내기 (SVG / PNG)</div>
-      <div class="menu-item" id="btnSave3D"><span class="ico">🧊</span> 3D 저장 (STL / OBJ / PLY)</div>
       <div class="menu-sep"></div>
       <div class="menu-section">편집</div>
       <div class="menu-item" id="btnUndo"><span class="ico">↶</span> 실행 취소 <span class="shortcut">Ctrl+Z</span></div>
@@ -1199,105 +1195,6 @@ body.simple-mode #simpleModeToggle { background:#1f8a4c; border-color:#2faf66; c
     </div>
   </div>
 </div>
-
-<!-- 3D 생성 모달 -->
-<div class="modal-overlay" id="gen3DModal">
-  <div class="modal" style="min-width: 600px;">
-    <h3>🧊 회전체 3D 생성</h3>
-    
-    <div class="section">
-      <h4>회전 설정</h4>
-      <div class="row">
-        <label>분할 수 (세그먼트):</label>
-        <input type="number" id="genSegments" value="64" min="8" max="360" style="flex:1;">
-      </div>
-      <div class="hint-text">36=10°마다, 64=5.6°마다, 128=2.8°마다 (많을수록 부드러움, 파일 크기 증가)</div>
-      
-      <div class="row">
-        <label>회전 각도 (°):</label>
-        <input type="number" id="genAngle" value="360" min="10" max="360" style="flex:1;">
-      </div>
-      <div class="hint-text">360=완전한 회전체, 180=반쪽만 (단면 확인용)</div>
-      
-      <div class="row">
-        <label>대상 도형:</label>
-        <select id="genTarget" style="flex:1;">
-          <option value="selected">선택된 도형만</option>
-          <option value="oneSide" selected>축 한쪽(왼쪽/오른쪽 자동)</option>
-          <option value="all">전체 도형</option>
-        </select>
-      </div>
-      
-      <div class="row">
-        <div class="checkbox-group">
-          <input type="checkbox" id="genClosed" checked>
-          <label for="genClosed" style="min-width:auto;">상단/하단 캡 닫기 (실린더형 마감)</label>
-        </div>
-      </div>
-      
-      <div class="row">
-        <div class="checkbox-group">
-          <input type="checkbox" id="genSampling" checked>
-          <label for="genSampling" style="min-width:auto;">곡선 자동 샘플링 (호/원/타원을 직선으로 분할)</label>
-        </div>
-      </div>
-      <div class="row">
-        <label>샘플 밀도 (mm):</label>
-        <input type="number" id="genSampleStep" value="0.5" min="0.1" max="10" step="0.1" style="flex:1;">
-      </div>
-    </div>
-    
-    <div class="section">
-      <h4>저장 형식</h4>
-      <div class="row">
-        <label>형식:</label>
-        <select id="gen3DFormat" style="flex:1;">
-          <option value="stl">STL (3D프린터 표준) ★권장</option>
-          <option value="obj">OBJ (다목적, 머터리얼 지원)</option>
-          <option value="ply">PLY (3D 스캔 표준)</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>STL 형식:</label>
-        <select id="genStlBinary" style="flex:1;">
-          <option value="ascii">ASCII (텍스트, 호환성↑)</option>
-          <option value="binary" selected>Binary (용량↓, 권장)</option>
-        </select>
-      </div>
-    </div>
-    
-    <div class="section">
-      <h4>예상 결과</h4>
-      <div id="genPreviewInfo" style="font-size:12px; color:#ffd966;">
-        삼각형 수: -<br>
-        파일 크기: -<br>
-      </div>
-    </div>
-    
-    <div class="actions">
-      <button id="btnGen3DCancel">취소</button>
-      <button class="snap" id="btnGen3DPreview" style="background:#8e44ad;">👁 미리보기</button>
-      <button class="success" id="btnGen3DSave">💾 3D 파일 저장</button>
-    </div>
-  </div>
-</div>
-
-<!-- 3D 미리보기 모달 -->
-<div class="modal-overlay" id="preview3DModal">
-  <div class="modal" style="min-width: 700px; min-height: 600px;">
-    <h3>🧊 3D 회전체 미리보기 (마우스 드래그=회전, 휠=줌)</h3>
-    <div style="width:100%; height:500px; background:#1a1a1a; border-radius:6px; position:relative;">
-      <canvas id="preview3DCanvas" style="width:100%; height:100%; cursor:grab;"></canvas>
-      <div id="preview3DInfo" style="position:absolute; top:8px; left:8px; font-size:11px; color:#aac8ff; background:rgba(0,0,0,0.6); padding:4px 8px; border-radius:4px;"></div>
-    </div>
-    <div class="actions">
-      <button id="btnPrev3DClose">닫기</button>
-      <button class="success" id="btnPrev3DSave">💾 이 모델 저장</button>
-    </div>
-  </div>
-</div>
-
-<!-- 도움말 모달 (Rev.9.2) -->
 <!-- Rev.16.88: 명령 패널 (사용자 정의 키보드) - 우측 떠있는 패널 -->
 <div id="cmdPanel" style="display:none; position:fixed; top:120px; right:16px; width:300px; max-height:80vh; background:#1e1e1e; border:1px solid #555; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,.6); z-index:9000; font-size:12px; color:#ddd; flex-direction:column;">
   <div id="cmdPanelHead" style="cursor:move; background:#2a2a2a; padding:8px 10px; border-radius:8px 8px 0 0; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #444;">

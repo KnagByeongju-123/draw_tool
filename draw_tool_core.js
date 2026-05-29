@@ -146,7 +146,6 @@ let calibFirstPoint = null;
 // 회전축 (v6.0)
 let rotAxis = null;
 let axisFirstPoint = null;
-let lastGeneratedMesh = null;
 let lastMousePoint = null; // Rev.10.5 - 회전축 거리입력 Enter 처리용
 
 // 끝점 픽킹 모드 (v7.2)
@@ -1195,6 +1194,8 @@ drawCanvas.addEventListener('mousemove', e => {
   const unit = calibSet ? `${mmX}, ${mmY} mm` : `${p.x}, ${p.y} px`;
   document.getElementById('statusCoord').textContent = unit + (p.snapped ? ' 🧲' : '');
 
+  // Rev.19.53: 배경 맞춤 mousemove 우선
+  if (typeof bgAdjustMouseMove === 'function' && bgAdjustMouseMove(e)) return;
   // Rev.19.43: 박스선택/이동 미리보기 우선
   if (typeof penTxtMouseMove === 'function' && penTxtMouseMove(e)) return;
   // Rev.19.26: 텍스트모드 마우스 드로잉 미리보기 (Shift=직선/45°)
@@ -1578,6 +1579,8 @@ drawCanvas.addEventListener('mousemove', e => {
 });
 
 drawCanvas.addEventListener('mousedown', e => {
+  // Rev.19.53: 배경 맞춤 모드 mousedown — 다른 처리보다 최우선
+  if (typeof bgAdjustMouseDown === 'function' && bgAdjustMouseDown(e)) return;
   // Rev.19.43: 텍스트모드 박스선택(우클릭) / 좌클릭 드래그 이동 우선 처리
   if (typeof penTxtMouseDown === 'function' && penTxtMouseDown(e)) return;
   // Rev.19.42: 휠 클릭 + 연결 모드면 점 연결 처리 (패닝 차단)
@@ -2229,6 +2232,11 @@ window.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Escape') {
+    // Rev.19.53: 배경 맞춤 모드 우선 취소
+    if (typeof bgAdjustMode !== 'undefined' && bgAdjustMode){
+      bgAdjustCancel();
+      return;
+    }
     // Rev.19.32: 좌표수정 팝업이 열려 있으면 우선 닫기
     const _coordPop = document.getElementById('penCoordEditPop');
     if (_coordPop && _coordPop.style.display !== 'none'){
@@ -5928,434 +5936,25 @@ function pointToAxialRadial(p) {
 }
 
 // 도형들을 (axial, radial) 점들의 윤곽선으로 변환
-function shapesToProfile(targetMode, sampleStep) {
-  if (!rotAxis) return [];
-  
-  let targetShapes = [];
-  if (targetMode === 'selected') {
-    targetShapes = shapes.filter(s => selectedIds.has(s.id));
-    if (targetShapes.length === 0) targetShapes = shapes;  // 선택 없으면 전체
-  } else {
-    targetShapes = shapes;
-  }
-  
-  // 1) 각 도형을 (axial, radial) 점 목록으로 샘플링
-  const segments = [];  // [{points:[{axial, radial}...]}]
-  
-  targetShapes.forEach(s => {
-    const pts = [];
-    if (s.type === 'line') {
-      pts.push(pointToAxialRadial(s.p1));
-      // 길이가 길면 샘플링
-      const len = Math.hypot(s.p2.x-s.p1.x, s.p2.y-s.p1.y) * mmPerPixel;
-      const steps = Math.max(1, Math.ceil(len / sampleStep));
-      for (let i = 1; i < steps; i++) {
-        const t = i / steps;
-        pts.push(pointToAxialRadial({
-          x: s.p1.x + (s.p2.x-s.p1.x)*t,
-          y: s.p1.y + (s.p2.y-s.p1.y)*t
-        }));
-      }
-      pts.push(pointToAxialRadial(s.p2));
-    } else if (s.type === 'rect') {
-      // 사각형 4변
-      const x1 = Math.min(s.p1.x, s.p2.x), x2 = Math.max(s.p1.x, s.p2.x);
-      const y1 = Math.min(s.p1.y, s.p2.y), y2 = Math.max(s.p1.y, s.p2.y);
-      const corners = [{x:x1,y:y1},{x:x2,y:y1},{x:x2,y:y2},{x:x1,y:y2},{x:x1,y:y1}];
-      for (let i = 0; i < corners.length-1; i++) {
-        const len = Math.hypot(corners[i+1].x-corners[i].x, corners[i+1].y-corners[i].y) * mmPerPixel;
-        const steps = Math.max(1, Math.ceil(len / sampleStep));
-        for (let j = 0; j <= steps; j++) {
-          const t = j / steps;
-          pts.push(pointToAxialRadial({
-            x: corners[i].x + (corners[i+1].x-corners[i].x)*t,
-            y: corners[i].y + (corners[i+1].y-corners[i].y)*t
-          }));
-        }
-      }
-    } else if (s.type === 'circle') {
-      const r = Math.hypot(s.p2.x-s.p1.x, s.p2.y-s.p1.y);
-      const circ = 2 * Math.PI * r * mmPerPixel;
-      const steps = Math.max(8, Math.ceil(circ / sampleStep));
-      for (let i = 0; i <= steps; i++) {
-        const ang = (i / steps) * Math.PI * 2;
-        pts.push(pointToAxialRadial({
-          x: s.p1.x + r*Math.cos(ang),
-          y: s.p1.y + r*Math.sin(ang)
-        }));
-      }
-    } else if (s.type === 'arc') {
-      let sa = s.startAngle, ea = s.endAngle;
-      let diff = ea - sa;
-      if (s.ccw) {
-        while (diff > 0) diff -= Math.PI*2;
-        while (diff < -Math.PI*2) diff += Math.PI*2;
-      } else {
-        while (diff < 0) diff += Math.PI*2;
-        while (diff > Math.PI*2) diff -= Math.PI*2;
-      }
-      const arcLen = Math.abs(diff) * s.r * mmPerPixel;
-      const steps = Math.max(4, Math.ceil(arcLen / sampleStep));
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const ang = sa + diff * t;
-        pts.push(pointToAxialRadial({
-          x: s.cx + s.r*Math.cos(ang),
-          y: s.cy + s.r*Math.sin(ang)
-        }));
-      }
-    } else if (s.type === 'ellipse') {
-      const circ = Math.PI * (s.rx + s.ry) * mmPerPixel;  // 근사 둘레
-      const steps = Math.max(8, Math.ceil(circ / sampleStep));
-      const cosA = Math.cos(s.angle||0), sinA = Math.sin(s.angle||0);
-      for (let i = 0; i <= steps; i++) {
-        const ang = (i / steps) * Math.PI * 2;
-        const ex = s.rx * Math.cos(ang), ey = s.ry * Math.sin(ang);
-        pts.push(pointToAxialRadial({
-          x: s.cx + ex*cosA - ey*sinA,
-          y: s.cy + ex*sinA + ey*cosA
-        }));
-      }
-    }
-    if (pts.length > 0) segments.push({points: pts});
-  });
-  
-  // 2) 세그먼트들을 끝점 기준으로 연결 (그리디 알고리즘)
-  if (segments.length === 0) return [];
-  
-  const profile = [];
-  const used = new Array(segments.length).fill(false);
-  
-  // 시작: 첫 세그먼트
-  let current = segments[0].points.slice();
-  used[0] = true;
-  
-  for (let iter = 0; iter < segments.length; iter++) {
-    if (current.length === 0) break;
-    const tail = current[current.length-1];
-    
-    let bestIdx = -1, bestDist = Infinity, bestReverse = false;
-    for (let i = 0; i < segments.length; i++) {
-      if (used[i]) continue;
-      const head = segments[i].points[0];
-      const end = segments[i].points[segments[i].points.length-1];
-      const dH = Math.hypot(tail.axial-head.axial, tail.radial-head.radial);
-      const dE = Math.hypot(tail.axial-end.axial, tail.radial-end.radial);
-      if (dH < bestDist) { bestDist = dH; bestIdx = i; bestReverse = false; }
-      if (dE < bestDist) { bestDist = dE; bestIdx = i; bestReverse = true; }
-    }
-    
-    if (bestIdx === -1) break;
-    if (bestDist > 50) break;  // 연결 불가
-    
-    const next = bestReverse ? segments[bestIdx].points.slice().reverse() : segments[bestIdx].points;
-    // 시작점이 tail과 같으면 중복 제거
-    if (Math.hypot(tail.axial-next[0].axial, tail.radial-next[0].radial) < 0.01) {
-      current = current.concat(next.slice(1));
-    } else {
-      current = current.concat(next);
-    }
-    used[bestIdx] = true;
-  }
-  
-  // 3) oneSide 모드: radial 부호 통일 (음수면 모두 절대값)
-  // 회전체는 반드시 한쪽 단면(radial > 0)이어야 함
-  // 평균 radial 부호로 결정
-  let sumPos = 0, sumNeg = 0;
-  current.forEach(p => { if (p.radial > 0) sumPos++; else if (p.radial < 0) sumNeg++; });
-  const flip = sumNeg > sumPos;
-  current.forEach(p => { p.radial = Math.abs(p.radial); if(flip){} });
-  
-  // 4) axial 기준으로 정렬 안 함 (사용자가 그린 순서 유지가 자연스러움)
-  
-  return current.map(p => ({axial: p.axial * mmPerPixel, radial: p.radial * mmPerPixel}));
-}
 
 // 윤곽선을 회전시켜 메쉬 생성
-function generateRevolutionMesh(profile, segments, angleDeg, closedCaps) {
-  // profile: [{axial, radial}] (mm 단위)
-  // segments: 회전 분할 수
-  // angleDeg: 회전 각도 (도)
-  const vertices = [];   // [x, y, z]
-  const triangles = [];  // [i1, i2, i3]
-  
-  const angleRad = angleDeg * Math.PI / 180;
-  const numRings = segments;  // 회전 분할
-  
-  // 정점 생성: 각 윤곽선 점을 각 회전 각도로 배치
-  // X축 = axial (회전축 방향, 메쉬의 Y로 매핑)
-  // 회전 평면: YZ
-  for (let i = 0; i <= numRings; i++) {
-    const t = i / numRings;
-    const ang = angleRad * t;
-    const cosA = Math.cos(ang), sinA = Math.sin(ang);
-    
-    profile.forEach(pt => {
-      // 3D 좌표: X = radial*cos, Y = axial, Z = radial*sin
-      const x = pt.radial * cosA;
-      const y = pt.axial;
-      const z = pt.radial * sinA;
-      vertices.push([x, y, z]);
-    });
-  }
-  
-  const pn = profile.length;
-  
-  // 측면 삼각형 (각 ring 사이)
-  for (let i = 0; i < numRings; i++) {
-    for (let j = 0; j < pn - 1; j++) {
-      const a = i * pn + j;
-      const b = i * pn + (j+1);
-      const c = (i+1) * pn + j;
-      const d = (i+1) * pn + (j+1);
-      // 사각형 → 2 삼각형 (반시계방향, 외부 노멀)
-      triangles.push([a, c, b]);
-      triangles.push([b, c, d]);
-    }
-  }
-  
-  // 캡 (윤곽선이 회전축에서 시작/끝나지 않으면 닫지 않음)
-  if (closedCaps && profile.length >= 2) {
-    // 시작 캡 (회전 시작점)
-    // 평균 axial을 가진 점을 중심으로 한 부채꼴들
-    // 단순히: 첫 ring과 끝 ring의 점들로 폐쇄
-    // 여기서는 윤곽선 양 끝이 축에 가까운지 확인
-    const first = profile[0];
-    const last = profile[profile.length-1];
-    
-    if (first.radial > 0.1) {
-      // 시작점이 축에서 떨어져 있음 → 캡 필요
-      // 시작 ring 점들로 부채꼴 (윤곽선 첫 점 기준)
-      // 단순 접근: 회전축 상의 점(0, first.axial, 0)을 추가하고 팬으로 닫음
-      // 이렇게 하면 깔끔하지 않음. 더 간단하게 첫 ring + 끝 ring을 다각형으로 닫는 방식 생략
-    }
-    
-    // 양 끝 ring을 연결 (회전 각도가 360 미만일 때)
-    if (angleDeg < 360 - 0.01) {
-      // 시작 ring (i=0)과 끝 ring (i=numRings)를 닫는 면 추가
-      // 이 두 ring은 윤곽선 모양의 평면 다각형 → 삼각화 필요
-      // 간단히 fan triangulation (첫 점 기준)
-      for (let j = 1; j < pn - 1; j++) {
-        // 시작 ring
-        triangles.push([0, j, j+1]);
-        // 끝 ring (반대 방향)
-        const offset = numRings * pn;
-        triangles.push([offset, offset + j+1, offset + j]);
-      }
-    }
-  }
-  
-  return {vertices, triangles};
-}
 
 // STL ASCII 내보내기
-function meshToSTL_ASCII(mesh, name) {
-  let stl = `solid ${name}\n`;
-  mesh.triangles.forEach(t => {
-    const v1 = mesh.vertices[t[0]], v2 = mesh.vertices[t[1]], v3 = mesh.vertices[t[2]];
-    // 노멀 계산
-    const ux = v2[0]-v1[0], uy = v2[1]-v1[1], uz = v2[2]-v1[2];
-    const vx = v3[0]-v1[0], vy = v3[1]-v1[1], vz = v3[2]-v1[2];
-    let nx = uy*vz - uz*vy;
-    let ny = uz*vx - ux*vz;
-    let nz = ux*vy - uy*vx;
-    const nlen = Math.hypot(nx,ny,nz);
-    if (nlen > 1e-10) { nx/=nlen; ny/=nlen; nz/=nlen; }
-    stl += `  facet normal ${nx.toFixed(6)} ${ny.toFixed(6)} ${nz.toFixed(6)}\n`;
-    stl += `    outer loop\n`;
-    stl += `      vertex ${v1[0].toFixed(4)} ${v1[1].toFixed(4)} ${v1[2].toFixed(4)}\n`;
-    stl += `      vertex ${v2[0].toFixed(4)} ${v2[1].toFixed(4)} ${v2[2].toFixed(4)}\n`;
-    stl += `      vertex ${v3[0].toFixed(4)} ${v3[1].toFixed(4)} ${v3[2].toFixed(4)}\n`;
-    stl += `    endloop\n`;
-    stl += `  endfacet\n`;
-  });
-  stl += `endsolid ${name}\n`;
-  return stl;
-}
 
 // STL Binary 내보내기
-function meshToSTL_Binary(mesh) {
-  const numTri = mesh.triangles.length;
-  const buf = new ArrayBuffer(84 + numTri * 50);
-  const view = new DataView(buf);
-  
-  // 헤더 80바이트 (텍스트)
-  const header = `Binary STL by 도면작도기 Rev.6 - ${new Date().toISOString().substring(0,19)}`;
-  for (let i = 0; i < Math.min(header.length, 80); i++) {
-    view.setUint8(i, header.charCodeAt(i));
-  }
-  // 삼각형 개수
-  view.setUint32(80, numTri, true);
-  
-  let offset = 84;
-  mesh.triangles.forEach(t => {
-    const v1 = mesh.vertices[t[0]], v2 = mesh.vertices[t[1]], v3 = mesh.vertices[t[2]];
-    const ux = v2[0]-v1[0], uy = v2[1]-v1[1], uz = v2[2]-v1[2];
-    const vx = v3[0]-v1[0], vy = v3[1]-v1[1], vz = v3[2]-v1[2];
-    let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
-    const nlen = Math.hypot(nx,ny,nz);
-    if (nlen > 1e-10) { nx/=nlen; ny/=nlen; nz/=nlen; }
-    view.setFloat32(offset, nx, true); offset += 4;
-    view.setFloat32(offset, ny, true); offset += 4;
-    view.setFloat32(offset, nz, true); offset += 4;
-    [v1, v2, v3].forEach(v => {
-      view.setFloat32(offset, v[0], true); offset += 4;
-      view.setFloat32(offset, v[1], true); offset += 4;
-      view.setFloat32(offset, v[2], true); offset += 4;
-    });
-    view.setUint16(offset, 0, true); offset += 2;  // attribute byte count
-  });
-  return buf;
-}
 
 // OBJ 내보내기
-function meshToOBJ(mesh, name) {
-  let obj = `# Wavefront OBJ - ${name}\n`;
-  obj += `# Generated by 도면작도기 Rev.6 - ${new Date().toISOString()}\n`;
-  obj += `# vertices: ${mesh.vertices.length}, triangles: ${mesh.triangles.length}\n\n`;
-  obj += `o ${name}\n`;
-  mesh.vertices.forEach(v => {
-    obj += `v ${v[0].toFixed(4)} ${v[1].toFixed(4)} ${v[2].toFixed(4)}\n`;
-  });
-  obj += `\n`;
-  mesh.triangles.forEach(t => {
-    // OBJ는 1-based 인덱스
-    obj += `f ${t[0]+1} ${t[1]+1} ${t[2]+1}\n`;
-  });
-  return obj;
-}
 
 // PLY 내보내기 (ASCII)
-function meshToPLY(mesh, name) {
-  let ply = `ply\nformat ascii 1.0\n`;
-  ply += `comment Generated by 도면작도기 Rev.6\n`;
-  ply += `element vertex ${mesh.vertices.length}\n`;
-  ply += `property float x\nproperty float y\nproperty float z\n`;
-  ply += `element face ${mesh.triangles.length}\n`;
-  ply += `property list uchar int vertex_indices\n`;
-  ply += `end_header\n`;
-  mesh.vertices.forEach(v => {
-    ply += `${v[0].toFixed(4)} ${v[1].toFixed(4)} ${v[2].toFixed(4)}\n`;
-  });
-  mesh.triangles.forEach(t => {
-    ply += `3 ${t[0]} ${t[1]} ${t[2]}\n`;
-  });
-  return ply;
-}
 
 // 3D 생성 핸들러
-document.getElementById('btnGen3D').addEventListener('click', () => {
-  if (!rotAxis) {
-    alert('먼저 [🔄 회전축] 도구로 회전축을 설정하세요.\n축의 양 끝을 클릭하면 됩니다.');
-    return;
-  }
-  if (shapes.length === 0) {
-    alert('회전시킬 도형(윤곽선)이 없습니다.');
-    return;
-  }
-  updateGen3DPreview();
-  document.getElementById('gen3DModal').classList.add('show');
-});
 
-function updateGen3DPreview() {
-  const seg = parseInt(document.getElementById('genSegments').value) || 64;
-  const ang = parseFloat(document.getElementById('genAngle').value) || 360;
-  const target = document.getElementById('genTarget').value;
-  const step = parseFloat(document.getElementById('genSampleStep').value) || 0.5;
-  const closed = document.getElementById('genClosed').checked;
-  
-  const profile = shapesToProfile(target, step);
-  if (profile.length === 0) {
-    document.getElementById('genPreviewInfo').innerHTML = '<span style="color:#e74c3c;">⚠ 윤곽선을 추출할 수 없습니다.</span>';
-    return;
-  }
-  
-  const numTri = seg * (profile.length-1) * 2 + (closed && ang < 360 ? (profile.length-2)*2 : 0);
-  const sizeKB = (numTri * 50 / 1024).toFixed(1);
-  
-  document.getElementById('genPreviewInfo').innerHTML = 
-    `윤곽선 점: ${profile.length}개<br>` +
-    `삼각형 수: 약 ${numTri.toLocaleString()}개<br>` +
-    `STL Binary 예상: ${sizeKB} KB`;
-}
 
-['genSegments','genAngle','genTarget','genSampleStep','genClosed'].forEach(id => {
-  document.getElementById(id).addEventListener('input', updateGen3DPreview);
-  document.getElementById(id).addEventListener('change', updateGen3DPreview);
-});
 
-document.getElementById('btnGen3DCancel').addEventListener('click', () => {
-  document.getElementById('gen3DModal').classList.remove('show');
-});
 
-document.getElementById('btnGen3DPreview').addEventListener('click', () => {
-  const mesh = buildMeshFromUI();
-  if (!mesh) return;
-  lastGeneratedMesh = mesh;
-  if (typeof updateLastMeshInfo === 'function') updateLastMeshInfo();
-  document.getElementById('gen3DModal').classList.remove('show');
-  show3DPreview(mesh);
-});
 
-document.getElementById('btnGen3DSave').addEventListener('click', () => {
-  const mesh = buildMeshFromUI();
-  if (!mesh) return;
-  lastGeneratedMesh = mesh;
-  if (typeof updateLastMeshInfo === 'function') updateLastMeshInfo();
-  saveMesh3D(mesh);
-  document.getElementById('gen3DModal').classList.remove('show');
-});
 
-function buildMeshFromUI() {
-  const seg = parseInt(document.getElementById('genSegments').value) || 64;
-  const ang = parseFloat(document.getElementById('genAngle').value) || 360;
-  const target = document.getElementById('genTarget').value;
-  const step = parseFloat(document.getElementById('genSampleStep').value) || 0.5;
-  const closed = document.getElementById('genClosed').checked;
-  
-  const profile = shapesToProfile(target, step);
-  if (profile.length < 2) {
-    alert('윤곽선이 너무 짧습니다. 도형을 더 그리거나 회전축 위치를 확인하세요.');
-    return null;
-  }
-  
-  return generateRevolutionMesh(profile, seg, ang, closed);
-}
 
-function saveMesh3D(mesh) {
-  const fmt = document.getElementById('gen3DFormat').value;
-  const stlBin = document.getElementById('genStlBinary').value === 'binary';
-  const name = (document.getElementById('saveName')?.value || '회전체').trim();
-  let finalName = name;
-  if (calibSet) finalName = `${name}_${mesh.vertices.length}v`;
-  
-  let blob, ext;
-  if (fmt === 'stl') {
-    if (stlBin) {
-      const buf = meshToSTL_Binary(mesh);
-      blob = new Blob([buf], {type: 'application/octet-stream'});
-    } else {
-      const txt = meshToSTL_ASCII(mesh, name);
-      blob = new Blob([txt], {type: 'text/plain'});
-    }
-    ext = 'stl';
-  } else if (fmt === 'obj') {
-    const txt = meshToOBJ(mesh, name);
-    blob = new Blob([txt], {type: 'text/plain'});
-    ext = 'obj';
-  } else if (fmt === 'ply') {
-    const txt = meshToPLY(mesh, name);
-    blob = new Blob([txt], {type: 'text/plain'});
-    ext = 'ply';
-  }
-  
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = finalName + '.' + ext; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  
-  alert(`✓ 3D 파일 저장 완료\n\n파일: ${finalName}.${ext}\n정점: ${mesh.vertices.length}개\n삼각형: ${mesh.triangles.length}개\n\n3D 프린터 슬라이서(Cura, PrusaSlicer)에서 바로 열 수 있습니다.`);
-}
 
 // ====== 3D 미리보기 (간단한 직접 렌더링) ======
 let prev3D = {
@@ -6363,152 +5962,10 @@ let prev3D = {
   dragging: false, lastX: 0, lastY: 0
 };
 
-function show3DPreview(mesh) {
-  prev3D.mesh = mesh;
-  // 바운딩 박스로 거리 계산
-  let mn = [Infinity,Infinity,Infinity], mx = [-Infinity,-Infinity,-Infinity];
-  mesh.vertices.forEach(v => {
-    for (let i = 0; i < 3; i++) {
-      if (v[i] < mn[i]) mn[i] = v[i];
-      if (v[i] > mx[i]) mx[i] = v[i];
-    }
-  });
-  const sz = Math.max(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]);
-  prev3D.distance = sz * 2.5;
-  prev3D.center = [(mn[0]+mx[0])/2, (mn[1]+mx[1])/2, (mn[2]+mx[2])/2];
-  
-  document.getElementById('preview3DInfo').innerHTML = 
-    `정점 ${mesh.vertices.length} | 삼각형 ${mesh.triangles.length}<br>` +
-    `크기: ${(mx[0]-mn[0]).toFixed(1)} × ${(mx[1]-mn[1]).toFixed(1)} × ${(mx[2]-mn[2]).toFixed(1)} mm`;
-  
-  document.getElementById('preview3DModal').classList.add('show');
-  setTimeout(() => {
-    const canvas = document.getElementById('preview3DCanvas');
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
-    render3D();
-  }, 50);
-}
 
-function render3D() {
-  const canvas = document.getElementById('preview3DCanvas');
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  ctx.fillStyle = '#1a1a1a';
-  ctx.fillRect(0, 0, w, h);
-  
-  if (!prev3D.mesh) return;
-  
-  const cx = prev3D.center;
-  const rx = prev3D.rotX, ry = prev3D.rotY;
-  const cosX = Math.cos(rx), sinX = Math.sin(rx);
-  const cosY = Math.cos(ry), sinY = Math.sin(ry);
-  const dist = prev3D.distance;
-  const focal = h * 0.8;
-  
-  // 모든 정점 변환
-  const projected = prev3D.mesh.vertices.map(v => {
-    // 중심 이동
-    let x = v[0] - cx[0], y = v[1] - cx[1], z = v[2] - cx[2];
-    // Y축 회전 (좌우)
-    let x1 = x*cosY - z*sinY;
-    let z1 = x*sinY + z*cosY;
-    // X축 회전 (상하)
-    let y2 = y*cosX - z1*sinX;
-    let z2 = y*sinX + z1*cosX;
-    // 원근 투영
-    const zc = z2 + dist;
-    if (zc <= 0.1) return null;
-    return {
-      x: w/2 + x1 * focal / zc,
-      y: h/2 - y2 * focal / zc,
-      z: zc,
-      vz: z2
-    };
-  });
-  
-  // 삼각형 렌더 (Z-sort)
-  const trisToDraw = [];
-  prev3D.mesh.triangles.forEach(t => {
-    const p1 = projected[t[0]], p2 = projected[t[1]], p3 = projected[t[2]];
-    if (!p1 || !p2 || !p3) return;
-    const avgZ = (p1.z + p2.z + p3.z) / 3;
-    // 노멀 (백페이스 컬링)
-    const ux = p2.x - p1.x, uy = p2.y - p1.y;
-    const vx = p3.x - p1.x, vy = p3.y - p1.y;
-    const cross = ux*vy - uy*vx;
-    // 빛 강도 (간이 라이팅): 3D 노멀 사용
-    const v1 = prev3D.mesh.vertices[t[0]], v2 = prev3D.mesh.vertices[t[1]], v3 = prev3D.mesh.vertices[t[2]];
-    let nx = (v2[1]-v1[1])*(v3[2]-v1[2]) - (v2[2]-v1[2])*(v3[1]-v1[1]);
-    let ny = (v2[2]-v1[2])*(v3[0]-v1[0]) - (v2[0]-v1[0])*(v3[2]-v1[2]);
-    let nz = (v2[0]-v1[0])*(v3[1]-v1[1]) - (v2[1]-v1[1])*(v3[0]-v1[0]);
-    const nlen = Math.hypot(nx,ny,nz);
-    if (nlen > 1e-10) { nx/=nlen; ny/=nlen; nz/=nlen; }
-    // 광원: 위에서 약간 앞 (-Y, +Z 방향)
-    const light = [0.3, -0.7, 0.6];
-    const llen = Math.hypot(...light); light.forEach((_,i) => light[i]/=llen);
-    // 노멀도 회전 적용 (간단히)
-    let lx1 = nx*cosY - nz*sinY, lz1 = nx*sinY + nz*cosY;
-    let ly2 = ny*cosX - lz1*sinX, lz2 = ny*sinX + lz1*cosX;
-    let intensity = -(lx1*light[0] + ly2*light[1] + lz2*light[2]);
-    if (intensity < 0.1) intensity = 0.1;
-    if (intensity > 1) intensity = 1;
-    trisToDraw.push({p1,p2,p3,avgZ,intensity,cross});
-  });
-  
-  trisToDraw.sort((a,b) => b.avgZ - a.avgZ);
-  
-  trisToDraw.forEach(tri => {
-    const g = Math.round(180 * tri.intensity + 40);
-    ctx.fillStyle = `rgb(${g},${Math.round(g*0.9)},${Math.round(g*0.7)})`;
-    ctx.strokeStyle = `rgba(0,0,0,0.3)`;
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(tri.p1.x, tri.p1.y);
-    ctx.lineTo(tri.p2.x, tri.p2.y);
-    ctx.lineTo(tri.p3.x, tri.p3.y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  });
-}
 
 // 미리보기 마우스 컨트롤
-(() => {
-  const canvas = document.getElementById('preview3DCanvas');
-  if (!canvas) return;
-  canvas.addEventListener('mousedown', e => {
-    prev3D.dragging = true;
-    prev3D.lastX = e.clientX; prev3D.lastY = e.clientY;
-    canvas.style.cursor = 'grabbing';
-  });
-  window.addEventListener('mousemove', e => {
-    if (!prev3D.dragging) return;
-    const dx = e.clientX - prev3D.lastX;
-    const dy = e.clientY - prev3D.lastY;
-    prev3D.rotY += dx * 0.01;
-    prev3D.rotX += dy * 0.01;
-    prev3D.lastX = e.clientX; prev3D.lastY = e.clientY;
-    render3D();
-  });
-  window.addEventListener('mouseup', () => {
-    prev3D.dragging = false;
-    canvas.style.cursor = 'grab';
-  });
-  canvas.addEventListener('wheel', e => {
-    e.preventDefault();
-    prev3D.distance *= (e.deltaY > 0 ? 1.1 : 0.9);
-    render3D();
-  });
-})();
 
-document.getElementById('btnPrev3DClose').addEventListener('click', () => {
-  document.getElementById('preview3DModal').classList.remove('show');
-});
-document.getElementById('btnPrev3DSave').addEventListener('click', () => {
-  if (lastGeneratedMesh) saveMesh3D(lastGeneratedMesh);
-  document.getElementById('preview3DModal').classList.remove('show');
-});
 
 // ====== 영역 채움 (페인트버킷) ======
 
@@ -10012,28 +9469,6 @@ function updateAxisStatus() {
 }
 
 // 미리보기 버튼: 마지막 메쉬 또는 새로 생성하여 표시
-document.getElementById('btnPreview3D').addEventListener('click', () => {
-  if (!rotAxis) {
-    alert('먼저 [🔄 회전축]으로 회전축을 설정하세요.');
-    return;
-  }
-  if (shapes.length === 0) {
-    alert('회전시킬 도형(윤곽선)이 없습니다.\n[2D 도면] 탭에서 단면을 먼저 그려주세요.');
-    return;
-  }
-  // 빠른 미리보기: 기본 옵션으로 메쉬 생성 → 미리보기
-  // 사용자가 이미 옵션을 한번 설정했으면 그 값 사용
-  // 옵션 모달의 현재 값 그대로 사용
-  const mesh = buildMeshFromUI();
-  if (!mesh) {
-    // 기본값으로 강제 시도
-    alert('윤곽선 추출에 실패했습니다.\n[🧊 3D 생성]에서 옵션을 조정해보세요.');
-    return;
-  }
-  lastGeneratedMesh = mesh;
-  updateLastMeshInfo();
-  show3DPreview(mesh);
-});
 
 // ====== 탭 전환 (Rev.7.5) ======
 document.querySelectorAll('.tab').forEach(t => {
@@ -10061,32 +9496,8 @@ document.querySelectorAll('.tab').forEach(t => {
 });
 
 // ====== 3D 저장 버튼 (저장 탭) ======
-document.getElementById('btnSave3D').addEventListener('click', () => {
-  if (!lastGeneratedMesh) {
-    if (!rotAxis) {
-      alert('먼저 [3D 회전체] 탭에서:\n1) [🔄 회전축 설정]으로 축을 그리고\n2) [🧊 3D 생성]으로 모델을 만든 다음 저장하세요.');
-    } else {
-      alert('아직 3D 모델이 생성되지 않았습니다.\n[3D 회전체] 탭의 [🧊 3D 생성] 버튼으로 만들어 주세요.');
-    }
-    // 3D 탭으로 자동 이동
-    document.querySelector('.tab[data-tab="tab3d"]').click();
-    return;
-  }
-  saveMesh3D(lastGeneratedMesh);
-});
 
 // 3D 생성 후 최근 메쉬 정보 표시
-function updateLastMeshInfo() {
-  const el = document.getElementById('lastMeshInfo');
-  if (!el) return;
-  if (!lastGeneratedMesh) {
-    el.textContent = '없음 (3D 생성 시 표시됨)';
-    el.style.color = '#aac8ff';
-  } else {
-    el.textContent = `정점 ${lastGeneratedMesh.vertices.length}, 삼각형 ${lastGeneratedMesh.triangles.length}`;
-    el.style.color = '#27ae60';
-  }
-}
 
 // ====== 헤더 버튼 (Rev.7.8) ======
 // 선택 도구 버튼
@@ -10923,91 +10334,6 @@ updateToolStatus = function() {
 };
 
 // ====== C3D(draw_tool3.html)로 도형 전송 ======
-function sendToC3D() {
-  if (!shapes || shapes.length === 0) {
-    if (confirm('전송할 2D 도형이 없습니다.\nC3D(3D 모델러)로 그냥 이동할까요?')) {
-      window.location.href = 'draw_tool3.html';
-    }
-    return;
-  }
-
-  // 픽셀 -> mm 스케일 입력 (기본 1픽셀 = 1mm)
-  const scaleStr = prompt(
-    '📐 C3D로 전송\n\n2D 도형 ' + shapes.length + '개를 3D 모델러로 보냅니다.\n\n픽셀 → mm 변환 스케일 입력\n(예: 1 = 1px당 1mm, 0.1 = 1px당 0.1mm)',
-    '1'
-  );
-  if (scaleStr === null) return; // 취소
-  const scale = parseFloat(scaleStr);
-  if (!isFinite(scale) || scale <= 0) {
-    alert('잘못된 스케일 값입니다.');
-    return;
-  }
-
-  // 도형 변환: draw_tool 좌표(Y 아래로 +) -> Catia3D 좌표(Y 위로 +)
-  // 캔버스 좌표의 중앙(또는 0,0)을 기준으로 그대로 변환하되 Y만 반전
-  const out = [];
-  shapes.forEach(s => {
-    const color = s.stroke || '#000000';
-    const lw = s.strokeWidth || 2;
-    if (s.type === 'line') {
-      out.push({
-        type: 'line',
-        x1: s.p1.x * scale, y1: -s.p1.y * scale,
-        x2: s.p2.x * scale, y2: -s.p2.y * scale,
-        color: color, lineWidth: lw
-      });
-    } else if (s.type === 'rect') {
-      out.push({
-        type: 'rect',
-        x1: s.p1.x * scale, y1: -s.p1.y * scale,
-        x2: s.p2.x * scale, y2: -s.p2.y * scale,
-        color: color, lineWidth: lw
-      });
-    } else if (s.type === 'circle') {
-      const r = Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) * scale;
-      out.push({
-        type: 'circle',
-        cx: s.p1.x * scale, cy: -s.p1.y * scale, r: r,
-        color: color, lineWidth: lw
-      });
-    } else if (s.type === 'arc') {
-      // Y 반전 시 각도도 부호 반전 (atan2(-y,x))
-      out.push({
-        type: 'arc',
-        cx: s.cx * scale, cy: -s.cy * scale, r: s.r * scale,
-        startAngle: -s.startAngle,
-        endAngle: -s.endAngle,
-        color: color, lineWidth: lw
-      });
-    }
-    // dim/text 등 기타 타입은 3D 변환 불가 → 건너뜀
-  });
-
-  if (out.length === 0) {
-    if (confirm('변환 가능한 도형(선/사각/원/호)이 없습니다.\nC3D로 그냥 이동할까요?')) {
-      window.location.href = 'draw_tool3.html';
-    }
-    return;
-  }
-
-  // localStorage에 저장 (C3D에서 자동 로드)
-  const payload = {
-    from: 'draw_tool',
-    sentAt: new Date().toISOString(),
-    scale: scale,
-    shapes: out
-  };
-  try {
-    localStorage.setItem('c3d_import_from_draw_tool', JSON.stringify(payload));
-  } catch (e) {
-    alert('전송 실패: ' + e.message);
-    return;
-  }
-
-  if (confirm('✅ ' + out.length + '개 도형을 C3D로 전송 준비 완료.\n\nC3D(draw_tool3.html)로 이동하시겠습니까?')) {
-    window.location.href = 'draw_tool3.html';
-  }
-}
 
 // ====== 드롭다운 메뉴바 (Rev.7.7) ======
 document.querySelectorAll('.menu .menu-title').forEach(t => {
@@ -11078,13 +10404,6 @@ document.getElementById('menuResetAxis').addEventListener('click', () => {
     runBreakAllIntersections();
   });
 })();
-document.getElementById('menuSave3D').addEventListener('click', () => {
-  if (!lastGeneratedMesh) {
-    alert('아직 3D 모델이 없습니다.\n[3D] 메뉴 → [3D 모델 생성]에서 만들어 주세요.');
-    return;
-  }
-  saveMesh3D(lastGeneratedMesh);
-});
 
 // 스냅/연속선 메뉴 토글 → 더미 버튼 트리거
 document.getElementById('menuSnap').addEventListener('click', () => {
@@ -11812,7 +11131,6 @@ updateCount();
 updateSelStat();
 updateToolStatus();
 updateCalibStat();
-updateLastMeshInfo();
 updateAxisStatus();
 updateLiveSnapButton();
 updateHeaderSelectButton();

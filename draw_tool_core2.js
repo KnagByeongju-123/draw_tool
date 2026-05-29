@@ -1649,7 +1649,7 @@ function penChamferAtPoint(pt, cMm){
 //   - Shift 누른 채 마우스 이동 = 슬로우(미세) 이동, 최종 좌클릭 시 적용
 let penDrawFirst = null;     // {x,y} 첫 클릭점(픽셀). null이면 시작 전
 let penDrawFirstIdx = -1;    // 첫 점의 펜 번호
-let penDrawSlowAnchor = null;// (Rev.19.29 미사용·호환유지)
+let penDrawSlowAnchor = null;  // Rev.19.54: Ctrl 슬로우 모션 anchor {raw:{x,y}, slow:{x,y}}
 let penDrawCurPt = null;     // 현재 미리보기 끝점(픽셀, 슬로우 반영)
 
 // 텍스트모드 드로잉이 활성 조건: 텍스트모드 + 원점지정완료 + 클릭연결모드 아님
@@ -1662,17 +1662,27 @@ function penDrawActive(){
 // 보정된 현재 점 계산 (mousemove에서 사용)
 // Rev.19.29: Shift = 직선/45도 잠금 (시작점 기준 0/45/90/135/180/... 8방향). 길이는 유지.
 function penDrawResolvePoint(e){
-  const raw = getCanvasPoint(e);  // 스냅 적용된 좌표
+  let raw = getCanvasPoint(e);  // 스냅 적용된 좌표
+  // Rev.19.54: Ctrl 슬로우 모션 — 마우스 이동의 1/10만 반영 (정밀 클릭용)
+  if (e.ctrlKey){
+    if (!penDrawSlowAnchor){
+      penDrawSlowAnchor = { raw:{x:raw.x, y:raw.y}, slow:{x:raw.x, y:raw.y} };
+    }
+    const sdx = (raw.x - penDrawSlowAnchor.raw.x) * 0.1;
+    const sdy = (raw.y - penDrawSlowAnchor.raw.y) * 0.1;
+    raw = { x: penDrawSlowAnchor.slow.x + sdx, y: penDrawSlowAnchor.slow.y + sdy, slow:true };
+  } else if (penDrawSlowAnchor){
+    penDrawSlowAnchor = null;
+  }
   if (shiftDown && penDrawFirst){
     const dx = raw.x - penDrawFirst.x;
     const dy = raw.y - penDrawFirst.y;
     const len = Math.hypot(dx, dy);
-    if (len < 1e-6) return { x: penDrawFirst.x, y: penDrawFirst.y, lock:true };
-    // 현재 각도를 45도 단위로 반올림
+    if (len < 1e-6) return { x: penDrawFirst.x, y: penDrawFirst.y, lock:true, slow:raw.slow };
     const step = Math.PI / 4;                  // 45°
     const ang  = Math.round(Math.atan2(dy, dx) / step) * step;
     return { x: penDrawFirst.x + Math.cos(ang) * len,
-             y: penDrawFirst.y + Math.sin(ang) * len, lock:true };
+             y: penDrawFirst.y + Math.sin(ang) * len, lock:true, slow:raw.slow };
   }
   return raw;
 }
@@ -1737,6 +1747,7 @@ function penDrawPreview(p2){
   document.getElementById('statusHint').textContent =
     `／ 텍스트선: ${lblLen} · ${ang.toFixed(1)}°`
     + (p2.lock ? ' [Shift 직선/45°]' : ' · Shift=직선/45°')
+    + (p2.slow ? ' [Ctrl 슬로우×1/10]' : ' · Ctrl=슬로우')
     + (continuousMode ? ' · ⛓연속' : '') + ' · 좌클릭=확정';
 }
 
@@ -1945,19 +1956,23 @@ function renderPenShapeFields(type, ex){
     hint.textContent = '반시계방향, 0°=오른쪽, 90°=위, 180°=왼쪽, 270°=아래 · 시작=끝이면 완전 원 · X/Y는 직경좌표 모드 ON시 그 좌표계';
   } else if (type === 'rect'){
     title.textContent = ex ? '▭ 사각형 수정' : '▭ 사각형 (신규)';
-    // Rev.19.48: 기준점 위치 옵션 (좌상/우상/좌하/우하/중심)
-    const anchor = (ex && ex._anchor) || 'br';  // 베이스용 기본값: 우하단
+    // Rev.19.48: 기준점 위치 옵션 / Rev.19.50: 화면(px) 기준으로 anchor 처리 (직경좌표 반전 무관)
+    const anchor = (ex && ex._anchor) || 'br';
     let x=0, y=0, w=10, h=5;
     if (ex){
-      const m1 = penPxToUserMm(ex.p1.x, ex.p1.y), m2 = penPxToUserMm(ex.p2.x, ex.p2.y);
-      const xMin = Math.min(m1.x, m2.x), xMax = Math.max(m1.x, m2.x);
-      const yMin = Math.min(m1.y, m2.y), yMax = Math.max(m1.y, m2.y);
-      w = xMax - xMin; h = yMax - yMin;
-      if      (anchor === 'tl'){ x = xMin; y = yMax; }
-      else if (anchor === 'tr'){ x = xMax; y = yMax; }
-      else if (anchor === 'bl'){ x = xMin; y = yMin; }
-      else if (anchor === 'br'){ x = xMax; y = yMin; }
-      else if (anchor === 'c' ){ x = (xMin+xMax)/2; y = (yMin+yMax)/2; }
+      const xMinPx = Math.min(ex.p1.x, ex.p2.x), xMaxPx = Math.max(ex.p1.x, ex.p2.x);
+      const yMinPx = Math.min(ex.p1.y, ex.p2.y), yMaxPx = Math.max(ex.p1.y, ex.p2.y);
+      w = (xMaxPx - xMinPx) * mmPerPixel;
+      h = (yMaxPx - yMinPx) * mmPerPixel;
+      // 화면 anchor px → 사용자 mm
+      let apx, apy;
+      if      (anchor === 'tl'){ apx = xMinPx; apy = yMinPx; }
+      else if (anchor === 'tr'){ apx = xMaxPx; apy = yMinPx; }
+      else if (anchor === 'bl'){ apx = xMinPx; apy = yMaxPx; }
+      else if (anchor === 'br'){ apx = xMaxPx; apy = yMaxPx; }
+      else if (anchor === 'c' ){ apx = (xMinPx+xMaxPx)/2; apy = (yMinPx+yMaxPx)/2; }
+      const m = penPxToUserMm(apx, apy);
+      x = m.x; y = m.y;
     } else if (penOriginUserCoord){
       x = penOriginUserCoord.x; y = penOriginUserCoord.y;
     }
@@ -2028,22 +2043,24 @@ function applyPenShape(){
         stroke, strokeWidth:sw, layer };
     }
   } else if (type === 'rect'){
-    // Rev.19.48: anchor에 따라 좌상단·우하단 계산
+    // Rev.19.50: 화면(px) 기준으로 anchor 처리 — anchor 점 1개를 px로 변환 후 화면상 W/H로 확장
+    // (직경좌표 모드에서도 화면상 우/좌가 일관)
     const anchor = (document.getElementById('psf-anchor')||{}).value || 'br';
     const ax = _parseNum('psf-x'), ay = _parseNum('psf-y');
     const w = _parseNum('psf-w'), h = _parseNum('psf-h');
     if (w <= 0 || h <= 0){ alert('너비/높이는 0보다 커야 합니다'); return; }
-    let xMin, yMax;
-    if      (anchor === 'tl'){ xMin = ax;     yMax = ay; }
-    else if (anchor === 'tr'){ xMin = ax - w; yMax = ay; }
-    else if (anchor === 'bl'){ xMin = ax;     yMax = ay + h; }
-    else if (anchor === 'br'){ xMin = ax - w; yMax = ay + h; }
-    else if (anchor === 'c' ){ xMin = ax - w/2; yMax = ay + h/2; }
-    const xMax = xMin + w, yMin = yMax - h;
-    const p1 = penUserMmToPx(xMin, yMax);  // 좌상단 (Y up = px 위쪽)
-    const p2 = penUserMmToPx(xMax, yMin);  // 우하단
+    const ap = penUserMmToPx(ax, ay);
+    const wPx = penMmLenToPx(w), hPx = penMmLenToPx(h);
+    // anchor를 화면 기준으로 해석 → 좌상단(p1)/우하단(p2) px 계산
+    let p1x, p1y;
+    if      (anchor === 'tl'){ p1x = ap.x;          p1y = ap.y; }
+    else if (anchor === 'tr'){ p1x = ap.x - wPx;    p1y = ap.y; }
+    else if (anchor === 'bl'){ p1x = ap.x;          p1y = ap.y - hPx; }
+    else if (anchor === 'br'){ p1x = ap.x - wPx;    p1y = ap.y - hPx; }
+    else if (anchor === 'c' ){ p1x = ap.x - wPx/2;  p1y = ap.y - hPx/2; }
+    const p2x = p1x + wPx, p2y = p1y + hPx;
     newShape = { id:++shapeIdSeq, type:'rect',
-      p1:{x:p1.x, y:p1.y}, p2:{x:p2.x, y:p2.y},
+      p1:{x:p1x, y:p1y}, p2:{x:p2x, y:p2y},
       _anchor: anchor,
       stroke, strokeWidth:sw, layer };
   } else if (type === 'triangle'){
@@ -2118,6 +2135,93 @@ function penFindShapeAt(p){
     }
   }
   return null;
+}
+
+// ===== Rev.19.53: 배경 이미지 마우스 드래그·휠 조정 모드 =====
+let bgAdjustMode = false;
+let bgAdjustDragStart = null;
+let bgAdjustOffsetStart = null;
+
+function bgAdjustToggle(){
+  if (typeof bgImage === 'undefined' || !bgImage){
+    document.getElementById('statusHint').textContent = '⚠ 먼저 📷 배경 도면을 열어주세요';
+    return;
+  }
+  bgAdjustMode = !bgAdjustMode;
+  bgAdjustDragStart = null; bgAdjustOffsetStart = null;
+  if (bgAdjustMode){
+    if (typeof cancelPenDraw === 'function') cancelPenDraw();
+    document.getElementById('statusHint').textContent =
+      '🎯 배경 맞춤 ON: 좌클릭 드래그 = 이동 · 휠 스크롤 = 크기 (Shift+휠 = 미세) · ESC = 종료';
+    cmdLog('🎯 배경 맞춤 ON', 'system');
+  } else {
+    document.getElementById('statusHint').textContent = '🎯 배경 맞춤 OFF';
+    cmdLog('🎯 배경 맞춤 OFF', 'system');
+  }
+}
+
+function bgAdjustMouseDown(e){
+  if (!bgAdjustMode) return false;
+  if (e.button !== 0) return false;
+  const p = getCanvasPoint(e);
+  bgAdjustDragStart = { x: p.x, y: p.y };
+  bgAdjustOffsetStart = { x: (typeof bgImageOffsetX === 'number' ? bgImageOffsetX : 0),
+                          y: (typeof bgImageOffsetY === 'number' ? bgImageOffsetY : 0) };
+  e.preventDefault();
+  return true;
+}
+
+function bgAdjustMouseMove(e){
+  if (!bgAdjustMode || !bgAdjustDragStart) return false;
+  const p = getCanvasPoint(e);
+  const dx = p.x - bgAdjustDragStart.x;
+  const dy = p.y - bgAdjustDragStart.y;
+  bgImageOffsetX = bgAdjustOffsetStart.x + dx;
+  bgImageOffsetY = bgAdjustOffsetStart.y + dy;
+  // 슬라이더 동기화
+  const sx = document.getElementById('bgOffsetX'), vx = document.getElementById('bgOffsetXVal');
+  if (sx) sx.value = Math.round(bgImageOffsetX);
+  if (vx) vx.textContent = Math.round(bgImageOffsetX);
+  const sy = document.getElementById('bgOffsetY'), vy = document.getElementById('bgOffsetYVal');
+  if (sy) sy.value = Math.round(bgImageOffsetY);
+  if (vy) vy.textContent = Math.round(bgImageOffsetY);
+  if (typeof redrawBg === 'function') redrawBg();
+  document.getElementById('statusHint').textContent =
+    `🎯 위치: X=${Math.round(bgImageOffsetX)}, Y=${Math.round(bgImageOffsetY)} · 휠=크기`;
+  return true;
+}
+
+function bgAdjustMouseUp(e){
+  if (!bgAdjustMode) return false;
+  if (!bgAdjustDragStart) return false;
+  bgAdjustDragStart = null;
+  bgAdjustOffsetStart = null;
+  return true;
+}
+
+function bgAdjustWheelHandler(e){
+  if (!bgAdjustMode) return false;
+  const step = e.shiftKey ? 0.01 : 0.05;     // Shift+휠 = 미세
+  const delta = e.deltaY > 0 ? -step : +step; // 위로 굴리면 키움
+  let s = (typeof bgImageScale === 'number' ? bgImageScale : 1) + delta;
+  s = Math.max(0.1, Math.min(4.0, s));
+  bgImageScale = s;
+  const ss = document.getElementById('bgScale'), vs = document.getElementById('bgScaleVal');
+  if (ss) ss.value = Math.round(bgImageScale * 100);
+  if (vs) vs.textContent = Math.round(bgImageScale * 100) + '%';
+  if (typeof redrawBg === 'function') redrawBg();
+  document.getElementById('statusHint').textContent =
+    `🎯 크기: ${Math.round(bgImageScale*100)}% · 드래그=이동`;
+  e.preventDefault(); e.stopPropagation();
+  return true;
+}
+
+function bgAdjustCancel(){
+  if (bgAdjustMode){
+    bgAdjustMode = false;
+    bgAdjustDragStart = null; bgAdjustOffsetStart = null;
+    document.getElementById('statusHint').textContent = '🎯 배경 맞춤 모드 종료';
+  }
 }
 
 // ===== Rev.19.43: 텍스트모드 박스 선택(우클릭) + 좌클릭 드래그 이동 + 삭제 =====
@@ -2917,6 +3021,11 @@ function startNormalMode(){
   if (bCon) bCon.addEventListener('click', penToggleConnectByWheel);
   if (typeof drawCanvas !== 'undefined' && drawCanvas){
     drawCanvas.addEventListener('mouseup', e => {
+      // Rev.19.53: 배경 맞춤 mouseup 우선
+      if (typeof bgAdjustMouseUp === 'function' && bgAdjustMouseUp(e)){
+        e.preventDefault();
+        return;
+      }
       // Rev.19.43: 박스선택/이동 mouseup (우클릭은 button=2, 좌클릭=0)
       if (typeof penTxtMouseUp === 'function' && penTxtMouseUp(e)){
         e.preventDefault();
@@ -2933,6 +3042,11 @@ function startNormalMode(){
     drawCanvas.addEventListener('contextmenu', e => {
       if (penPickMode){ e.preventDefault(); }
     });
+    // Rev.19.53: 배경 맞춤 모드 휠 (캡처 단계로 줌 차단 우선)
+    const _bgWheelTarget = (typeof wrap !== 'undefined' && wrap) || drawCanvas;
+    _bgWheelTarget.addEventListener('wheel', e => {
+      if (typeof bgAdjustWheelHandler === 'function') bgAdjustWheelHandler(e);
+    }, { capture: true, passive: false });
   }
 
   // Rev.19.40: 단순화 토글 비활성화 — localStorage 복원도 비활성, 저장값도 제거
@@ -3047,6 +3161,29 @@ function tryDimCommand(cmdStr){
           if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
           if (typeof openPenShapeModal === 'function') openPenShapeModal('triangle', null);
         }, ex:'△ 정삼각형: 중심X,Y · 변 길이 · 회전° 입력 → 도형 추가' },
+      // Rev.19.52: 배경 도면(이미지) — 사각형 안에 도면 맞춰 넣기
+      { l:'📷 배경 도면', action: () => {
+          const f = document.getElementById('imgFile');
+          if (f) f.click();
+          const sh = document.getElementById('statusHint');
+          if (sh) sh.textContent = '📷 배경 이미지 선택 후 [🎯 배경 맞춤]으로 마우스 조정';
+        }, ex:'📷 배경 도면 열기: 이미지 파일 선택 → 사각형(베이스)에 맞춰 배경으로 깔림 · 이후 [🎯 배경 맞춤]으로 마우스 드래그 조정' },
+      // Rev.19.53: 마우스 드래그/휠로 배경 이미지 조정
+      { l:'🎯 배경 맞춤', action: () => {
+          if (typeof bgAdjustToggle === 'function') bgAdjustToggle();
+        }, ex:'🎯 배경 맞춤 토글: 좌클릭 드래그 = 위치 이동 · 휠 스크롤 = 크기 (Shift+휠 = 미세) · ESC = 종료. 슬라이더 값과 자동 동기화' },
+      { l:'↩️ 배경 초기화', action: () => {
+          const m = document.getElementById('menuBgReset');
+          if (m) m.click();
+          const sh = document.getElementById('statusHint');
+          if (sh) sh.textContent = '↩️ 배경 이미지 위치·크기 초기화';
+        }, ex:'↩️ 배경 위치/크기 초기화 (이미지는 유지)' },
+      { l:'❌ 배경 제거', action: () => {
+          const m = document.getElementById('menuClearBg');
+          if (m) m.click();
+          const sh = document.getElementById('statusHint');
+          if (sh) sh.textContent = '❌ 배경 이미지 제거됨';
+        }, ex:'❌ 배경 이미지 제거 (도형은 유지)' },
     ],
     '연장/절교': [
       { l:'연장', t:'연장 ', ex:'연장 1 2 30 / 교점 / X 50 / Y 30' },
@@ -3069,7 +3206,11 @@ function tryDimCommand(cmdStr){
       { l:'백(취소)', t:'백', ex:'백 → 직전 1회 취소' },
       { l:'교점', t:'교점', ex:'교점 → 모든 교차점 번호부여' },
       { l:'만남', t:'만남', ex:'만남 → 선택한 두 선의 무한직선 교점에 번호 부여 (두께 평행선처럼 번호 없는 선도 OK). 두 선 선택 후 입력 · 또는 "만남 3 5"=3번/5번 점이 속한 선 자동' },
-      { l:'🏷 라벨 자동', t:'라벨', ex:'🏷 라벨이 없는 점·도형 꼭짓점에 자동 번호 부여 (이미 라벨 있는 건 제외)' },
+      { l:'🏷 라벨 자동', action: () => {
+          // Rev.19.51: 즉시 실행 (이전엔 t:'라벨'로 ▶ 추가 클릭 필요했음) + 텍스트 모드 자동 진입
+          if (typeof penPickMode !== 'undefined' && !penPickMode && typeof startTextMode === 'function') startTextMode();
+          if (typeof tryDimCommand === 'function') tryDimCommand('라벨');
+        }, ex:'🏷 라벨이 없는 점·도형 꼭짓점에 자동 번호 부여 (이미 라벨 있는 건 제외) — 버튼만 눌러도 즉시 실행' },
       // Rev.19.16: 정리·외곽선·채움을 텍스트도구에서도 직접 호출
       { l:'🧹 정리', t:'정리 ', ex:'🧹 정리 1 → 1mm 이하 짧은 선과 모든 점 삭제 (치수 생략 시 도구바 칸 값). 선택된 도형 있으면 그 안에서만' },
       { l:'🖊 외곽선', action: () => { document.getElementById('headerBtnOutline')?.click(); },

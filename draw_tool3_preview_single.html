@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.60 (단일본) - 높이조절/높이이동 핸들 분리</title>
+<title>tool3 v8.61 (단일본) - 높이조절/높이이동 핸들 거리 확대</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.60</h1>
+  <h1>📐 tool3 v8.61</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -5997,14 +5997,24 @@ function showTransformHandles(part){
   });
 
   // ── 3) 윗면 중앙: 높이(Y) 조절 (흰 점 + 가는 지시선) ──
+  // v8.61: 지시선을 좀 더 길게 + 흰점에 넉넉한 투명 클릭영역 추가 (선택 쉽게)
   const stem = new THREE.Mesh(
-    new THREE.CylinderGeometry(dot*0.18, dot*0.18, maxSize*0.12, 8),
+    new THREE.CylinderGeometry(dot*0.18, dot*0.18, maxSize*0.20, 8),
     new THREE.MeshBasicMaterial({color: WHITE, depthTest:false, transparent:true, opacity:0.7})
   );
-  stem.position.set(center.x, topY + maxSize*0.06, center.z);
+  stem.position.set(center.x, topY + maxSize*0.10, center.z);
   stem.renderOrder = 1000;
   group.add(stem);
-  makeDot(center.x, topY + maxSize*0.12, center.z, {type:'scale', axis:'+y'});
+  makeDot(center.x, topY + maxSize*0.20, center.z, {type:'scale', axis:'+y'});
+  // 큰 투명 클릭영역 (흰점만으로는 작아서 클릭이 어려움)
+  const yHit = new THREE.Mesh(
+    new THREE.SphereGeometry(dot*2.4, 12, 10),
+    new THREE.MeshBasicMaterial({transparent:true, opacity:0, depthTest:false, depthWrite:false})
+  );
+  yHit.position.set(center.x, topY + maxSize*0.20, center.z);
+  yHit.userData._handle = {type:'scale', axis:'+y'};
+  yHit.renderOrder = 999;
+  group.add(yHit);
 
   // ── 4) 회전 핸들: 작은 곡선 화살표 아이콘 (클릭하면 원형 회전 링 표시) ──
   //    팅커캐드처럼 평소엔 작은 아이콘, 클릭 시 그 축의 원형 링이 나타남
@@ -6098,11 +6108,10 @@ function showTransformHandles(part){
     grp.position.set(center.x + posOffset.x, center.y + posOffset.y, center.z + posOffset.z);
     return grp;
   }
-  // v8.58: Y이동(=수직 이동) 핸들 — 부품 위쪽 중앙에 배치 (가장 직관적, Tinkercad 스타일)
-  // v8.59: 색상을 더 진한 파랑으로 강조 (수직 = Z = 파랑, CAD 컨벤션)
-  // v8.60: 높이조절(흰점, topY+0.12) 위로 충분히 띄워 클릭 충돌 방지 (0.28 → 0.46)
+  // v8.58~v8.60: Y이동 핸들 — 부품 위쪽 중앙
+  // v8.61: 높이조절 흰점과 시각/클릭 거리 크게 확보 (0.46 → 0.85)
   group.add(makeMoveArrow('y', 0x2244ff,
-    {x: 0, y: size.y/2 + maxSize*0.46, z: 0}));
+    {x: 0, y: size.y/2 + maxSize*0.85, z: 0}));
 
   transformState.handleGroup = group;
   scene.add(group);

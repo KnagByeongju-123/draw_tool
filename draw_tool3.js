@@ -5549,6 +5549,13 @@ function doRevolve(){
     ? [...state.selectedShapes].map(i => state.shapes[i])
     : state.shapes;
   
+  // v8.48: 채움 객체가 포함된 경우 → 한쪽 outline 자동 추출 + 정렬 skip
+  // (닫힌 폴리곤 전체를 y로 정렬하면 정점 순서가 깨져 사오리 형상이 됨)
+  const hasFill = targets.some(s => s.type === 'fill');
+  if(hasFill){
+    toast('🌀 채움 객체 회전체: 한쪽 outline 자동 추출 (9각형 같은 닫힌 도형은 🟦 돌출이 더 적합)');
+  }
+  
   const points = [];
   targets.forEach(s=>{
     if(s.type === 'line'){
@@ -5568,8 +5575,30 @@ function doRevolve(){
       points.push({x: s.x2, y: s.y2});
       points.push({x: s.x1, y: s.y2});
     } else if(s.type === 'fill' && Array.isArray(s.vertices)){
-      // v8.47: 채움 객체 — 폴리곤 정점 그대로 단면으로 사용
-      s.vertices.forEach(v => points.push({x: v.x, y: v.y}));
+      // v8.48: 닫힌 폴리곤 → 회전축 기준 한쪽 outline만 추출
+      // |radius| 최대 정점 ~ |radius| 최소 정점 사이 두 경로 중 더 긴 쪽 (외곽 outline)
+      const vs = s.vertices;
+      const n = vs.length;
+      const rOf = (v) => (axis === 'y' || axis === 'z') ? v.x : v.y;
+      let iMax = 0, iMin = 0;
+      for(let i = 1; i < n; i++){
+        if(Math.abs(rOf(vs[i])) > Math.abs(rOf(vs[iMax]))) iMax = i;
+        if(Math.abs(rOf(vs[i])) < Math.abs(rOf(vs[iMin]))) iMin = i;
+      }
+      function _traceOutline(start, end, dir){
+        const path = [];
+        let i = start, safety = n + 2;
+        while(safety-- > 0){
+          path.push({x: vs[i].x, y: vs[i].y});
+          if(i === end) return path;
+          i = (i + dir + n) % n;
+        }
+        return path;
+      }
+      const fwd = _traceOutline(iMax, iMin, 1);
+      const bwd = _traceOutline(iMax, iMin, -1);
+      const outline = (fwd.length >= bwd.length) ? fwd : bwd;
+      outline.forEach(v => points.push({x: v.x, y: v.y}));
     }
   });
   
@@ -5633,7 +5662,11 @@ function doRevolve(){
       return new THREE.Vector2(Math.max(0, newR), p.x);
     });
   }
-  lathePts.sort((a,b)=>a.y - b.y);
+  // v8.48: 채움 객체가 있으면 정점 순서가 이미 outline 순서이므로 정렬 skip
+  // (정렬하면 outline 순서가 깨져 사오리 형상이 됨)
+  if(!hasFill){
+    lathePts.sort((a,b)=>a.y - b.y);
+  }
   
   // v2.3: 회전체 결과가 비정상(원반/도넛만) 인지 진단
   //   - 모든 lathe 점의 반경(x)이 거의 같으면 → 원반/도넛만 나옴

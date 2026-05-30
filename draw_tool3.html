@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.24 - 라이브 접선 스냅 + 두 선 접선 배치</title>
+<title>tool3 v8.26 - 교차분할 견고화 (접선·끝점·부동소수점 오차)</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.24</h1>
+  <h1>📐 tool3 v8.26</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -335,13 +335,13 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <!-- v8.24: 라이브 접선 스냅 -->
     <button id="btn-tangentsnap" onclick="toggleTangentSnap()" title="🪐 라이브 접선 스냅: 원/호 드래그 중 가까운 선에 자동 접선 (선을 따라 미끄러짐)">🪐</button>
   </div>
-  <!-- v8.23: Y축 표시 기준점 — 표시 Y가 이 값에서부터 0으로 계산됨 -->
-  <div class="group sketch-only" id="yOriginGroup">
-    <label title="Y축 표시 기준점(mm). 입력값 만큼 Y축이 위/아래로 이동한 것처럼 표시·입력됨">Y기준:</label>
-    <input type="number" id="yOriginInput" value="0" step="0.1" style="width:60px" title="Y축 기준점(mm). 예: 50 입력 시 실제 Y=50인 점이 표시 Y=0으로 표시됨. 입력값도 동일 기준으로 환산">
-    <button id="btn-yOriginApply" onclick="sk3SetYOrigin()" title="입력값을 Y 기준점으로 설정 (Enter도 동작)">적용</button>
-    <button id="btn-yOriginReset" onclick="sk3ResetYOrigin()" title="Y 기준 0으로 초기화" style="padding:2px 6px">⟲</button>
-    <span id="yOriginIndicator" style="color:#888;font-size:10px;margin-left:4px"></span>
+  <!-- v8.25: X축 표시 기준점 — 표시 X가 이 값에서부터 0으로 계산됨 (음수도 가능) -->
+  <div class="group sketch-only" id="xOriginGroup">
+    <label title="X축 표시 기준점(mm). 입력값 만큼 X축이 좌/우로 이동한 것처럼 표시·입력됨">X기준:</label>
+    <input type="number" id="xOriginInput" value="0" step="0.1" style="width:60px" title="X축 기준점(mm). 음수 가능. 예: 50 입력 시 실제 X=50인 점이 표시 X=0으로 표시됨. -30 입력 시 실제 X=-30이 표시 X=0">
+    <button id="btn-xOriginApply" onclick="sk3SetXOrigin()" title="입력값을 X 기준점으로 설정 (Enter도 동작)">적용</button>
+    <button id="btn-xOriginReset" onclick="sk3ResetXOrigin()" title="X 기준 0으로 초기화" style="padding:2px 6px">⟲</button>
+    <span id="xOriginIndicator" style="color:#888;font-size:10px;margin-left:4px"></span>
   </div>
   <div class="group sketch-only">
     <label>색상:</label>

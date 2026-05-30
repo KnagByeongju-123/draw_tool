@@ -699,6 +699,27 @@ window.sk3TogglePenCoord = function(){
   if(btn) btn.style.background = state.penShowCoord ? '#a04030' : '';
 };
 
+// v8.36: 원점(0,0)에 펜점 추가 — 작업 시작점 빠른 표시
+window.sk3AddOriginPoint = function(){
+  if(state.mode !== 'sketch'){ toast('스케치 모드에서만 가능'); return; }
+  const tol = 0.01;
+  let idx = state.penPoints.findIndex(p => Math.abs(p.x) < tol && Math.abs(p.y) < tol);
+  if(idx >= 0){
+    state.penCur = idx;
+    redrawSketch();
+    if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+    toast('● 원점 P' + idx + ' 이미 있음 (현재 점으로 선택)');
+    return;
+  }
+  pushHistory();
+  state.penPoints.push({x: 0, y: 0});
+  state.penCur = state.penPoints.length - 1;
+  redrawSketch(); updateInfo();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  toast('● 원점 (0, 0)에 점 P' + state.penCur + ' 추가');
+  if(typeof skCmdLog === 'function') skCmdLog('  ● 원점 점 P' + state.penCur + ' 추가 (0, 0)', 'sys');
+};
+
 // ─── v8.33: 지름좌표 → 원점 양쪽에 점 2개 추가 ─────────────────
 // 입력값 D(지름) → 원점(0,0) 기준 ±D/2 X축 양쪽에 점 추가
 // 이미 같은 좌표에 펜점이 있으면 재사용 (중복 방지)
@@ -1278,16 +1299,29 @@ skCanvas.addEventListener('mousedown', (e)=>{
         }
         return;
       }
+      // v8.35: Shift 누른 상태로 점 드래그 = 복사 모드 (Excel 스타일)
+      // 원본 점은 그대로 두고 복제본을 만들어 그 복제본을 드래그
+      let dragIdx = hp;
+      let copyMode = false;
+      if(e.shiftKey){
+        const src = state.penPoints[hp];
+        state.penPoints.push({x: src.x, y: src.y});
+        dragIdx = state.penPoints.length - 1;
+        copyMode = true;
+      }
       state.dragPoint = {
-        idx: hp,
-        origX: state.penPoints[hp].x,
-        origY: state.penPoints[hp].y,
+        idx: dragIdx,
+        origX: state.penPoints[dragIdx].x,
+        origY: state.penPoints[dragIdx].y,
         startSx: sx, startSy: sy,
         moved: false,
-        prevTool: state.tool
+        prevTool: state.tool,
+        copyMode: copyMode,
+        sourceIdx: copyMode ? hp : -1
       };
-      state.penCur = hp;
-      skCanvas.style.cursor = 'move';
+      state.penCur = dragIdx;
+      skCanvas.style.cursor = copyMode ? 'copy' : 'move';
+      if(copyMode && typeof skCmdLog === 'function') skCmdLog('  📋 Shift+드래그 복사: P' + hp + ' → P' + dragIdx + ' (복제)', 'sys');
       redrawSketch();
       return;
     }
@@ -1523,16 +1557,20 @@ skCanvas.addEventListener('mousemove', (e)=>{
     const p = state.penPoints[dp.idx];
     const oldX = p.x, oldY = p.y;
     p.x = wp.x; p.y = wp.y;
-    const tol = 0.01;
-    state.shapes.forEach(s => {
-      if(s.type !== 'line') return;
-      if(Math.abs(s.x1-oldX)<tol && Math.abs(s.y1-oldY)<tol){ s.x1=wp.x; s.y1=wp.y; }
-      if(Math.abs(s.x2-oldX)<tol && Math.abs(s.y2-oldY)<tol){ s.x2=wp.x; s.y2=wp.y; }
-    });
+    // v8.35: 복사 모드면 연결된 선은 따라오지 않음 (점만 복제)
+    if(!dp.copyMode){
+      const tol = 0.01;
+      state.shapes.forEach(s => {
+        if(s.type !== 'line') return;
+        if(Math.abs(s.x1-oldX)<tol && Math.abs(s.y1-oldY)<tol){ s.x1=wp.x; s.y1=wp.y; }
+        if(Math.abs(s.x2-oldX)<tol && Math.abs(s.y2-oldY)<tol){ s.x2=wp.x; s.y2=wp.y; }
+      });
+    }
     state._penPreviewWp = wp;  // 마커 표시용
     redrawSketch();
     // v8.25: X기준점 적용 — 표시는 dispX()로 변환
-    document.getElementById('footCoord').textContent = `X: ${dispX(wp.x).toFixed(2)}  Y: ${wp.y.toFixed(2)}` + (state.xOrigin?' (X기준'+(state.xOrigin>=0?'+':'')+state.xOrigin+')':'') + (state._lastSnapKind?' ['+state._lastSnapKind+']':'') + ' · 🤚드래그';
+    const modeTag = dp.copyMode ? ' · 📋복사' : ' · 🤚드래그';
+    document.getElementById('footCoord').textContent = `X: ${dispX(wp.x).toFixed(2)}  Y: ${wp.y.toFixed(2)}` + (state.xOrigin?' (X기준'+(state.xOrigin>=0?'+':'')+state.xOrigin+')':'') + (state._lastSnapKind?' ['+state._lastSnapKind+']':'') + modeTag;
     return;
   }
   // v8.16: 도형 드래그 이동 진행 중
@@ -1627,28 +1665,46 @@ skCanvas.addEventListener('mouseup', (e)=>{
     const dp = state.dragPoint;
     const p = state.penPoints[dp.idx];
     if(dp.moved && (Math.abs(p.x - dp.origX) > 0.01 || Math.abs(p.y - dp.origY) > 0.01)){
-      // 진짜 드래그 → 히스토리 기록
-      const finalX = p.x, finalY = p.y;
-      const tol = 0.01;
-      // 원위치 복원
-      state.shapes.forEach(s => {
-        if(s.type !== 'line') return;
-        if(Math.abs(s.x1-finalX)<tol && Math.abs(s.y1-finalY)<tol){ s.x1=dp.origX; s.y1=dp.origY; }
-        if(Math.abs(s.x2-finalX)<tol && Math.abs(s.y2-finalY)<tol){ s.x2=dp.origX; s.y2=dp.origY; }
-      });
-      p.x = dp.origX; p.y = dp.origY;
-      pushHistory();
-      // 다시 최종 위치로
-      state.shapes.forEach(s => {
-        if(s.type !== 'line') return;
-        if(Math.abs(s.x1-dp.origX)<tol && Math.abs(s.y1-dp.origY)<tol){ s.x1=finalX; s.y1=finalY; }
-        if(Math.abs(s.x2-dp.origX)<tol && Math.abs(s.y2-dp.origY)<tol){ s.x2=finalX; s.y2=finalY; }
-      });
-      p.x = finalX; p.y = finalY;
-      setStat('✓ P' + dp.idx + ' 이동 (' + finalX.toFixed(2) + ', ' + finalY.toFixed(2) + ')mm');
+      // v8.35: 복사 모드면 단순히 히스토리만 — 원본 펜점은 이미 따로 있음
+      if(dp.copyMode){
+        // 복제본을 제거한 상태로 되돌리고 history push, 그 후 다시 추가
+        const finalX = p.x, finalY = p.y;
+        state.penPoints.splice(dp.idx, 1);
+        pushHistory();
+        state.penPoints.push({x: finalX, y: finalY});
+        state.penCur = state.penPoints.length - 1;
+        setStat('✓ P' + dp.sourceIdx + ' → P' + state.penCur + ' 복사 (' + finalX.toFixed(2) + ', ' + finalY.toFixed(2) + ')mm');
+      } else {
+        // 진짜 드래그 → 히스토리 기록
+        const finalX = p.x, finalY = p.y;
+        const tol = 0.01;
+        // 원위치 복원
+        state.shapes.forEach(s => {
+          if(s.type !== 'line') return;
+          if(Math.abs(s.x1-finalX)<tol && Math.abs(s.y1-finalY)<tol){ s.x1=dp.origX; s.y1=dp.origY; }
+          if(Math.abs(s.x2-finalX)<tol && Math.abs(s.y2-finalY)<tol){ s.x2=dp.origX; s.y2=dp.origY; }
+        });
+        p.x = dp.origX; p.y = dp.origY;
+        pushHistory();
+        // 다시 최종 위치로
+        state.shapes.forEach(s => {
+          if(s.type !== 'line') return;
+          if(Math.abs(s.x1-dp.origX)<tol && Math.abs(s.y1-dp.origY)<tol){ s.x1=finalX; s.y1=finalY; }
+          if(Math.abs(s.x2-dp.origX)<tol && Math.abs(s.y2-dp.origY)<tol){ s.x2=finalX; s.y2=finalY; }
+        });
+        p.x = finalX; p.y = finalY;
+        setStat('✓ P' + dp.idx + ' 이동 (' + finalX.toFixed(2) + ', ' + finalY.toFixed(2) + ')mm');
+      }
     } else {
-      // 안 움직임 — 단일 클릭으로 처리 (penCur만 이동, 선택 도구 동작도 보존)
-      setStat('▸ P' + dp.idx + ' 선택 (penCur로 설정)');
+      // 안 움직임
+      if(dp.copyMode){
+        // 복제했는데 안 움직였으면 복제본 제거 (사용자가 마음 바꿈)
+        state.penPoints.splice(dp.idx, 1);
+        state.penCur = dp.sourceIdx;
+        setStat('▸ 복사 취소 (이동 안 함)');
+      } else {
+        setStat('▸ P' + dp.idx + ' 선택 (penCur로 설정)');
+      }
     }
     state.dragPoint = null;
     state._penPreviewWp = null;
@@ -9763,6 +9819,36 @@ document.addEventListener('keydown', (e)=>{
       skCanvas.style.cursor = '';
       redrawSketch(); updateInfo();
       setStat('✗ 도형 이동 취소');
+      return;
+    }
+    // v8.35: 점 드래그(특히 Shift 복사) 진행 중이면 취소
+    if(state.dragPoint){
+      const dp = state.dragPoint;
+      if(dp.copyMode){
+        // 복제본 제거, 원본 복귀
+        state.penPoints.splice(dp.idx, 1);
+        state.penCur = dp.sourceIdx;
+        setStat('✗ Shift+복사 취소');
+      } else {
+        // 일반 드래그: 원위치 복원
+        const p = state.penPoints[dp.idx];
+        if(p){
+          const tol = 0.01;
+          const curX = p.x, curY = p.y;
+          state.shapes.forEach(s => {
+            if(s.type !== 'line') return;
+            if(Math.abs(s.x1-curX)<tol && Math.abs(s.y1-curY)<tol){ s.x1=dp.origX; s.y1=dp.origY; }
+            if(Math.abs(s.x2-curX)<tol && Math.abs(s.y2-curY)<tol){ s.x2=dp.origX; s.y2=dp.origY; }
+          });
+          p.x = dp.origX; p.y = dp.origY;
+        }
+        setStat('✗ 점 이동 취소');
+      }
+      state.dragPoint = null;
+      state._penPreviewWp = null;
+      state._lastSnapKind = null;
+      skCanvas.style.cursor = '';
+      redrawSketch(); updateInfo();
       return;
     }
     // v2.6: 워크플레인 픽 모드 또는 활성 워크플레인 우선 해제

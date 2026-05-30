@@ -2430,6 +2430,9 @@ window.sk3UpdateSelProp = function(){
       let absDeg = lineDeg;
       if(absDeg < 0) absDeg += 360;
       const reverseDeg = (absDeg + 180) % 360;
+      // v8.30: 상대 치수 (P1→P2)
+      const relDx = s.x2 - s.x1;
+      const relDy = s.y2 - s.y1;
       html = `
         <div class="prop-row"><label>P1.X</label><input type="number" step="0.1" id="sk3p1x" value="${dispX(s.x1).toFixed(2)}"></div>
         <div class="prop-row"><label>P1.Y</label><input type="number" step="0.1" id="sk3p1y" value="${s.y1.toFixed(2)}"></div>
@@ -2438,7 +2441,9 @@ window.sk3UpdateSelProp = function(){
         <div class="prop-row"><label>색상</label><input type="color" id="sk3color" value="${s.color||'#000000'}"></div>
         <div class="prop-row"><label>굵기</label><input type="number" step="1" id="sk3lw" value="${s.lineWidth||2}"></div>
         <button onclick="sk3ApplySelProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
-        <div style="font-size:10px;color:#888;margin-top:4px;line-height:1.5">
+        <div style="font-size:10px;color:#888;margin-top:4px;line-height:1.5;border-top:1px solid #333;padding-top:5px">
+          <span style="color:#aac8ff;font-weight:bold">📐 상대 (P1→P2)</span><br>
+          Δx: <b style="color:#fff">${relDx >= 0 ? '+' : ''}${relDx.toFixed(2)}mm</b> · Δy: <b style="color:#fff">${relDy >= 0 ? '+' : ''}${relDy.toFixed(2)}mm</b><br>
           📏 길이: <b style="color:#aac8ff">${lineLen.toFixed(2)}mm</b><br>
           📐 절대각도(P1→P2): <b style="color:#f39c12">${absDeg.toFixed(2)}°</b><br>
           ↔ 반대방향(P2→P1): <span style="color:#aaa">${reverseDeg.toFixed(2)}°</span><br>
@@ -2496,30 +2501,44 @@ window.sk3UpdateSelProp = function(){
     panel.style.display = 'block';
     title.textContent = '● 점 P' + i;
     // v8.15: 연결된 선들의 절대각도 계산
+    // v8.30: 각 연결선의 절대각도/길이를 input으로 만들어 수정 가능
     const tol = 0.01;
     const connected = [];
     state.shapes.forEach((s, sIdx) => {
       if(s.type !== 'line') return;
       if(Math.abs(s.x1 - p.x) < tol && Math.abs(s.y1 - p.y) < tol){
-        // P{i}가 시작점 → P2 방향 절대각
+        // 이 점이 P1 → 다른 끝점은 P2 (이동 대상)
         let deg = Math.atan2(s.y2-s.y1, s.x2-s.x1) * 180 / Math.PI;
         if(deg < 0) deg += 360;
         const len = Math.hypot(s.x2-s.x1, s.y2-s.y1);
-        connected.push({deg, len, ex:s.x2, ey:s.y2});
+        connected.push({deg, len, ex:s.x2, ey:s.y2, shapeIdx:sIdx, endIs:'P2'});
       } else if(Math.abs(s.x2 - p.x) < tol && Math.abs(s.y2 - p.y) < tol){
-        // P{i}가 끝점 → P1 방향 절대각 (현재점에서 나가는 방향)
+        // 이 점이 P2 → 다른 끝점은 P1 (이동 대상)
         let deg = Math.atan2(s.y1-s.y2, s.x1-s.x2) * 180 / Math.PI;
         if(deg < 0) deg += 360;
         const len = Math.hypot(s.x1-s.x2, s.y1-s.y2);
-        connected.push({deg, len, ex:s.x1, ey:s.y1});
+        connected.push({deg, len, ex:s.x1, ey:s.y1, shapeIdx:sIdx, endIs:'P1'});
       }
     });
     let linesHtml = '';
     if(connected.length > 0){
       connected.sort((a,b) => a.deg - b.deg);
-      linesHtml = '<div style="font-size:10px;color:#aac8ff;margin-top:6px;border-top:1px solid #333;padding-top:5px">📐 연결된 선 ' + connected.length + '개 (P' + i + '에서 나가는 방향)</div>';
-      connected.forEach(c => {
-        linesHtml += '<div style="font-size:10px;color:#bbb;margin-top:2px">↗ <b style="color:#f39c12">' + c.deg.toFixed(2) + '°</b> · 길이 ' + c.len.toFixed(2) + 'mm → (' + c.ex.toFixed(2) + ',' + c.ey.toFixed(2) + ')</div>';
+      linesHtml = '<div style="font-size:10px;color:#aac8ff;margin-top:6px;border-top:1px solid #333;padding-top:5px"><b>📐 연결된 선 ' + connected.length + '개</b> (P' + i + '에서 나가는 방향)<br><span style="color:#666;font-size:9px">각도/길이 수정 → 다른 끝점이 이동</span></div>';
+      connected.forEach((c, k) => {
+        linesHtml += '<div style="margin-top:4px;padding:4px;background:#1f2530;border:1px solid #2e3a45;border-radius:3px">' +
+          '<div style="display:flex;gap:4px;align-items:center;font-size:10px;color:#bbb">' +
+            '<span style="width:28px;color:#f39c12">↗각</span>' +
+            '<input type="number" step="0.01" id="sk3conn_deg_' + k + '" value="' + c.deg.toFixed(2) + '" style="flex:1;width:60px;background:#0a0e14;color:#f39c12;border:1px solid #444;border-radius:3px;padding:2px 4px;font-size:10px">' +
+            '<span style="color:#666">°</span>' +
+          '</div>' +
+          '<div style="display:flex;gap:4px;align-items:center;margin-top:3px;font-size:10px;color:#bbb">' +
+            '<span style="width:28px;color:#aac8ff">길이</span>' +
+            '<input type="number" step="0.01" id="sk3conn_len_' + k + '" value="' + c.len.toFixed(2) + '" style="flex:1;width:60px;background:#0a0e14;color:#aac8ff;border:1px solid #444;border-radius:3px;padding:2px 4px;font-size:10px">' +
+            '<span style="color:#666">mm</span>' +
+          '</div>' +
+          '<div style="font-size:9px;color:#666;margin-top:2px">현재 끝점: (' + dispX(c.ex).toFixed(2) + ', ' + c.ey.toFixed(2) + ')</div>' +
+          '<button onclick="sk3ApplyConnectedLine(' + i + ',' + c.shapeIdx + ',\'' + c.endIs + '\',' + k + ')" style="width:100%;margin-top:3px;padding:3px;background:#3a7ad4;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:10px">적용</button>' +
+          '</div>';
       });
     } else {
       linesHtml = '<div style="font-size:10px;color:#666;margin-top:6px;border-top:1px solid #333;padding-top:5px">연결된 선 없음</div>';
@@ -2614,6 +2633,50 @@ window.sk3ApplyPointProp = function(idx){
   redrawSketch(); updateInfo();
   sk3UpdateSelProp();
   toast('✓ P' + idx + ' → 표시X=' + nxDisp + ' (실제X=' + nx + ', Y=' + ny + ')');
+};
+
+// v8.30: 점 속성에서 연결된 선의 각도/길이 수정 적용
+// pointIdx: 기준 점 인덱스 (penPoints)
+// shapeIdx: 대상 선의 인덱스
+// fixedEnd: 'P1' or 'P2' — 어느 끝점이 이동 대상인지 (이 끝이 새 위치로 옮겨감)
+// connIdx: HTML id의 접미사 (sk3conn_deg_N, sk3conn_len_N)
+window.sk3ApplyConnectedLine = function(pointIdx, shapeIdx, fixedEnd, connIdx){
+  const p = state.penPoints[pointIdx];
+  const s = state.shapes[shapeIdx];
+  if(!p || !s || s.type !== 'line'){ toast('대상 선을 찾을 수 없음'); return; }
+  const degInp = document.getElementById('sk3conn_deg_' + connIdx);
+  const lenInp = document.getElementById('sk3conn_len_' + connIdx);
+  if(!degInp || !lenInp) return;
+  const deg = sk3EvalExpr(degInp.value);
+  const len = sk3EvalExpr(lenInp.value);
+  if(!isFinite(deg) || !isFinite(len) || len < 0){ toast('각도/길이 입력 오류'); return; }
+  pushHistory();
+  // 기준점(P pointIdx)에서 각도/길이만큼 떨어진 점이 새 끝점
+  const rad = deg * Math.PI / 180;
+  const newEx = p.x + Math.cos(rad) * len;
+  const newEy = p.y + Math.sin(rad) * len;
+  // fixedEnd에 따라 선의 어느 끝을 옮길지 결정
+  const tol = 0.01;
+  let oldEx, oldEy;
+  if(fixedEnd === 'P2'){
+    // 기준점이 P1(s.x1,s.y1) → 옮길 곳은 P2
+    oldEx = s.x2; oldEy = s.y2;
+    s.x2 = newEx; s.y2 = newEy;
+  } else {
+    // 기준점이 P2(s.x2,s.y2) → 옮길 곳은 P1
+    oldEx = s.x1; oldEy = s.y1;
+    s.x1 = newEx; s.y1 = newEy;
+  }
+  // 이동된 끝점과 일치하던 펜점도 함께 이동
+  state.penPoints.forEach(pp => {
+    if(pp === p) return; // 기준점은 그대로
+    if(Math.abs(pp.x - oldEx) < tol && Math.abs(pp.y - oldEy) < tol){
+      pp.x = newEx; pp.y = newEy;
+    }
+  });
+  redrawSketch(); updateInfo();
+  sk3UpdateSelProp();
+  toast('✓ 선 #' + shapeIdx + ' 갱신: ' + deg.toFixed(2) + '°, ' + len.toFixed(2) + 'mm → (' + dispX(newEx).toFixed(2) + ',' + newEy.toFixed(2) + ')');
 };
 
 function selectShapeAt(wp, addToSel){
@@ -12226,6 +12289,7 @@ function initCmdKeyboard() {
         try { window.sk3ApplyPointProp(state.penCur); } catch(e){}
       }
     }
+    // v8.30: 연결된 선 각도/길이 input은 자동 적용 안 함 (선 단위 적용 버튼이 별도 있음)
     // 도구바 X기준 input
     if(id === 'xOriginInput' && typeof window.sk3SetXOrigin === 'function'){
       try { window.sk3SetXOrigin(); } catch(e){}

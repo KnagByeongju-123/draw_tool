@@ -4422,16 +4422,20 @@ function setupRaycastClick(dom){
       transformState.draggingHandle = null;
       transformState._rotStart = null;
       transformState._rotInitial = null;
+      transformState._rotInitialQuat = null;  // v8.55
+      transformState._rotWorldAxis = null;    // v8.55
       // v2.0: 회전 종료 시 - v3.9: HUD를 5초간 유지하여 직접 입력 가능
       if(wasRotate){
         if(p && p.mesh){
-          const deg = (p.mesh.rotation[h.axis] * 180 / Math.PI);
-          const axisName = h.axis.toUpperCase();
-          toast('↻ ' + axisName + '축 회전 = ' + deg.toFixed(1) + '°  (HUD 클릭 = 직접 입력)');
-          setStat('회전 완료: ' + axisName + '축 ' + deg.toFixed(1) + '°');
+          // v8.55: 카메라 기준 회전이므로 단순 안내 (Euler 값은 누적 시 의미 없음)
+          const axisName = (h.axis === 'x') ? '가로(화면X)' : (h.axis === 'y') ? '세로(화면Y)' : '시계(화면Z)';
+          toast('↻ ' + axisName + ' 축 회전 완료 (카메라 기준)');
+          setStat('회전 완료: ' + axisName + ' 축');
           syncRotPropPanel(p);
-          // HUD에 마지막 정보 유지 + 클릭 가능 표시
-          rotHudPersist(h.axis, p.mesh.rotation[h.axis]);
+          // HUD 영구 표시는 카메라 기준이라 약간 다르게: 마지막 mesh.rotation 사용
+          if(typeof rotHudPersist === 'function'){
+            rotHudPersist(h.axis, p.mesh.rotation[h.axis]);
+          }
         }
       }
       // v2.5: 크기 변경 종료 시 HUD 숨김 + 최종 크기 알림
@@ -5100,7 +5104,7 @@ function handleDrag(e){
       refreshPropPanelTransform(p);
     }
   } else if(h.type === 'rotate'){
-    // v2.0: 3축 회전 - 객체 중심을 화면에 투영하고 마우스 각도 차이로 회전 + 실시간 각도 표시
+    // v8.55: Tinkercad 스타일 — 카메라 기준 회전축 (화면의 핸들 방향이 화면 기준 회전)
     p.mesh.updateMatrixWorld(true);
     const bb = new THREE.Box3().setFromObject(p.mesh);
     const center3D = bb.getCenter(new THREE.Vector3());
@@ -5108,17 +5112,33 @@ function handleDrag(e){
     const projCenter = center3D.clone().project(camera);
     const cx = (projCenter.x + 1) * 0.5 * rect.width + rect.left;
     const cy = (-projCenter.y + 1) * 0.5 * rect.height + rect.top;
-    // 시작 각도 (초기 한 번 계산)
+    // 시작 각도 + 시작 quaternion 저장
     if(transformState._rotStart === null || transformState._rotStart === undefined){
       transformState._rotStart = Math.atan2(transformState.dragStart.y - cy, transformState.dragStart.x - cx);
-      transformState._rotInitial = {x: p.mesh.rotation.x, y: p.mesh.rotation.y, z: p.mesh.rotation.z};
+      transformState._rotInitialQuat = p.mesh.quaternion.clone();
+      // v8.55: 핸들 축(x/y/z)을 카메라 기준 회전축으로 매핑
+      //   x 핸들 → 카메라 right (화면 가로축 기준 회전, 위/아래로 기울이기)
+      //   y 핸들 → 카메라 up    (화면 세로축 기준 회전, 좌/우로 돌리기)
+      //   z 핸들 → 카메라 forward (화면 깊이축 기준 회전, 시계/반시계)
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3();
+      const forward = new THREE.Vector3();
+      camera.matrixWorld.extractBasis(right, up, forward);
+      // forward는 카메라가 -Z를 바라봄 → 우리가 원하는 시야 방향은 -forward
+      forward.negate();
+      let axis;
+      if(h.axis === 'x') axis = right;
+      else if(h.axis === 'y') axis = up;
+      else axis = forward;
+      transformState._rotWorldAxis = axis.normalize();
     }
     const angleNow = Math.atan2(e.clientY - cy, e.clientX - cx);
     let delta = angleNow - transformState._rotStart;
-    // 화면 좌표는 y가 아래로 +라 마우스 회전 방향과 일치
-    // 축에 따른 부호 조정 (시각적으로 자연스럽게)
-    let deltaSigned = (h.axis === 'z' || h.axis === 'x') ? -delta : delta;
-    // v5.3: 회전 스냅 단위 적용 (드롭다운 선택 우선, 없으면 Shift=15°)
+    // 축에 따른 부호 (z 핸들은 시각적으로 자연스럽게)
+    let deltaSigned = (h.axis === 'z') ? -delta : delta;
+    // x 핸들(화면 가로축 회전)도 부호 보정 (마우스 위로=뒤로 기울)
+    if(h.axis === 'x') deltaSigned = -deltaSigned;
+    // v5.3: 회전 스냅
     let snapDeg = 0;
     if(state.rotSnap > 0) snapDeg = state.rotSnap;
     else if(e.shiftKey) snapDeg = 15;
@@ -5126,12 +5146,13 @@ function handleDrag(e){
       const step = snapDeg * Math.PI / 180;
       deltaSigned = Math.round(deltaSigned / step) * step;
     }
-    if(h.axis === 'y') p.mesh.rotation.y = transformState._rotInitial.y + deltaSigned;
-    else if(h.axis === 'x') p.mesh.rotation.x = transformState._rotInitial.x + deltaSigned;
-    else if(h.axis === 'z') p.mesh.rotation.z = transformState._rotInitial.z + deltaSigned;
-    // v2.0: 실시간 각도 HUD 표시
-    showRotHud(h.axis, p.mesh.rotation[h.axis], deltaSigned, snapDeg > 0);
-    // 속성 패널 회전값도 즉시 갱신 (선택된 부품이 동일하면)
+    // 카메라 축 기준 quaternion 회전 적용 (시작 quat을 기준으로)
+    const q = new THREE.Quaternion().setFromAxisAngle(transformState._rotWorldAxis, deltaSigned);
+    p.mesh.quaternion.copy(transformState._rotInitialQuat).premultiply(q);
+    // Euler 동기화 (HUD/속성 패널이 mesh.rotation 읽으므로)
+    p.mesh.rotation.setFromQuaternion(p.mesh.quaternion, p.mesh.rotation.order);
+    // HUD: 카메라 기준 회전이므로 단순 delta 각도 표시
+    showRotHud(h.axis, deltaSigned, deltaSigned, snapDeg > 0);
     syncRotPropPanel(p);
   }
   // 변형 후 치수 라벨 갱신

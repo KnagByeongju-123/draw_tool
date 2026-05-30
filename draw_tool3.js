@@ -10347,12 +10347,16 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('─── v8.23/24/25 신규 ─────────────────────', 'sys');
     skCmdLog('  📍 X기준 입력란 (도구바): 표시 X의 0점을 임의 값으로 (음수 OK)', 'help');
     skCmdLog('     · 도형은 안 움직이고 화면 표시/속성 패널만 보정', 'help');
-    skCmdLog('     · 수식 가능 (=50, -30, 100/2)', 'help');
+    skCmdLog('     · 수식 가능 (=50, -30, 100/2) / 더블클릭=계산기', 'help');
     skCmdLog('  🪐 라이브 접선 스냅 (도구바 🪐 버튼)', 'help');
     skCmdLog('     · ON 상태에서 원/호 드래그 → 가까운 선에 자동 접선', 'help');
-    skCmdLog('     · 마우스를 선 따라 움직이면 원이 선 위 미끄러짐', 'help');
     skCmdLog('  ⊙ 원을 두 선에 접선 (스케치 메뉴)', 'help');
-    skCmdLog('     · 원 1개 + 선 2개 선택 → 메뉴 → 반지름 유지하며 자동 배치', 'help');
+    skCmdLog('  🧬 겹친 선 통합 (메뉴/명령창 "통합")', 'help');
+    skCmdLog('─── v8.28 신규 ────────────────────────────', 'sys');
+    skCmdLog('  🧮 계산기 모달 (속성 패널 number input 클릭 시 자동)', 'help');
+    skCmdLog('     · 4칙연산, ÷2/×2/×10/÷10, 1/x, x², √, ±, %, MC/MR/M+/M-/MS', 'help');
+    skCmdLog('     · 키보드 입력: 숫자, +-*/, Enter=적용, Esc=취소, BS=⌫, Del=CE', 'help');
+    skCmdLog('     · 도구바(격자/X기준)는 더블클릭으로 계산기 (직접 타이핑 보존)', 'help');
     return;
   }
 
@@ -12019,3 +12023,240 @@ function initCmdKeyboard() {
   });
   window.addEventListener('mouseup', () => { drag=false; });
 }
+
+// ─── v8.28: 풍성한 계산기 모달 (Windows 계산기 표준 모드) ────
+// - 모든 number input에 자동 연결: focus/click 시 모달 오픈
+// - 4칙연산 + 메모리(MC/MR/M+/M-/MS) + 1/x, x², √, ±, %, ÷2, ×2
+// - 적용 시 input.value 갱신 + change 이벤트 발생 (기존 핸들러 트리거)
+(function initSk3Calc(){
+  const calc = {
+    target: null,      // 연결된 input 엘리먼트
+    display: '0',
+    accumulator: null,
+    pendingOp: null,
+    newEntry: false,
+    memory: 0,
+    exprHistory: ''    // 표시용 식 (예: "12 + 34")
+  };
+  window._sk3Calc = calc;
+
+  function $(id){ return document.getElementById(id); }
+  function dispBox(){ return $('sk3CalcDisp'); }
+  function exprBox(){ return $('sk3CalcExpr'); }
+  function memInd(){ return $('sk3CalcMemInd'); }
+
+  function fmtNum(s){
+    // 너무 긴 소수는 잘라서 표시
+    let n = parseFloat(s);
+    if(!isFinite(n)) return 'Error';
+    if(Math.abs(n) < 1e-12) n = 0;
+    let str = String(n);
+    if(str.length > 16){
+      str = n.toPrecision(12);
+      // 불필요한 0 제거
+      if(str.includes('e')) return str;
+      if(str.includes('.')) str = str.replace(/0+$/, '').replace(/\.$/, '');
+    }
+    return str;
+  }
+
+  function render(){
+    dispBox().textContent = calc.display === 'Error' ? 'Error' : fmtNum(calc.display);
+    exprBox().textContent = calc.exprHistory;
+    memInd().textContent = (Math.abs(calc.memory) > 1e-12) ? ('M: ' + fmtNum(String(calc.memory))) : '';
+  }
+
+  function evalOp(op, a, b){
+    if(!isFinite(a) || !isFinite(b)) return NaN;
+    if(op === '+') return a + b;
+    if(op === '-') return a - b;
+    if(op === '*') return a * b;
+    if(op === '/') return b === 0 ? NaN : a / b;
+    return b;
+  }
+
+  function opSymbol(op){
+    return op === '*' ? '×' : op === '/' ? '÷' : op;
+  }
+
+  function press(key){
+    if(calc.display === 'Error' && key !== 'C' && key !== 'CE'){
+      calc.display = '0'; calc.accumulator = null; calc.pendingOp = null; calc.newEntry = false; calc.exprHistory = '';
+    }
+    if(/^[0-9]$/.test(key)){
+      if(calc.newEntry || calc.display === '0'){ calc.display = key; calc.newEntry = false; }
+      else if(calc.display.replace('-','').replace('.','').length < 16) calc.display += key;
+    } else if(key === '.'){
+      if(calc.newEntry){ calc.display = '0.'; calc.newEntry = false; }
+      else if(!calc.display.includes('.')) calc.display += '.';
+    } else if(['+','-','*','/'].includes(key)){
+      if(calc.pendingOp && !calc.newEntry){
+        const r = evalOp(calc.pendingOp, calc.accumulator, parseFloat(calc.display));
+        calc.display = String(r); calc.accumulator = r;
+      } else {
+        calc.accumulator = parseFloat(calc.display);
+      }
+      calc.exprHistory = fmtNum(String(calc.accumulator)) + ' ' + opSymbol(key);
+      calc.pendingOp = key; calc.newEntry = true;
+    } else if(key === '='){
+      if(calc.pendingOp){
+        calc.exprHistory = fmtNum(String(calc.accumulator)) + ' ' + opSymbol(calc.pendingOp) + ' ' + fmtNum(calc.display) + ' =';
+        const r = evalOp(calc.pendingOp, calc.accumulator, parseFloat(calc.display));
+        calc.display = String(r); calc.accumulator = null; calc.pendingOp = null; calc.newEntry = true;
+      }
+    } else if(key === 'C'){
+      calc.display = '0'; calc.accumulator = null; calc.pendingOp = null; calc.newEntry = false; calc.exprHistory = '';
+    } else if(key === 'CE'){
+      calc.display = '0'; calc.newEntry = false;
+    } else if(key === '⌫'){
+      if(!calc.newEntry){
+        if(calc.display.length > 1 && !(calc.display.length === 2 && calc.display.startsWith('-'))){
+          calc.display = calc.display.slice(0, -1);
+        } else {
+          calc.display = '0';
+        }
+      }
+    } else if(key === '+/-'){
+      if(calc.display !== '0' && calc.display !== 'Error'){
+        calc.display = calc.display.startsWith('-') ? calc.display.slice(1) : '-' + calc.display;
+      }
+    } else if(key === '1/x'){
+      const v = parseFloat(calc.display);
+      if(v === 0){ calc.display = 'Error'; }
+      else { calc.exprHistory = '1/(' + fmtNum(calc.display) + ')'; calc.display = String(1/v); calc.newEntry = true; }
+    } else if(key === 'x²'){
+      const v = parseFloat(calc.display);
+      calc.exprHistory = 'sqr(' + fmtNum(calc.display) + ')'; calc.display = String(v*v); calc.newEntry = true;
+    } else if(key === '√'){
+      const v = parseFloat(calc.display);
+      if(v < 0){ calc.display = 'Error'; }
+      else { calc.exprHistory = '√(' + fmtNum(calc.display) + ')'; calc.display = String(Math.sqrt(v)); calc.newEntry = true; }
+    } else if(key === '%'){
+      const v = parseFloat(calc.display);
+      if(calc.pendingOp){
+        const r = calc.accumulator * v / 100;
+        calc.display = String(r);
+      } else {
+        calc.display = String(v / 100);
+      }
+      calc.newEntry = true;
+    } else if(key === '÷2'){
+      const v = parseFloat(calc.display);
+      calc.exprHistory = fmtNum(calc.display) + ' ÷ 2'; calc.display = String(v/2); calc.newEntry = true;
+    } else if(key === 'x2'){
+      const v = parseFloat(calc.display);
+      calc.exprHistory = fmtNum(calc.display) + ' × 2'; calc.display = String(v*2); calc.newEntry = true;
+    } else if(key === 'x10'){
+      const v = parseFloat(calc.display);
+      calc.exprHistory = fmtNum(calc.display) + ' × 10'; calc.display = String(v*10); calc.newEntry = true;
+    } else if(key === 'd10'){
+      const v = parseFloat(calc.display);
+      calc.exprHistory = fmtNum(calc.display) + ' ÷ 10'; calc.display = String(v/10); calc.newEntry = true;
+    } else if(key === 'MC'){ calc.memory = 0; }
+    else if(key === 'MR'){ calc.display = String(calc.memory); calc.newEntry = true; }
+    else if(key === 'M+'){ calc.memory += parseFloat(calc.display) || 0; calc.newEntry = true; }
+    else if(key === 'M-'){ calc.memory -= parseFloat(calc.display) || 0; calc.newEntry = true; }
+    else if(key === 'MS'){ calc.memory = parseFloat(calc.display) || 0; calc.newEntry = true; }
+    render();
+  }
+
+  window.sk3CalcOpen = function(input){
+    if(!input) return;
+    calc.target = input;
+    // 입력란의 현재 값으로 시작
+    const cur = String(input.value || '').trim();
+    if(cur === '' || cur === '0' || !isFinite(parseFloat(cur))){
+      calc.display = '0';
+    } else {
+      // 수식 형태(=10+5 등) → 평가 후 표시
+      const cleaned = cur.replace(/[^0-9+\-*/.()]/g, '');
+      try {
+        const v = Function('"use strict";return (' + cleaned + ')')();
+        calc.display = isFinite(v) ? String(v) : cur;
+      } catch(e){ calc.display = '0'; }
+    }
+    calc.accumulator = null; calc.pendingOp = null; calc.newEntry = true; calc.exprHistory = '';
+    // 라벨 표시 (input의 라벨 텍스트 찾기)
+    let labelTxt = '';
+    const row = input.closest && input.closest('.prop-row');
+    if(row){
+      const lab = row.querySelector('label');
+      if(lab) labelTxt = lab.textContent.trim();
+    }
+    if(!labelTxt && input.id) labelTxt = input.id;
+    if(!labelTxt && input.placeholder) labelTxt = input.placeholder;
+    $('sk3CalcTarget').textContent = labelTxt ? '→ ' + labelTxt : '';
+    $('sk3CalcOverlay').style.display = 'flex';
+    render();
+    // input은 포커스 잃지 않게 (Apply 시 직접 갱신)
+    setTimeout(() => $('sk3CalcDisp').focus && $('sk3CalcDisp').focus(), 0);
+  };
+
+  window.sk3CalcCancel = function(){
+    $('sk3CalcOverlay').style.display = 'none';
+    calc.target = null;
+  };
+
+  window.sk3CalcApply = function(){
+    if(!calc.target){ sk3CalcCancel(); return; }
+    if(calc.display === 'Error'){ return; }
+    // 진행 중인 연산이 있으면 = 자동
+    if(calc.pendingOp){ press('='); }
+    const val = parseFloat(calc.display);
+    if(!isFinite(val)){ return; }
+    // step 정밀도로 반올림
+    const step = parseFloat(calc.target.step) || 0.01;
+    const decimals = Math.max(0, -Math.floor(Math.log10(step)));
+    calc.target.value = (decimals > 0 ? val.toFixed(decimals) : String(val));
+    // 기존 change/input 리스너 발화
+    calc.target.dispatchEvent(new Event('input', {bubbles: true}));
+    calc.target.dispatchEvent(new Event('change', {bubbles: true}));
+    sk3CalcCancel();
+  };
+
+  // 버튼 클릭 위임
+  document.querySelectorAll('#sk3CalcBox .sk3calcbtn[data-k]').forEach(btn => {
+    btn.addEventListener('click', () => press(btn.dataset.k));
+  });
+
+  // 키보드 입력 처리
+  document.addEventListener('keydown', e => {
+    if($('sk3CalcOverlay').style.display !== 'flex') return;
+    if(e.key >= '0' && e.key <= '9'){ press(e.key); e.preventDefault(); }
+    else if(e.key === '.'){ press('.'); e.preventDefault(); }
+    else if(e.key === '+' || e.key === '-' || e.key === '*' || e.key === '/'){ press(e.key); e.preventDefault(); }
+    else if(e.key === 'Enter' || e.key === '='){ sk3CalcApply(); e.preventDefault(); }
+    else if(e.key === 'Escape'){ sk3CalcCancel(); e.preventDefault(); }
+    else if(e.key === 'Backspace'){ press('⌫'); e.preventDefault(); }
+    else if(e.key === 'Delete'){ press('CE'); e.preventDefault(); }
+  });
+
+  // ─── 모든 number input에 자동 연결 ──────────────────────
+  // 새로 생성되는 input도 잡기 위해 document 레벨 이벤트 위임
+  function shouldAttach(el){
+    if(!el || el.tagName !== 'INPUT') return false;
+    if(el.type !== 'number') return false;
+    if(el.dataset.sk3NoCalc === '1') return false;  // opt-out
+    if(el.disabled || el.readOnly) return false;
+    return true;
+  }
+
+  // focus 시점에 모달 오픈 (click도 focus를 동반)
+  document.addEventListener('focusin', e => {
+    if(!shouldAttach(e.target)) return;
+    // 계산기 자체 내부 입력은 제외 (지금은 없지만 미래 대비)
+    if(e.target.closest && e.target.closest('#sk3CalcBox')) return;
+    // 이미 모달이 열려 있으면 무시
+    if($('sk3CalcOverlay').style.display === 'flex') return;
+    // 약간 지연시켜 다른 포커스 핸들러 충돌 방지
+    setTimeout(() => {
+      if(document.activeElement === e.target){
+        e.target.blur();  // 키보드 안 뜨게
+        sk3CalcOpen(e.target);
+      }
+    }, 0);
+  }, true);
+
+  // 초기 렌더
+  render();
+})();

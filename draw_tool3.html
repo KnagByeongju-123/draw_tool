@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.20 - 신규 필렛 호 방향 수정 (짧은 호 보장)</title>
+<title>tool3 v8.21 - 전체선택(Ctrl+A) + 펜점 자동정리 + 새파일 완전초기화</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.20</h1>
+  <h1>📐 tool3 v8.21</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -223,6 +223,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <div class="menu-item" onclick="sk3ChamferAt()"><span class="ico">✂</span>모따기 / Chamfer<span class="shortcut">2선 선택</span></div>
       <div class="menu-sep"></div>
       <div class="menu-item" onclick="setTool('select')"><span class="ico">👆</span>선택<span class="shortcut">S</span></div>
+      <div class="menu-item" onclick="sk3SelectAll()"><span class="ico">🔘</span>전체 선택<span class="shortcut">Ctrl+A</span></div>
       <div class="menu-item" onclick="deleteSelected()"><span class="ico">🗑️</span>삭제<span class="shortcut">Del</span></div>
       <!-- v8.19: 복사/붙여넣기/반전/회전 -->
       <div class="menu-sep"></div>

@@ -1956,6 +1956,18 @@ window.sk3ChamferAt = function(){
 // ─── v8.19: 복사/붙여넣기/반전/회전 ────────────────────────────
 let _sk3Clipboard = null;  // {shapes: [...], penPoints: [...]} 형태로 보관
 
+// v8.21: 전체 선택 (Ctrl+A) — 스케치 모드의 모든 도형
+window.sk3SelectAll = function(){
+  if(state.mode !== 'sketch'){ toast('스케치 모드에서만 가능'); return; }
+  if(state.shapes.length === 0){ toast('🔘 선택할 도형이 없습니다'); return; }
+  state.selectedShapes.clear();
+  state.shapes.forEach((s, i) => state.selectedShapes.add(i));
+  redrawSketch();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  toast('🔘 전체 선택: 도형 ' + state.selectedShapes.size + '개');
+  if(typeof skCmdLog === 'function') skCmdLog('  🔘 전체 선택: ' + state.selectedShapes.size + '개 도형', 'sys');
+};
+
 // 선택 도형의 바운딩 박스 중심 계산
 function _sk3SelectionCenter(){
   const sel = [...state.selectedShapes];
@@ -2610,17 +2622,53 @@ function setTool(t){
 
 function deleteSelected(){
   if(state.mode === 'sketch'){
-    // v8.14: 선택된 도형 또는 현재 펜 점 삭제 (연결된 선도 함께)
+    // v8.21: 선택된 도형 삭제 시 그 도형의 끝점과 일치하던 펜점도 함께 정리
+    // (단, 그 펜점이 남은 다른 도형의 끝점과도 일치하면 보존)
     const hasShapes = state.selectedShapes && state.selectedShapes.size > 0;
     const hasPen = state.penCur >= 0 && state.penPoints[state.penCur];
     if(!hasShapes && !hasPen){ toast('선택된 도형/점이 없습니다'); return; }
     pushHistory();
     if(hasShapes){
       const idxs = [...state.selectedShapes].sort((a,b)=>b-a);
+      // 삭제 전: 삭제될 도형들의 끝점/중심점 좌표 수집
+      const tol = 0.01;
+      const deletedEnds = [];
+      idxs.forEach(i => {
+        const s = state.shapes[i]; if(!s) return;
+        if(s.type === 'line' || s.type === 'rect'){
+          deletedEnds.push([s.x1, s.y1], [s.x2, s.y2]);
+        } else if(s.type === 'circle' || s.type === 'arc'){
+          deletedEnds.push([s.cx, s.cy]);
+        }
+      });
+      // 도형 삭제
       idxs.forEach(i => state.shapes.splice(i, 1));
+      // 고아 펜점 정리: 삭제된 끝점에 있던 펜점 중 남은 도형과도 연결 안 된 것
+      function hasRemainingShapeEnd(px, py){
+        return state.shapes.some(s => {
+          if(s.type === 'line' || s.type === 'rect'){
+            return (Math.abs(s.x1-px)<tol && Math.abs(s.y1-py)<tol) ||
+                   (Math.abs(s.x2-px)<tol && Math.abs(s.y2-py)<tol);
+          } else if(s.type === 'circle' || s.type === 'arc'){
+            return Math.abs(s.cx-px)<tol && Math.abs(s.cy-py)<tol;
+          }
+          return false;
+        });
+      }
+      const beforePts = state.penPoints.length;
+      state.penPoints = state.penPoints.filter(p => {
+        const wasConnected = deletedEnds.some(([ex,ey]) =>
+          Math.abs(p.x-ex)<tol && Math.abs(p.y-ey)<tol);
+        if(!wasConnected) return true;  // 원래부터 도형과 무관한 점은 보존
+        return hasRemainingShapeEnd(p.x, p.y);  // 다른 도형과도 연결되어 있으면 보존
+      });
+      const removedPts = beforePts - state.penPoints.length;
+      // penCur 조정
+      if(state.penCur >= state.penPoints.length) state.penCur = state.penPoints.length - 1;
       state.selectedShapes.clear();
       redrawSketch(); updateInfo();
-      toast(idxs.length + '개 도형 삭제');
+      if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+      toast('🗑 도형 ' + idxs.length + '개' + (removedPts > 0 ? ' + 펜점 ' + removedPts + '개' : '') + ' 삭제');
       return;
     }
     if(hasPen){
@@ -2646,14 +2694,21 @@ function deleteSelected(){
 }
 
 function clearSketch(){
-  if(state.shapes.length === 0) return;
-  if(!confirm('스케치 전체를 삭제하시겠습니까?')) return;
+  // v8.21: 도형 또는 펜점이 하나라도 있으면 진행
+  if(state.shapes.length === 0 && (!state.penPoints || state.penPoints.length === 0)) return;
+  if(!confirm('스케치 전체를 삭제하시겠습니까?\n(도형 + 펜점 모두)')) return;
   pushHistory();
   state.shapes = [];
   state.selectedShapes.clear();
+  // v8.21: 펜점도 함께 정리 (이미지의 P0~P4 잔존 버그 해결)
+  state.penPoints = [];
+  state.penCur = -1;
+  state.penOrigin = null;
+  state.drawing = null;
   redrawSketch();
   updateInfo();
-  toast('스케치 삭제됨');
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  toast('🧹 스케치 삭제됨 (도형 + 펜점)');
 }
 
 // v4.6: 부품 1개를 저장 가능한 평형 데이터로 직렬화 (mesh의 현재 위치/회전/크기 포함)
@@ -7503,6 +7558,21 @@ function newProject(){
   if(!confirm('새 프로젝트를 시작하시겠습니까?\n저장되지 않은 작업은 사라집니다.')) return;
   state.shapes = [];
   state.selectedShapes.clear();
+  // v8.21: 펜점/펜커서/원점/측정 모드 등 모든 스케치 상태 초기화
+  state.penPoints = [];
+  state.penCur = -1;
+  state.penOrigin = null;
+  state.drawing = null;
+  state.dragPoint = null;
+  state.dragShape = null;
+  state.boxSelect = null;
+  state.wheelConnectMode = false;
+  state.wheelConnectFirst = -1;
+  if(state.measureMode){
+    state.measureMode = false;
+    state.measureFirst = null;
+  }
+  if(typeof _sk3Clipboard !== 'undefined') _sk3Clipboard = null;  // v8.19 클립보드도 비우기
   state.parts.forEach(p => removePartFromScene(p));
   state.parts = [];
   state.selectedPartId = null;
@@ -7512,11 +7582,13 @@ function newProject(){
   document.getElementById('selectedPartProp').style.display = 'none';
   const _zrpNew = document.getElementById('zRevolvePanel');
   if(_zrpNew) _zrpNew.style.display = 'none';
+  const _ssp = document.getElementById('sk3SelProp');
+  if(_ssp) _ssp.style.display = 'none';
   renderPartsList();
   redrawSketch();
   updateInfo();
   pushHistory(); // v4.6: 새 프로젝트 빈 상태 시드
-  toast('새 프로젝트');
+  toast('📄 새 프로젝트 — 도형/펜점/히스토리 모두 초기화');
 }
 
 function saveProject(){
@@ -9137,6 +9209,10 @@ document.addEventListener('keydown', (e)=>{
     if((e.key === 'v' || e.key === 'V') && state.mode === 'sketch' && _sk3Clipboard){
       e.preventDefault(); sk3PasteClipboard(); return;
     }
+    // v8.21: Ctrl+A 전체 선택 (스케치 모드)
+    if((e.key === 'a' || e.key === 'A') && state.mode === 'sketch'){
+      e.preventDefault(); sk3SelectAll(); return;
+    }
     if(e.key === 'd'){e.preventDefault(); duplicatePart(); return}
     if(e.key === 'g'){
       e.preventDefault();
@@ -9928,6 +10004,11 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('     · 선택 도형 바운딩박스 중심 기준', 'help');
     skCmdLog('  🔄 Shift+R 90° 회전 (시계반대) · 메뉴에서 ±90/180/임의', 'help');
     skCmdLog('     · 90°의 배수면 rect 유지, 그 외엔 line으로 분해', 'help');
+    skCmdLog('─── v8.21 신규 ────────────────────────────', 'sys');
+    skCmdLog('  🔘 Ctrl+A 전체 선택 (스케치 모드 모든 도형)', 'help');
+    skCmdLog('  📄 Ctrl+N 새 프로젝트 (도형+펜점+히스토리 완전 초기화)', 'help');
+    skCmdLog('  🗑 Del: 도형 삭제 시 고아 펜점도 자동 정리', 'help');
+    skCmdLog('     · 다른 도형 끝점과도 연결된 점은 보존', 'help');
     return;
   }
 

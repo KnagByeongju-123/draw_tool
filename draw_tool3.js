@@ -754,6 +754,52 @@ window.sk3TogglePenCoord = function(){
   if(btn) btn.style.background = state.penShowCoord ? '#a04030' : '';
 };
 
+// ─── v8.40: 도형 끝점 → 펜점 자동 동기화 ──────────────────────
+// 모든 도형(line/rect/circle/arc)의 끝점·중심을 스캔하여 펜점이 없으면 자동 추가
+// 교차분할/두께주기/교점/외곽선/필렛/모따기 등 도형 변경 후 호출하여
+// 새로 생긴 끝점에 즉시 펜점 번호 부여 → 후속 작업(연결/이동/속성) 편의성
+// 옵션: kinds = {line:true, rect:true, circle:false, arc:true} 같은 식으로 제한 가능
+window.sk3SyncPenPointsToShapes = function(opts){
+  const o = opts || {};
+  const doLine   = o.line   !== false;  // 기본 true
+  const doRect   = o.rect   !== false;
+  const doArc    = o.arc    !== false;
+  const doCircle = !!o.circle;          // 기본 false (원 중심에 점 자동생성은 보통 거추장)
+  const tol = (o.tol !== undefined) ? o.tol : 0.01;
+
+  function findOrAdd(x, y){
+    let idx = state.penPoints.findIndex(p => Math.abs(p.x-x)<tol && Math.abs(p.y-y)<tol);
+    if(idx < 0){ state.penPoints.push({x, y}); idx = state.penPoints.length - 1; return {idx, added:true}; }
+    return {idx, added:false};
+  }
+
+  let addedCount = 0;
+  state.shapes.forEach(s => {
+    if(s.type === 'line' && doLine){
+      if(findOrAdd(s.x1, s.y1).added) addedCount++;
+      if(findOrAdd(s.x2, s.y2).added) addedCount++;
+    } else if(s.type === 'rect' && doRect){
+      // rect는 4개 모서리
+      const xs = [s.x1, s.x2, s.x2, s.x1];
+      const ys = [s.y1, s.y1, s.y2, s.y2];
+      for(let i=0; i<4; i++){
+        if(findOrAdd(xs[i], ys[i]).added) addedCount++;
+      }
+    } else if(s.type === 'arc' && doArc && !s.isFull){
+      // 호 시작점/끝점
+      const sx = s.cx + s.r * Math.cos(s.startAngle);
+      const sy = s.cy + s.r * Math.sin(s.startAngle);
+      const ex = s.cx + s.r * Math.cos(s.endAngle);
+      const ey = s.cy + s.r * Math.sin(s.endAngle);
+      if(findOrAdd(sx, sy).added) addedCount++;
+      if(findOrAdd(ex, ey).added) addedCount++;
+    } else if(s.type === 'circle' && doCircle){
+      if(findOrAdd(s.cx, s.cy).added) addedCount++;
+    }
+  });
+  return addedCount;
+};
+
 // v8.36: 원점(0,0)에 펜점 추가 — 작업 시작점 빠른 표시
 window.sk3AddOriginPoint = function(){
   if(state.mode !== 'sketch'){ toast('스케치 모드에서만 가능'); return; }
@@ -2226,10 +2272,15 @@ window.sk3NewFilletV2 = function(){
     lineWidth: L1.lineWidth || 2
   });
   state.selectedShapes.clear();
+  // v8.40: 필렛 호 양 끝점·잘린 선 끝점에 펜점 자동 부여
+  let autoAdded = 0;
+  if(typeof window.sk3SyncPenPointsToShapes === 'function'){
+    autoAdded = window.sk3SyncPenPointsToShapes();
+  }
   updateInfo(); redrawSketch();
   if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
-  toast('🌀 신규 필렛 R' + R + 'mm 적용 (가상 교점=' + res.I.x.toFixed(1) + ',' + res.I.y.toFixed(1) + ')');
-  if(typeof skCmdLog === 'function') skCmdLog('  🌀 신규 필렛 V2: R' + R + 'mm · 가상교점 (' + res.I.x.toFixed(2) + ',' + res.I.y.toFixed(2) + ')', 'sys');
+  toast('🌀 신규 필렛 R' + R + 'mm 적용' + (autoAdded?' · 신규 펜점 ' + autoAdded + '개':''));
+  if(typeof skCmdLog === 'function') skCmdLog('  🌀 신규 필렛 V2: R' + R + 'mm · 가상교점 (' + res.I.x.toFixed(2) + ',' + res.I.y.toFixed(2) + ')' + (autoAdded?' · 펜점 ' + autoAdded:''), 'sys');
 };
 
 // ─── v8.17: 모따기 / Chamfer (가상 교점 기반) ───────────────────
@@ -2310,11 +2361,16 @@ window.sk3ChamferAt = function(){
     lineWidth: L1.lineWidth || 2
   });
   state.selectedShapes.clear();
+  // v8.40: 모따기 새 선·잘린 끝점에 펜점 자동 부여
+  let autoAddedC = 0;
+  if(typeof window.sk3SyncPenPointsToShapes === 'function'){
+    autoAddedC = window.sk3SyncPenPointsToShapes();
+  }
   updateInfo(); redrawSketch();
   if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
   const lbl = (D1 === D2) ? (D1 + 'mm') : (D1 + ',' + D2 + 'mm');
-  toast('✂ 모따기 ' + lbl + ' 적용 (가상 교점=' + I.x.toFixed(1) + ',' + I.y.toFixed(1) + ')');
-  if(typeof skCmdLog === 'function') skCmdLog('  ✂ 모따기 D=(' + D1 + ',' + D2 + ')mm · 가상교점 (' + I.x.toFixed(2) + ',' + I.y.toFixed(2) + ')', 'sys');
+  toast('✂ 모따기 ' + lbl + ' 적용' + (autoAddedC?' · 신규 펜점 ' + autoAddedC + '개':''));
+  if(typeof skCmdLog === 'function') skCmdLog('  ✂ 모따기 D=(' + D1 + ',' + D2 + ')mm · 가상교점 (' + I.x.toFixed(2) + ',' + I.y.toFixed(2) + ')' + (autoAddedC?' · 펜점 ' + autoAddedC:''), 'sys');
 };
 
 // ─── v8.19: 복사/붙여넣기/반전/회전 ────────────────────────────
@@ -8245,11 +8301,16 @@ window.sk3MergeOverlappingLines = function(silent){
     state.shapes = keepOthers.concat(lineEntries.map(e => e.s));
     state.selectedShapes.clear();
   }
+  // v8.40: 통합된 선의 새 끝점에 펜점 자동 부여
+  let autoAddedM = 0;
+  if(typeof window.sk3SyncPenPointsToShapes === 'function'){
+    autoAddedM = window.sk3SyncPenPointsToShapes();
+  }
   redrawSketch(); updateInfo();
   if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
-  const msg = '🧬 겹친 선 ' + mergedCount + '쌍 통합' + (colorMismatchCount > 0 ? ' (색상/굵기 다른 ' + colorMismatchCount + '쌍은 첫 선 기준)' : '');
+  const msg = '🧬 겹친 선 ' + mergedCount + '쌍 통합' + (colorMismatchCount > 0 ? ' (색상/굵기 다른 ' + colorMismatchCount + '쌍은 첫 선 기준)' : '') + (autoAddedM?' · 신규 펜점 ' + autoAddedM + '개':'');
   if(!silent) toast(msg);
-  if(typeof skCmdLog === 'function') skCmdLog('  🧬 겹친 선 통합: ' + mergedCount + '쌍' + (useSelection ? ' (선택 대상)' : ' (전체)') + (colorMismatchCount?' · 색상다름 '+colorMismatchCount:''), 'sys');
+  if(typeof skCmdLog === 'function') skCmdLog('  🧬 겹친 선 통합: ' + mergedCount + '쌍' + (useSelection ? ' (선택 대상)' : ' (전체)') + (colorMismatchCount?' · 색상다름 '+colorMismatchCount:'') + (autoAddedM?' · 펜점 ' + autoAddedM:''), 'sys');
   return mergedCount;
 };
 
@@ -11522,6 +11583,23 @@ function sk3ExecuteCmd(raw) {
     _lastCmd = raw; return;
   }
 
+  // ─── v8.40: 점동기 / SYNC (모든 도형 끝점에 펜점 자동) ──────
+  if(key === '점동기' || key === 'SYNC' || key === '동기'){
+    if(typeof window.sk3SyncPenPointsToShapes !== 'function'){
+      skCmdLog('  ⚠ 동기화 기능 사용 불가', 'err'); _lastCmd = raw; return;
+    }
+    // 원 중심도 포함할지 (옵션 인자 "원")
+    const includeCircle = toks.slice(1).some(t => t === '원' || t.toUpperCase() === 'C' || t === 'CIRCLE');
+    pushHistory();
+    const added = window.sk3SyncPenPointsToShapes({circle: includeCircle});
+    redrawSketch(); updateInfo();
+    if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+    skCmdLog('  📌 점동기: 신규 펜점 ' + added + '개 추가' + (includeCircle?' (원 중심 포함)':''), 'sys');
+    if(added > 0) toast('📌 새 펜점 ' + added + '개 추가');
+    else toast('📌 이미 모든 끝점에 펜점 있음');
+    _lastCmd = raw; return;
+  }
+
 
   // ─── 호 N R [시계|반시계] 각 A | 교점 ──────────────────
   if(key === '호' && toks.length >= 3){
@@ -11793,11 +11871,16 @@ function sk3ExecuteCmd(raw) {
     });
     state.shapes = newShapes;
     state.selectedShapes.clear();
+    // v8.40: 분할로 새로 생긴 끝점에 펜점 자동 부여
+    let autoAdded = 0;
+    if(typeof window.sk3SyncPenPointsToShapes === 'function'){
+      autoAdded = window.sk3SyncPenPointsToShapes();
+    }
     redrawSketch(); updateInfo();
     if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
     // v8.26: 교점 종류별 진단 메시지
     const ixTotal = ixCount.LL + ixCount.LA + ixCount.AA;
-    skCmdLog('  ⊞ 교차 분할 → ' + segCount + '개 조각', 'sys');
+    skCmdLog('  ⊞ 교차 분할 → ' + segCount + '개 조각' + (autoAdded?' · 신규 펜점 ' + autoAdded + '개':''), 'sys');
     skCmdLog('     · 교점 ' + ixTotal + '개 (선↔선 ' + ixCount.LL + ', 선↔원/호 ' + ixCount.LA + ', 원/호↔원/호 ' + ixCount.AA + ')', 'sys');
     if(ixCount.LA === 0 && work.some(s => s.type === 'arc')){
       skCmdLog('     · ⚠ 원/호와 선이 만나는 교점이 0개 - 선이 원 안/밖에 있는지 확인', 'err');
@@ -11940,8 +12023,13 @@ function sk3ExecuteCmd(raw) {
     pushHistory();
     state.shapes.push({type:'line', x1:p1.x+ox, y1:p1.y+oy, x2:p2.x+ox, y2:p2.y+oy,
       color:col(), lineWidth:lw()});
+    // v8.40: 두께 평행선 두 끝점에 펜점 자동 부여
+    let autoAdded = 0;
+    if(typeof window.sk3SyncPenPointsToShapes === 'function'){
+      autoAdded = window.sk3SyncPenPointsToShapes();
+    }
     redrawSketch(); updateInfo();
-    skCmdLog('  ⚙ 두께 P' + i1 + '–P' + i2 + ' ' + side + ' ' + T + 'mm', 'sys');
+    skCmdLog('  ⚙ 두께 P' + i1 + '–P' + i2 + ' ' + side + ' ' + T + 'mm' + (autoAdded?' · 신규 펜점 ' + autoAdded + '개':''), 'sys');
     _lastCmd = raw; return;
   }
 

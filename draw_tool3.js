@@ -4824,8 +4824,8 @@ function showTransformHandles(part){
     return grp;
   }
   // v8.58: Y이동(=수직 이동) 핸들 — 부품 위쪽 중앙에 배치 (가장 직관적, Tinkercad 스타일)
-  // 색상: 수직축 색(파랑, v8.57 swap 반영)
-  group.add(makeMoveArrow('y', 0x3366ff,
+  // v8.59: 색상을 더 진한 파랑으로 강조 (수직 = Z = 파랑, CAD 컨벤션)
+  group.add(makeMoveArrow('y', 0x2244ff,
     {x: 0, y: size.y/2 + maxSize*0.28, z: 0}));
 
   transformState.handleGroup = group;

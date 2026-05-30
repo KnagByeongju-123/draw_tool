@@ -4425,19 +4425,17 @@ function setupRaycastClick(dom){
       transformState.draggingHandle = null;
       transformState._rotStart = null;
       transformState._rotInitial = null;
-      transformState._rotInitialQuat = null;  // v8.55
-      transformState._rotWorldAxis = null;    // v8.55
-      // v2.0: 회전 종료 시 - v3.9: HUD를 5초간 유지하여 직접 입력 가능
+      transformState._absStartDeg = null;       // v8.65
+      // v2.0: 회전 종료 시 - v3.9: HUD를 유지하여 직접 입력 가능
       if(wasRotate){
         if(p && p.mesh){
-          // v8.55: 카메라 기준 회전이므로 단순 안내 (Euler 값은 누적 시 의미 없음)
-          const axisName = (h.axis === 'x') ? '가로(화면X)' : (h.axis === 'y') ? '세로(화면Y)' : '시계(화면Z)';
-          toast('↻ ' + axisName + ' 축 회전 완료 (카메라 기준)');
-          setStat('회전 완료: ' + axisName + ' 축');
+          const d = getAbsRot(p);
+          const axName = {x:'X', y:'Y', z:'Z'}[h.axis] || h.axis;
+          toast('↻ ' + axName + '축(절대) = ' + d[h.axis].toFixed(1) + '°');
+          setStat('회전 완료(절대): ' + axName + '축 ' + d[h.axis].toFixed(1) + '°');
           syncRotPropPanel(p);
-          // HUD 영구 표시는 카메라 기준이라 약간 다르게: 마지막 mesh.rotation 사용
           if(typeof rotHudPersist === 'function'){
-            rotHudPersist(h.axis, p.mesh.rotation[h.axis]);
+            rotHudPersist(h.axis, d[h.axis] * Math.PI / 180);
           }
         }
       }
@@ -4936,6 +4934,26 @@ function updateHandlePositions(){
   showTransformHandles(part);
 }
 
+// v8.65: 절대축(월드 X/Y/Z) 기준 회전 헬퍼 — 오리진 피벗
+//   p._absRotDeg = {x,y,z} (도). 월드축 회전을 Z→Y→X 순서로 합성(q = qx·qy·qz).
+function getAbsRot(p){
+  if(!p._absRotDeg){
+    const e = p.mesh.rotation;
+    p._absRotDeg = { x: e.x*180/Math.PI, y: e.y*180/Math.PI, z: e.z*180/Math.PI };
+  }
+  return p._absRotDeg;
+}
+function applyAbsRot(p){
+  const d = getAbsRot(p);
+  const r = v => v*Math.PI/180;
+  const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), r(d.x));
+  const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), r(d.y));
+  const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), r(d.z));
+  const q = qx.multiply(qy).multiply(qz); // 월드축 합성 (오리진 피벗 = 기본 동작)
+  p.mesh.quaternion.copy(q);
+  p.mesh.rotation.setFromQuaternion(q, p.mesh.rotation.order);
+}
+
 function handleDrag(e){
   const h = transformState.draggingHandle;
   const p = transformState.activePart;
@@ -5137,55 +5155,37 @@ function handleDrag(e){
       refreshPropPanelTransform(p);
     }
   } else if(h.type === 'rotate'){
-    // v8.55: Tinkercad 스타일 — 카메라 기준 회전축 (화면의 핸들 방향이 화면 기준 회전)
+    // v8.65: 절대축(월드 X/Y/Z) 기준 회전 + 오리진(물체 원점) 피벗
+    // 마우스 회전량은 화면상 "원점 투영점"을 중심으로 계산 → 그 각도를 해당 월드축 절대각에 누적
     p.mesh.updateMatrixWorld(true);
-    const bb = new THREE.Box3().setFromObject(p.mesh);
-    const center3D = bb.getCenter(new THREE.Vector3());
+    const origin3D = p.mesh.position.clone();
     const rect = renderer.domElement.getBoundingClientRect();
-    const projCenter = center3D.clone().project(camera);
-    const cx = (projCenter.x + 1) * 0.5 * rect.width + rect.left;
-    const cy = (-projCenter.y + 1) * 0.5 * rect.height + rect.top;
-    // 시작 각도 + 시작 quaternion 저장
+    const projC = origin3D.clone().project(camera);
+    const cx = (projC.x + 1) * 0.5 * rect.width + rect.left;
+    const cy = (-projC.y + 1) * 0.5 * rect.height + rect.top;
     if(transformState._rotStart === null || transformState._rotStart === undefined){
       transformState._rotStart = Math.atan2(transformState.dragStart.y - cy, transformState.dragStart.x - cx);
-      transformState._rotInitialQuat = p.mesh.quaternion.clone();
-      // v8.55: 핸들 축(x/y/z)을 카메라 기준 회전축으로 매핑
-      const right = new THREE.Vector3();
-      const up = new THREE.Vector3();
-      const forward = new THREE.Vector3();
-      camera.matrixWorld.extractBasis(right, up, forward);
-      forward.negate();
-      let axis;
-      if(h.axis === 'x') axis = right;
-      else if(h.axis === 'y') axis = up;
-      else axis = forward;
-      transformState._rotWorldAxis = axis.normalize();
-      // v8.58: 디버그 — 어떤 축으로 회전 시작했는지 표시
-      const ax = transformState._rotWorldAxis;
-      setStat('↻ 회전 시작 (' + h.axis.toUpperCase() + ' 핸들) 축=(' +
-        ax.x.toFixed(2) + ',' + ax.y.toFixed(2) + ',' + ax.z.toFixed(2) + ')');
+      const d0 = getAbsRot(p);
+      transformState._absStartDeg = { x:d0.x, y:d0.y, z:d0.z };
     }
     const angleNow = Math.atan2(e.clientY - cy, e.clientX - cx);
     let delta = angleNow - transformState._rotStart;
-    // 축에 따른 부호 (z 핸들은 시각적으로 자연스럽게)
-    let deltaSigned = (h.axis === 'z') ? -delta : delta;
-    // x 핸들(화면 가로축 회전)도 부호 보정 (마우스 위로=뒤로 기울)
-    if(h.axis === 'x') deltaSigned = -deltaSigned;
-    // v5.3: 회전 스냅
+    // 핸들 축별 부호 보정 (드래그 방향 직관화)
+    let deltaSigned = delta;
+    if(h.axis === 'z') deltaSigned = -delta;
+    else if(h.axis === 'x') deltaSigned = -delta;
+    let deltaDeg = deltaSigned * 180 / Math.PI;
+    // 스냅
     let snapDeg = 0;
     if(state.rotSnap > 0) snapDeg = state.rotSnap;
     else if(e.shiftKey) snapDeg = 15;
-    if(snapDeg > 0){
-      const step = snapDeg * Math.PI / 180;
-      deltaSigned = Math.round(deltaSigned / step) * step;
-    }
-    // 카메라 축 기준 quaternion 회전 적용 (시작 quat을 기준으로)
-    const q = new THREE.Quaternion().setFromAxisAngle(transformState._rotWorldAxis, deltaSigned);
-    p.mesh.quaternion.copy(transformState._rotInitialQuat).premultiply(q);
-    // Euler 동기화 (HUD/속성 패널이 mesh.rotation 읽으므로)
-    p.mesh.rotation.setFromQuaternion(p.mesh.quaternion, p.mesh.rotation.order);
-    // HUD: 카메라 기준 회전이므로 단순 delta 각도 표시
-    showRotHud(h.axis, deltaSigned, deltaSigned, snapDeg > 0);
+    if(snapDeg > 0) deltaDeg = Math.round(deltaDeg / snapDeg) * snapDeg;
+    // 절대각 = 시작 절대각 + 이번 드래그 델타 (해당 축만)
+    const absNew = transformState._absStartDeg[h.axis] + deltaDeg;
+    getAbsRot(p)[h.axis] = absNew;
+    applyAbsRot(p);
+    _rotHudActiveAxis = h.axis;
+    showRotHud(h.axis, absNew * Math.PI / 180, deltaDeg * Math.PI / 180, snapDeg > 0);
     syncRotPropPanel(p);
   }
   // 변형 후 치수 라벨 갱신
@@ -9821,7 +9821,7 @@ function onRotHudClick(event){
   const p = state.parts.find(x => x.id === id);
   if(_hudMode === 'rotate'){
     let curDeg = 0;
-    if(p && p.mesh) curDeg = p.mesh.rotation[_rotHudActiveAxis] * 180 / Math.PI;
+    if(p && p.mesh) curDeg = getAbsRot(p)[_rotHudActiveAxis];
     inp.value = curDeg.toFixed(1);
   } else if(p && p.mesh){
     if(_hudMode === 'scale'){
@@ -9867,10 +9867,11 @@ function applyRotHudInput(){
   const p = state.parts.find(x => x.id === id);
   if(p && p.mesh){
     if(_hudMode === 'rotate'){
-      p.mesh.rotation[_rotHudActiveAxis] = v * Math.PI / 180;
+      getAbsRot(p)[_rotHudActiveAxis] = v;
+      applyAbsRot(p);
       angSpan.textContent = v.toFixed(1) + '°';
-      toast('↻ ' + _rotHudActiveAxis.toUpperCase() + '축 = ' + v.toFixed(1) + '°');
-      setStat('회전 직접 입력: ' + _rotHudActiveAxis.toUpperCase() + '축 ' + v.toFixed(1) + '°');
+      toast('↻ ' + _rotHudActiveAxis.toUpperCase() + '축(절대) = ' + v.toFixed(1) + '°');
+      setStat('회전 직접 입력(절대): ' + _rotHudActiveAxis.toUpperCase() + '축 ' + v.toFixed(1) + '°');
     } else if(_hudMode === 'scale'){
       // 절대 크기(mm) 설정 — 중심 고정, 해당 축 스케일을 목표 mm에 맞춤
       const tgt = Math.max(0.5, v);

@@ -294,6 +294,8 @@ const state = {
   objSnap: true,    // v8.11: 객체 스냅 (점/끝점/중점/중심/사분점/수평수직 가이드)
   _lastSnapKind: null,  // 마지막 스냅 종류 — 시각 피드백용
   gridSize: 10,
+  yOrigin: 0,       // v8.23: Y축 표시 기준점(mm) — 표시 Y = 실제 Y − yOrigin, 입력 Y는 + yOrigin로 변환
+  tangentSnap: false,  // v8.24: 라이브 접선 스냅 - 원/호 드래그 시 가까운 선에 자동 접선
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
   autoPopup: true, // v6.2: 도형 클릭 시 위치/크기/회전 입력 팝업 자동 표시
@@ -947,12 +949,14 @@ function drawGrid(){
 
 function drawAxes(){
   const o = worldToScreen(0, 0);
+  // 빨간 가로축(실제 Y=0)
   skCtx.strokeStyle = '#d04040';
   skCtx.lineWidth = 1.5;
   skCtx.beginPath();
   skCtx.moveTo(0, o.y);
   skCtx.lineTo(skCanvas.width, o.y);
   skCtx.stroke();
+  // 파란 세로축(X=0)
   skCtx.strokeStyle = '#4080d0';
   skCtx.beginPath();
   skCtx.moveTo(o.x, 0);
@@ -964,9 +968,30 @@ function drawAxes(){
   skCtx.fill();
   skCtx.fillStyle = '#d04040';
   skCtx.font = 'bold 12px Consolas';
-  skCtx.fillText('X+', skCanvas.width - 22, o.y - 4);
+  skCtx.fillText('X+ (Y_실제=0)', skCanvas.width - 110, o.y - 4);
   skCtx.fillStyle = '#4080d0';
   skCtx.fillText('Y+', o.x + 4, 14);
+
+  // v8.23: Y 기준선 (yOrigin) 표시 - 0이 아닐 때 주황 점선으로
+  const yo = state.yOrigin || 0;
+  if(Math.abs(yo) > 1e-9){
+    const oY = worldToScreen(0, yo);
+    skCtx.save();
+    skCtx.strokeStyle = '#f39c12';
+    skCtx.lineWidth = 1.2;
+    skCtx.setLineDash([6, 4]);
+    skCtx.beginPath();
+    skCtx.moveTo(0, oY.y);
+    skCtx.lineTo(skCanvas.width, oY.y);
+    skCtx.stroke();
+    skCtx.setLineDash([]);
+    skCtx.fillStyle = '#f39c12';
+    skCtx.font = 'bold 11px Consolas';
+    skCtx.fillText('Y_표시=0 (실제Y=' + yo + ')', skCanvas.width - 200, oY.y - 4);
+    // 좌측에도 안내 라벨
+    skCtx.fillText('▶ 기준', 4, oY.y - 4);
+    skCtx.restore();
+  }
 }
 
 function drawShape(s, selected){
@@ -1410,7 +1435,8 @@ skCanvas.addEventListener('mousemove', (e)=>{
     });
     state._penPreviewWp = wp;  // 마커 표시용
     redrawSketch();
-    document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(2)}  Y: ${wp.y.toFixed(2)}` + (state._lastSnapKind?' ['+state._lastSnapKind+']':'') + ' · 🤚드래그';
+    // v8.23: Y기준점 적용 — 표시는 dispY()로 변환
+    document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(2)}  Y: ${dispY(wp.y).toFixed(2)}` + (state.yOrigin?' (기준'+(state.yOrigin>=0?'+':'')+state.yOrigin+')':'') + (state._lastSnapKind?' ['+state._lastSnapKind+']':'') + ' · 🤚드래그';
     return;
   }
   // v8.16: 도형 드래그 이동 진행 중
@@ -1436,6 +1462,28 @@ skCanvas.addEventListener('mousemove', (e)=>{
         cur.cx = orig.cx + dx; cur.cy = orig.cy + dy;
       }
     });
+
+    // v8.24: 라이브 접선 스냅 — 단일 원/호 드래그 시 가까운 선에 자동 접선
+    let tangentInfo = '';
+    if(state.tangentSnap && ds.idxs.length === 1){
+      const idx = ds.idxs[0];
+      const cur = state.shapes[idx];
+      if(cur && (cur.type === 'circle' || cur.type === 'arc')){
+        // 임계값: 화면 픽셀로 약 15px → mm 환산
+        const thresholdMm = 15 / state.pixelsPerMm;
+        const snap = sk3FindTangentSnap({x: cur.cx, y: cur.cy}, cur.r, [idx], thresholdMm);
+        if(snap){
+          // 보정된 center 로 이동, dx/dy도 갱신해서 펜점 이동 일관
+          const oldCx = cur.cx, oldCy = cur.cy;
+          cur.cx = snap.center.x;
+          cur.cy = snap.center.y;
+          dx += (snap.center.x - oldCx);
+          dy += (snap.center.y - oldCy);
+          tangentInfo = ' · 🪐접선[선#' + snap.lineIdx + ']';
+        }
+      }
+    }
+
     // 일치하는 펜점도 함께 이동 (연결 유지)
     if(ds.pinIdxs && ds.pinIdxs.length){
       ds.pinIdxs.forEach((pi, k) => {
@@ -1446,7 +1494,7 @@ skCanvas.addEventListener('mousemove', (e)=>{
     }
     ds.moved = Math.hypot(dx, dy) > 0.05;
     redrawSketch();
-    document.getElementById('footCoord').textContent = `Δx: ${dx.toFixed(2)}  Δy: ${dy.toFixed(2)}mm · 🤚도형 ${ds.idxs.length}개 이동` + (ds.pinIdxs && ds.pinIdxs.length ? ` (+점 ${ds.pinIdxs.length})` : '');
+    document.getElementById('footCoord').textContent = `Δx: ${dx.toFixed(2)}  Δy: ${dy.toFixed(2)}mm · 🤚도형 ${ds.idxs.length}개 이동` + (ds.pinIdxs && ds.pinIdxs.length ? ` (+점 ${ds.pinIdxs.length})` : '') + tangentInfo;
     return;
   }
   // v8.5: 박스 선택 진행 중 — 박스 갱신 + 미리보기 그리기
@@ -1461,7 +1509,8 @@ skCanvas.addEventListener('mousemove', (e)=>{
   if(state.mode !== 'sketch') return;
   let wp = screenToWorld(sx, sy);
   wp = snapPoint(wp);
-  document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(2)}  Y: ${wp.y.toFixed(2)}` + (state._lastSnapKind?' ['+state._lastSnapKind+']':'');
+  // v8.23: Y기준점 적용
+  document.getElementById('footCoord').textContent = `X: ${wp.x.toFixed(2)}  Y: ${dispY(wp.y).toFixed(2)}` + (state.yOrigin?' (기준'+(state.yOrigin>=0?'+':'')+state.yOrigin+')':'') + (state._lastSnapKind?' ['+state._lastSnapKind+']':'');
   if(state.drawing){
     state.drawing.current = wp;
     redrawSketch();
@@ -2383,9 +2432,9 @@ window.sk3UpdateSelProp = function(){
       const reverseDeg = (absDeg + 180) % 360;
       html = `
         <div class="prop-row"><label>P1.X</label><input type="number" step="0.1" id="sk3p1x" value="${s.x1.toFixed(2)}"></div>
-        <div class="prop-row"><label>P1.Y</label><input type="number" step="0.1" id="sk3p1y" value="${s.y1.toFixed(2)}"></div>
+        <div class="prop-row"><label>P1.Y</label><input type="number" step="0.1" id="sk3p1y" value="${dispY(s.y1).toFixed(2)}"></div>
         <div class="prop-row"><label>P2.X</label><input type="number" step="0.1" id="sk3p2x" value="${s.x2.toFixed(2)}"></div>
-        <div class="prop-row"><label>P2.Y</label><input type="number" step="0.1" id="sk3p2y" value="${s.y2.toFixed(2)}"></div>
+        <div class="prop-row"><label>P2.Y</label><input type="number" step="0.1" id="sk3p2y" value="${dispY(s.y2).toFixed(2)}"></div>
         <div class="prop-row"><label>색상</label><input type="color" id="sk3color" value="${s.color||'#000000'}"></div>
         <div class="prop-row"><label>굵기</label><input type="number" step="1" id="sk3lw" value="${s.lineWidth||2}"></div>
         <button onclick="sk3ApplySelProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
@@ -2402,9 +2451,9 @@ window.sk3UpdateSelProp = function(){
       const rectArea = w * h;
       html = `
         <div class="prop-row"><label>X1</label><input type="number" step="0.1" id="sk3p1x" value="${s.x1.toFixed(2)}"></div>
-        <div class="prop-row"><label>Y1</label><input type="number" step="0.1" id="sk3p1y" value="${s.y1.toFixed(2)}"></div>
+        <div class="prop-row"><label>Y1</label><input type="number" step="0.1" id="sk3p1y" value="${dispY(s.y1).toFixed(2)}"></div>
         <div class="prop-row"><label>X2</label><input type="number" step="0.1" id="sk3p2x" value="${s.x2.toFixed(2)}"></div>
-        <div class="prop-row"><label>Y2</label><input type="number" step="0.1" id="sk3p2y" value="${s.y2.toFixed(2)}"></div>
+        <div class="prop-row"><label>Y2</label><input type="number" step="0.1" id="sk3p2y" value="${dispY(s.y2).toFixed(2)}"></div>
         <div class="prop-row"><label>색상</label><input type="color" id="sk3color" value="${s.color||'#000000'}"></div>
         <div class="prop-row"><label>굵기</label><input type="number" step="1" id="sk3lw" value="${s.lineWidth||2}"></div>
         <button onclick="sk3ApplySelProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
@@ -2413,7 +2462,7 @@ window.sk3UpdateSelProp = function(){
       title.textContent = '○ 원 (circle)';
       html = `
         <div class="prop-row"><label>중심 X</label><input type="number" step="0.1" id="sk3cx" value="${s.cx.toFixed(2)}"></div>
-        <div class="prop-row"><label>중심 Y</label><input type="number" step="0.1" id="sk3cy" value="${s.cy.toFixed(2)}"></div>
+        <div class="prop-row"><label>중심 Y</label><input type="number" step="0.1" id="sk3cy" value="${dispY(s.cy).toFixed(2)}"></div>
         <div class="prop-row"><label>반지름</label><input type="number" step="0.1" id="sk3r" value="${s.r.toFixed(2)}"></div>
         <div class="prop-row"><label>색상</label><input type="color" id="sk3color" value="${s.color||'#000000'}"></div>
         <div class="prop-row"><label>굵기</label><input type="number" step="1" id="sk3lw" value="${s.lineWidth||2}"></div>
@@ -2427,7 +2476,7 @@ window.sk3UpdateSelProp = function(){
       const arcLen = s.r * arcSweep * Math.PI / 180;
       html = `
         <div class="prop-row"><label>중심 X</label><input type="number" step="0.1" id="sk3cx" value="${s.cx.toFixed(2)}"></div>
-        <div class="prop-row"><label>중심 Y</label><input type="number" step="0.1" id="sk3cy" value="${s.cy.toFixed(2)}"></div>
+        <div class="prop-row"><label>중심 Y</label><input type="number" step="0.1" id="sk3cy" value="${dispY(s.cy).toFixed(2)}"></div>
         <div class="prop-row"><label>반지름</label><input type="number" step="0.1" id="sk3r" value="${s.r.toFixed(2)}"></div>
         <div class="prop-row"><label>시작°</label><input type="number" step="0.1" id="sk3sd" value="${sd}"></div>
         <div class="prop-row"><label>끝°</label><input type="number" step="0.1" id="sk3ed" value="${ed}"></div>
@@ -2477,7 +2526,7 @@ window.sk3UpdateSelProp = function(){
     }
     body.innerHTML = `
       <div class="prop-row"><label>P${i}.X</label><input type="number" step="0.01" id="sk3pxv" value="${p.x.toFixed(3)}"></div>
-      <div class="prop-row"><label>P${i}.Y</label><input type="number" step="0.01" id="sk3pyv" value="${p.y.toFixed(3)}"></div>
+      <div class="prop-row"><label>P${i}.Y</label><input type="number" step="0.01" id="sk3pyv" value="${dispY(p.y).toFixed(3)}"></div>
       <button onclick="sk3ApplyPointProp(${i})" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
       <div style="font-size:10px;color:#888;margin-top:4px">P${i} 좌표 변경 시 연결된 선도 함께 이동</div>
       ${linesHtml}`;
@@ -2521,18 +2570,19 @@ window.sk3ApplySelProp = function(){
   // v8.14: 수식 입력 지원
   const _v = id => sk3EvalExpr((document.getElementById(id)||{}).value);
   const _c = id => (document.getElementById(id)||{}).value;
+  // v8.23: Y 입력값은 표시 기준 → 실제 좌표로 변환 (inpY)
   if(s.type === 'line' || s.type === 'rect'){
     if(isFinite(_v('sk3p1x'))) s.x1 = _v('sk3p1x');
-    if(isFinite(_v('sk3p1y'))) s.y1 = _v('sk3p1y');
+    if(isFinite(_v('sk3p1y'))) s.y1 = inpY(_v('sk3p1y'));
     if(isFinite(_v('sk3p2x'))) s.x2 = _v('sk3p2x');
-    if(isFinite(_v('sk3p2y'))) s.y2 = _v('sk3p2y');
+    if(isFinite(_v('sk3p2y'))) s.y2 = inpY(_v('sk3p2y'));
   } else if(s.type === 'circle'){
     if(isFinite(_v('sk3cx'))) s.cx = _v('sk3cx');
-    if(isFinite(_v('sk3cy'))) s.cy = _v('sk3cy');
+    if(isFinite(_v('sk3cy'))) s.cy = inpY(_v('sk3cy'));
     if(isFinite(_v('sk3r')) && _v('sk3r') > 0) s.r = _v('sk3r');
   } else if(s.type === 'arc'){
     if(isFinite(_v('sk3cx'))) s.cx = _v('sk3cx');
-    if(isFinite(_v('sk3cy'))) s.cy = _v('sk3cy');
+    if(isFinite(_v('sk3cy'))) s.cy = inpY(_v('sk3cy'));
     if(isFinite(_v('sk3r')) && _v('sk3r') > 0) s.r = _v('sk3r');
     if(isFinite(_v('sk3sd'))) s.startAngle = _v('sk3sd') * Math.PI / 180;
     if(isFinite(_v('sk3ed'))) s.endAngle = _v('sk3ed') * Math.PI / 180;
@@ -2549,7 +2599,9 @@ window.sk3ApplyPointProp = function(idx){
   if(!p) return;
   // v8.14: 수식 입력 지원 (25+25 등)
   const nx = sk3EvalExpr((document.getElementById('sk3pxv')||{}).value);
-  const ny = sk3EvalExpr((document.getElementById('sk3pyv')||{}).value);
+  // v8.23: Y 입력값은 표시 기준 → 실제 좌표로 변환
+  const nyDisp = sk3EvalExpr((document.getElementById('sk3pyv')||{}).value);
+  const ny = isFinite(nyDisp) ? inpY(nyDisp) : nyDisp;
   if(!isFinite(nx) || !isFinite(ny)) return;
   pushHistory();
   const tol = 0.01;
@@ -2561,7 +2613,7 @@ window.sk3ApplyPointProp = function(idx){
   p.x = nx; p.y = ny;
   redrawSketch(); updateInfo();
   sk3UpdateSelProp();
-  toast('✓ P' + idx + ' → (' + nx + ', ' + ny + ')');
+  toast('✓ P' + idx + ' → 표시(' + nyDisp + ', 실제Y=' + ny + ')');
 };
 
 function selectShapeAt(wp, addToSel){
@@ -7554,6 +7606,164 @@ function toggleGridSnap(){
   toast('격자스냅 ' + (state.gridSnap ? 'ON' : 'OFF'));
 }
 
+// ─── v8.23: Y축 표시 기준점 ───────────────────────────────────
+// dispY(actualY): 사용자에게 보여줄 Y (푸터 좌표, 속성 패널 표시)
+// inpY(userInputY): 사용자가 입력한 Y를 실제 Y로 변환 (속성 패널 적용 시)
+window.dispY = function(y){ return y - (state.yOrigin || 0); };
+window.inpY  = function(y){ return y + (state.yOrigin || 0); };
+
+function updateYOriginIndicator(){
+  const ind = document.getElementById('yOriginIndicator');
+  if(!ind) return;
+  const v = state.yOrigin || 0;
+  if(Math.abs(v) < 1e-9){
+    ind.textContent = '(기본)';
+    ind.style.color = '#888';
+  } else {
+    // 표시 공식 안내: 표시Y = 실제Y − yOrigin
+    const sign = v >= 0 ? '−' : '+';
+    ind.textContent = '※표시Y = 실제Y ' + sign + ' ' + Math.abs(v);
+    ind.style.color = '#f39c12';
+  }
+}
+
+window.sk3SetYOrigin = function(){
+  const el = document.getElementById('yOriginInput');
+  if(!el) return;
+  // 수식 평가 지원 (=50, =100/2 등)
+  let raw = String(el.value).trim();
+  if(raw === ''){ toast('값을 입력하세요'); return; }
+  const cleaned = raw.replace(/[^0-9+\-*/.()]/g, '');
+  let v;
+  try { v = Function('"use strict";return (' + cleaned + ')')(); }
+  catch(e){ toast('숫자 또는 수식 오류'); return; }
+  if(!isFinite(v)){ toast('유효한 숫자 필요'); return; }
+  state.yOrigin = v;
+  el.value = String(v);
+  updateYOriginIndicator();
+  redrawSketch();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  toast('📍 Y기준 ' + (v >= 0 ? '+' : '') + v + 'mm 적용 — 실제 Y=' + v + '인 점이 표시 Y=0');
+};
+
+window.sk3ResetYOrigin = function(){
+  state.yOrigin = 0;
+  const el = document.getElementById('yOriginInput');
+  if(el) el.value = '0';
+  updateYOriginIndicator();
+  redrawSketch();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  toast('⟲ Y기준 0으로 초기화');
+};
+
+// ─── v8.24: 라이브 접선 스냅 + 두 선 접선 배치 ─────────────────
+window.toggleTangentSnap = function(){
+  state.tangentSnap = !state.tangentSnap;
+  const btn = document.getElementById('btn-tangentsnap');
+  if(btn) btn.classList.toggle('active', state.tangentSnap);
+  toast('🪐 라이브 접선 스냅 ' + (state.tangentSnap ? 'ON' : 'OFF') +
+    (state.tangentSnap ? ' — 원/호 드래그 시 가까운 선에 자동 접선' : ''));
+};
+
+// 원 중심 P (반지름 r) 를 가장 가까운 line 에 접하도록 보정한 새 중심 반환
+// excludeIdxs: 자기 자신 도형 인덱스(선택된 원/호의 펜점·rect 모서리 등) 제외
+// thresholdMm: 접선 판정 임계값(mm)
+function sk3FindTangentSnap(P, r, excludeIdxs, thresholdMm){
+  if(r <= 0) return null;
+  let best = null;
+  state.shapes.forEach((L, idx) => {
+    if(L.type !== 'line') return;
+    if(excludeIdxs && excludeIdxs.indexOf(idx) >= 0) return;
+    const dx = L.x2-L.x1, dy = L.y2-L.y1;
+    const len = Math.hypot(dx, dy);
+    if(len < 1e-9) return;
+    const ux = dx/len, uy = dy/len;
+    const nx = -uy, ny = ux;
+    const sd = (P.x-L.x1)*nx + (P.y-L.y1)*ny;
+    const err = Math.abs(Math.abs(sd) - r);
+    if(err > thresholdMm) return;
+    // 마우스의 선 위 투영 t (segment 내부 + 약간 여유)
+    const tParam = ((P.x-L.x1)*ux + (P.y-L.y1)*uy) / len;
+    if(tParam < -0.2 || tParam > 1.2) return;
+    if(!best || err < best.err){
+      const sign = sd >= 0 ? 1 : -1;
+      const projX = P.x - nx*sd, projY = P.y - ny*sd;
+      best = {
+        err, lineIdx: idx,
+        center: {x: projX + nx*r*sign, y: projY + ny*r*sign}
+      };
+    }
+  });
+  return best;
+}
+
+// 원을 두 선에 모두 접하도록 이동 (반지름 유지)
+window.sk3TangentTwoLines = function(){
+  const sel = [...state.selectedShapes];
+  if(sel.length === 0){ toast('원 1개 + 선 2개를 선택하세요'); return; }
+  const circles = [];
+  const lines = [];
+  sel.forEach(i => {
+    const s = state.shapes[i];
+    if(!s) return;
+    if(s.type === 'circle') circles.push({idx:i, s});
+    else if(s.type === 'line') lines.push({idx:i, s});
+  });
+  if(circles.length !== 1 || lines.length !== 2){
+    toast('원 1개 + 선 2개를 선택해야 합니다 (현재 원 ' + circles.length + ', 선 ' + lines.length + ')');
+    return;
+  }
+  const C = circles[0].s, L1 = lines[0].s, L2 = lines[1].s;
+  // 두 선이 평행이면 안 됨
+  const dx1=L1.x2-L1.x1, dy1=L1.y2-L1.y1, dx2=L2.x2-L2.x1, dy2=L2.y2-L2.y1;
+  const cross = dx1*dy2 - dy1*dx2;
+  if(Math.abs(cross) < 1e-10){ toast('두 선이 평행하여 접선 배치 불가'); return; }
+
+  // 각 선의 normal 중 현재 원 중심이 있는 쪽으로 r만큼 평행이동
+  // 그 두 직선의 교점이 새 원 중심
+  function unitTowardCenter(L, P){
+    const dx=L.x2-L.x1, dy=L.y2-L.y1, len=Math.hypot(dx,dy);
+    const ux=dx/len, uy=dy/len;
+    const n={x:-uy, y:ux};
+    const sd=(P.x-L.x1)*n.x+(P.y-L.y1)*n.y;
+    return sd>=0 ? n : {x:-n.x, y:-n.y};
+  }
+  const P = {x: C.cx, y: C.cy};
+  const n1 = unitTowardCenter(L1, P);
+  const n2 = unitTowardCenter(L2, P);
+  const r = C.r;
+  const A1={x:L1.x1+n1.x*r, y:L1.y1+n1.y*r};
+  const A2={x:L1.x2+n1.x*r, y:L1.y2+n1.y*r};
+  const B1={x:L2.x1+n2.x*r, y:L2.y1+n2.y*r};
+  const B2={x:L2.x2+n2.x*r, y:L2.y2+n2.y*r};
+  const Adx=A2.x-A1.x, Ady=A2.y-A1.y, Bdx=B2.x-B1.x, Bdy=B2.y-B1.y;
+  const cr=Adx*Bdy-Ady*Bdx;
+  if(Math.abs(cr)<1e-10){ toast('계산 실패'); return; }
+  const tt=((B1.x-A1.x)*Bdy-(B1.y-A1.y)*Bdx)/cr;
+  const newCx = A1.x + tt*Adx;
+  const newCy = A1.y + tt*Ady;
+
+  pushHistory();
+  // 펜점 일치하면 함께 이동
+  const tol = 0.01;
+  state.penPoints.forEach(p => {
+    if(Math.abs(p.x-C.cx)<tol && Math.abs(p.y-C.cy)<tol){ p.x=newCx; p.y=newCy; }
+  });
+  const oldCx = C.cx, oldCy = C.cy;
+  C.cx = newCx; C.cy = newCy;
+  redrawSketch(); updateInfo();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  // 검증: 두 선까지 거리 확인
+  function distLine(P, L){
+    const dx=L.x2-L.x1, dy=L.y2-L.y1, len=Math.hypot(dx,dy);
+    return Math.abs(((P.x-L.x1)*(-dy/len) + (P.y-L.y1)*(dx/len)));
+  }
+  const d1 = distLine({x:newCx,y:newCy}, L1).toFixed(3);
+  const d2 = distLine({x:newCx,y:newCy}, L2).toFixed(3);
+  toast('⊙ 원 → 두 선에 접선 배치 (r=' + r + ', 거리 L1=' + d1 + 'mm, L2=' + d2 + 'mm)');
+  if(typeof skCmdLog === 'function') skCmdLog('  ⊙ 두선 접선: 원 (' + oldCx.toFixed(2) + ',' + oldCy.toFixed(2) + ') → (' + newCx.toFixed(2) + ',' + newCy.toFixed(2) + ') r=' + r, 'sys');
+};
+
 function newProject(){
   if(!confirm('새 프로젝트를 시작하시겠습니까?\n저장되지 않은 작업은 사라집니다.')) return;
   state.shapes = [];
@@ -9345,6 +9555,17 @@ document.getElementById('gridSize').addEventListener('change', (e)=>{
   redrawSketch();
 });
 
+// v8.23: Y기준 입력란 - Enter 키 + 초기 인디케이터 + change 자동 적용
+(function initYOriginInput(){
+  const el = document.getElementById('yOriginInput');
+  if(!el) return;
+  el.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); sk3SetYOrigin(); }
+  });
+  el.addEventListener('change', () => sk3SetYOrigin());
+  if(typeof updateYOriginIndicator === 'function') updateYOriginIndicator();
+})();
+
 // 휠클릭(중간버튼) 시 브라우저 자동 스크롤(동그란 아이콘) 방지 - CAD 화면이동 전용
 (function preventMiddleAutoscroll(){
   const wrap = document.querySelector('.canvas-wrap');
@@ -10009,6 +10230,14 @@ function sk3ExecuteCmd(raw) {
     skCmdLog('  📄 Ctrl+N 새 프로젝트 (도형+펜점+히스토리 완전 초기화)', 'help');
     skCmdLog('  🗑 Del: 도형 삭제 시 고아 펜점도 자동 정리', 'help');
     skCmdLog('     · 다른 도형 끝점과도 연결된 점은 보존', 'help');
+    skCmdLog('─── v8.23/24 신규 ────────────────────────', 'sys');
+    skCmdLog('  📍 Y기준 입력란 (도구바): 표시 Y의 0점을 임의 값으로', 'help');
+    skCmdLog('     · 도형은 안 움직이고 화면 표시/속성 패널만 보정', 'help');
+    skCmdLog('  🪐 라이브 접선 스냅 (도구바 🪐 버튼)', 'help');
+    skCmdLog('     · ON 상태에서 원/호 드래그 → 가까운 선에 자동 접선', 'help');
+    skCmdLog('     · 마우스를 선 따라 움직이면 원이 선 위 미끄러짐', 'help');
+    skCmdLog('  ⊙ 원을 두 선에 접선 (스케치 메뉴)', 'help');
+    skCmdLog('     · 원 1개 + 선 2개 선택 → 메뉴 → 반지름 유지하며 자동 배치', 'help');
     return;
   }
 

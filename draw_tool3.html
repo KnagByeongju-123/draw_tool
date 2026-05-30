@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.51 - 채움 객체 이동/삭제 fix</title>
+<title>tool3 v8.53 - 캡스크류 진짜 육각 렌치 구멍</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.51</h1>
+  <h1>📐 tool3 v8.53</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -776,8 +776,30 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <select id="boltHeadType">
         <option value="hex" selected>육각 (Hex)</option>
         <option value="round">둥근머리 (Round)</option>
-        <option value="cap">캡스크류 (Allen)</option>
+        <option value="cap">캡스크류 (렌치 구멍)</option>
       </select>
+    </div>
+    <!-- v8.53: 캡스크류 키 사이즈 (cap 선택 시 사용) -->
+    <div class="modal-row">
+      <label>렌치 키 사이즈(mm)</label>
+      <input type="number" id="boltKeyD" value="5" min="1" step="0.5" title="육각 렌치 키 대변 거리. ISO 4762: M3=2.5, M4=3, M5=4, M6=5, M8=6, M10=8, M12=10">
+    </div>
+    <!-- v8.52: 나사산 옵션 -->
+    <div class="modal-row">
+      <label>🌀 나사산</label>
+      <select id="boltThread">
+        <option value="none">없음 (매끈한 원통)</option>
+        <option value="iso" selected>ISO 미터 표준 (자동 피치)</option>
+        <option value="custom">사용자 피치</option>
+      </select>
+    </div>
+    <div class="modal-row">
+      <label>피치 P(mm)</label>
+      <input type="number" id="boltPitch" value="1.0" min="0.2" step="0.05" title="ISO 미터 표준: M3=0.5, M4=0.7, M5=0.8, M6=1.0, M8=1.25, M10=1.5, M12=1.75">
+    </div>
+    <div class="modal-row">
+      <label>3D 프린터 공차(mm)</label>
+      <input type="number" id="boltTolerance" value="0.2" min="0" max="0.5" step="0.05" title="볼트 외경에서 빼는 값. 너트가 헐겁게 들어가도록. FDM 보통 0.2~0.3mm">
     </div>
     <div class="modal-row">
       <label>색상</label>
@@ -788,7 +810,8 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <input type="text" id="boltPartName" placeholder="자동 생성">
     </div>
     <div class="info-box">
-      🔩 KS B 1002 육각볼트 규격 기반. 나사산은 표현하지 않고 매끈한 원통으로 단순화합니다.
+      🔩 KS B 1002 육각볼트 규격 기반. v8.52: 나사산 + 3D 프린터 공차 지원.<br>
+      ISO 미터 표준: M3=P0.5, M4=P0.7, M5=P0.8, M6=P1.0, M8=P1.25, M10=P1.5, M12=P1.75
     </div>
     <div class="modal-actions">
       <button onclick="closeModal('boltModal')">취소</button>
@@ -825,6 +848,23 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <div class="modal-row">
       <label>높이(mm)</label>
       <input type="number" id="nutHeight" value="5" min="1" step="0.5">
+    </div>
+    <!-- v8.52: 나사산 옵션 -->
+    <div class="modal-row">
+      <label>🌀 나사산</label>
+      <select id="nutThread">
+        <option value="none">없음 (매끈한 구멍)</option>
+        <option value="iso" selected>ISO 미터 표준 (자동 피치)</option>
+        <option value="custom">사용자 피치</option>
+      </select>
+    </div>
+    <div class="modal-row">
+      <label>피치 P(mm)</label>
+      <input type="number" id="nutPitch" value="1.0" min="0.2" step="0.05" title="ISO 미터 표준 피치">
+    </div>
+    <div class="modal-row">
+      <label>3D 프린터 공차(mm)</label>
+      <input type="number" id="nutTolerance" value="0.2" min="0" max="0.5" step="0.05" title="구멍에 추가하는 값. 볼트가 헐겁게 들어가도록.">
     </div>
     <div class="modal-row">
       <label>색상</label>

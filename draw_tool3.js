@@ -7850,6 +7850,105 @@ function ungroupPart(){
   toast('✂️ 그룹 해제 완료 (' + children.length + '개 부품)');
 }
 
+// ─── v8.52: ISO 미터 나사 표준 + 나사산 메시 생성 ───────────────
+const ISO_METRIC_PITCH = {3:0.5, 4:0.7, 5:0.8, 6:1.0, 8:1.25, 10:1.5, 12:1.75};
+
+// 명목 직경 d → 표준 피치
+function isoPitchFor(d){
+  const ds = Object.keys(ISO_METRIC_PITCH).map(Number).sort((a,b)=>a-b);
+  let best = ds[0], bestDiff = Math.abs(d - ds[0]);
+  for(let i=1; i<ds.length; i++){
+    const diff = Math.abs(d - ds[i]);
+    if(diff < bestDiff){ bestDiff = diff; best = ds[i]; }
+  }
+  if(bestDiff < 0.4) return ISO_METRIC_PITCH[best];
+  return Math.max(0.25, Math.round(d * 0.15 * 4) / 4);
+}
+
+// 나사산 메시 — 헬릭스를 따라 산-골 격자 빌드 (삼각 단면)
+// outerR: 산 반경, rootR: 골 반경, length: 나사부 길이, pitch: 피치
+// rightHand: 오른나사(기본 true), segPerTurn: 한 회전당 분할 수(기본 24)
+// 단면: 삼각형 [골(y), 산(y+P/4), 다음 골(y+P)] — 표준 60° 산보다 단순화된 형태
+function createThreadMesh(outerR, rootR, length, pitch, material, rightHand, segPerTurn){
+  if(!segPerTurn) segPerTurn = 24;
+  if(rightHand === undefined) rightHand = true;
+  if(outerR <= rootR + 0.001 || length < pitch * 0.5){
+    return null;  // 산 높이가 너무 작거나 길이가 부족
+  }
+  const turns = length / pitch;
+  const totalSeg = Math.max(16, Math.round(turns * segPerTurn));
+  const sign = rightHand ? 1 : -1;
+  const positions = [];
+  const indices = [];
+  // 각 segment에서 두 점 (골, 산) — 산은 1/4 피치 위
+  for(let i = 0; i <= totalSeg; i++){
+    const t = i / segPerTurn;
+    const angle = sign * t * Math.PI * 2;
+    const y = t * pitch - length / 2;
+    const cosA = Math.cos(angle), sinA = Math.sin(angle);
+    positions.push(rootR * cosA, y,                 rootR * sinA);
+    positions.push(outerR * cosA, y + pitch * 0.25, outerR * sinA);
+  }
+  // stitch — 각 인접 stack 사이 4점으로 두 삼각형
+  for(let i = 0; i < totalSeg; i++){
+    const a = 2*i, b = 2*i+1, c = 2*i+2, d = 2*i+3;
+    indices.push(a, b, c);
+    indices.push(b, d, c);
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geom.setIndex(indices);
+  geom.computeVertexNormals();
+  return new THREE.Mesh(geom, material);
+}
+
+// v8.53: 캡스크류 머리 빌드 — 원기둥 + 위쪽 육각 렌치 구멍
+// headD: 머리 지름, headH: 머리 높이, keyD: 렌치 키 사이즈(대변), tolerance: 공차(키에 추가)
+// 반환: THREE.Group (Y=0 ~ Y=headH 범위에 위치)
+function buildCapHead(headD, headH, keyD, tolerance, mat){
+  const grp = new THREE.Group();
+  // 1) 아래쪽 단단한 원기둥 (헬릭스 키 구멍이 머리 끝까지 관통하지 않도록)
+  const solidH = headH * 0.4;
+  const holeH  = headH - solidH;
+  const solidGeom = new THREE.CylinderGeometry(headD/2, headD/2, solidH, 32);
+  const solidMesh = new THREE.Mesh(solidGeom, mat);
+  solidMesh.position.y = solidH / 2;  // 0 ~ solidH
+  grp.add(solidMesh);
+  // 2) 위쪽 구멍 있는 부분 — 원형 외곽 + 육각 hole → ExtrudeGeometry
+  const outer = new THREE.Shape();
+  outer.absarc(0, 0, headD/2, 0, Math.PI*2, false);
+  // 육각 hole: 대변 거리(across-flats)가 keyD + tolerance
+  // 정육각형의 대변=√3 · 한변, 즉 한변(변 거리) = (대변)/√3 ... 아니 정확히는 대변 = √3 · (정점간 거리/2)
+  // 실용적: across-flats = keyEff → 정점까지 거리 = keyEff / √3 ... 아니
+  // 정육각형: 대변(short diameter, AF) = √3/2 · 대각선(long diameter, AC)
+  // 즉 정점까지 거리(corner radius) = AF / √3 · (sqrt 작업)
+  // 더 정확: 정점까지 거리 R = AF / (2 · cos(30°)) = AF / √3
+  // → cornerR = keyEff / √3
+  const keyEff = keyD + tolerance;
+  const cornerR = keyEff / Math.sqrt(3);
+  const hex = new THREE.Path();
+  for(let i = 0; i < 6; i++){
+    const a = i * Math.PI / 3 + Math.PI / 6;  // 평면이 위/아래 향하도록 +30°
+    const x = cornerR * Math.cos(a);
+    const y = cornerR * Math.sin(a);
+    if(i === 0) hex.moveTo(x, y);
+    else hex.lineTo(x, y);
+  }
+  hex.closePath();
+  outer.holes.push(hex);
+  const upperGeom = new THREE.ExtrudeGeometry(outer, {
+    depth: holeH, bevelEnabled: false, curveSegments: 32
+  });
+  // ExtrudeGeometry는 +Z 방향. -90° X축 회전 → -Y로 깊이가 됨
+  upperGeom.rotateX(-Math.PI / 2);
+  // 회전 후 0 ~ -holeH 범위로 깊이 → 우리는 solidH ~ headH 범위에 두고 싶음
+  // translate(0, headH, 0)하면 (headH - holeH) ~ headH 범위 = solidH ~ headH ✓
+  upperGeom.translate(0, headH, 0);
+  const upperMesh = new THREE.Mesh(upperGeom, mat);
+  grp.add(upperMesh);
+  return grp;
+}
+
 // ===== 볼트/너트/스프링 (v1.3) =====
 const BOLT_PRESETS = {
   M3:  {shankD:3,  shankL:10, headD:5.5,  headH:2,   key:2.5},
@@ -7891,6 +7990,15 @@ function applyBoltPreset(){
   document.getElementById('boltShankL').value = p.shankL;
   document.getElementById('boltHeadD').value = p.headD;
   document.getElementById('boltHeadH').value = p.headH;
+  // v8.52: ISO 표준 피치 자동
+  const pitchEl = document.getElementById('boltPitch');
+  if(pitchEl){
+    const P = ISO_METRIC_PITCH[p.shankD];
+    if(P !== undefined) pitchEl.value = P;
+  }
+  // v8.53: ISO 4762 캡스크류 키 사이즈 자동
+  const keyEl = document.getElementById('boltKeyD');
+  if(keyEl && p.key !== undefined) keyEl.value = p.key;
 }
 function applyNutPreset(){
   const k = document.getElementById('nutPreset').value;
@@ -7899,6 +8007,12 @@ function applyNutPreset(){
   document.getElementById('nutHoleD').value = p.holeD;
   document.getElementById('nutOuterD').value = p.outerD;
   document.getElementById('nutHeight').value = p.height;
+  // v8.52: ISO 표준 피치 자동
+  const pitchEl = document.getElementById('nutPitch');
+  if(pitchEl){
+    const P = ISO_METRIC_PITCH[p.holeD];
+    if(P !== undefined) pitchEl.value = P;
+  }
 }
 
 function doBolt(){
@@ -7907,6 +8021,12 @@ function doBolt(){
   const headD = parseFloat(document.getElementById('boltHeadD').value);
   const headH = parseFloat(document.getElementById('boltHeadH').value);
   const headType = document.getElementById('boltHeadType').value;
+  // v8.53: 캡스크류 키 사이즈
+  const keyD = parseFloat((document.getElementById('boltKeyD')||{}).value) || (shankD * 0.6);
+  // v8.52: 나사산 옵션
+  const threadMode = (document.getElementById('boltThread') || {}).value || 'iso';
+  const customPitch = parseFloat((document.getElementById('boltPitch')||{}).value) || 1.0;
+  const tolerance = parseFloat((document.getElementById('boltTolerance')||{}).value) || 0;
   const color = document.getElementById('boltColor').value;
   let name = document.getElementById('boltPartName').value.trim() || ('볼트_' + state.partIdCounter);
   if(isNaN(shankD) || isNaN(shankL) || isNaN(headD) || isNaN(headH)){toast('수치를 확인하세요'); return}
@@ -7914,47 +8034,59 @@ function doBolt(){
   const group = new THREE.Group();
   const mat = makeMaterial(color, 1);
 
-  // 머리: Y축 위쪽에 배치, 나사부는 아래쪽
-  let headGeom;
-  if(headType === 'hex'){
-    // 육각 머리: 6각형 단면 (Cylinder의 segments=6)
-    headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 6);
-  } else if(headType === 'round'){
-    // 둥근머리: 반구 위에 짧은 원통
-    const dome = new THREE.SphereGeometry(headD/2, 32, 16, 0, Math.PI*2, 0, Math.PI/2);
-    const domeMesh = new THREE.Mesh(dome, mat);
-    domeMesh.position.y = headH/2;
-    group.add(domeMesh);
-    headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 32);
-  } else {
-    // cap (Allen): 원통 머리
-    headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 32);
+  // v8.52: 나사산이 있으면 나사부는 골 반경의 원통 + 헬릭스 메시 추가
+  // 없으면 외경 -공차 원통 하나 (단순)
+  let shankOuterR = (shankD - tolerance) / 2;
+  let shankCoreR = shankOuterR;
+  let threadMesh = null;
+  if(threadMode !== 'none'){
+    const P = (threadMode === 'iso') ? isoPitchFor(shankD) : customPitch;
+    // 골 반경 = (d - 1.0825P)/2 — 공차는 외경에서만 적용 (골은 그대로)
+    shankCoreR = (shankD - 1.0825 * P) / 2;
+    shankOuterR = (shankD - tolerance) / 2;
+    threadMesh = createThreadMesh(shankOuterR, shankCoreR, shankL, P, mat, true, 24);
   }
-  const headMesh = new THREE.Mesh(headGeom, mat);
-  headMesh.position.y = headH/2;
-  group.add(headMesh);
 
-  // 나사부 (단순한 원통)
-  const shankGeom = new THREE.CylinderGeometry(shankD/2, shankD/2, shankL, 32);
+  // 머리: Y축 위쪽에 배치, 나사부는 아래쪽
+  if(headType === 'cap'){
+    // v8.53: 캡스크류 — 원기둥 + 육각 렌치 구멍 (실제 음각)
+    const capHead = buildCapHead(headD, headH, keyD, tolerance, mat);
+    group.add(capHead);
+  } else {
+    let headGeom;
+    if(headType === 'hex'){
+      // 육각 머리: 6각형 단면 (Cylinder의 segments=6)
+      headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 6);
+    } else if(headType === 'round'){
+      // 둥근머리: 반구 위에 짧은 원통
+      const dome = new THREE.SphereGeometry(headD/2, 32, 16, 0, Math.PI*2, 0, Math.PI/2);
+      const domeMesh = new THREE.Mesh(dome, mat);
+      domeMesh.position.y = headH/2;
+      group.add(domeMesh);
+      headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 32);
+    }
+    const headMesh = new THREE.Mesh(headGeom, mat);
+    headMesh.position.y = headH/2;
+    group.add(headMesh);
+  }
+
+  // 나사부 — 나사산 있으면 골 반경 원통(core) + 나사산 메시
+  const shankGeom = new THREE.CylinderGeometry(shankCoreR, shankCoreR, shankL, 32);
   const shankMesh = new THREE.Mesh(shankGeom, mat);
   shankMesh.position.y = -shankL/2;
   group.add(shankMesh);
-
-  // 캡스크류: 머리 위에 육각 키 구멍 (오목한 표시)
-  if(headType === 'cap'){
-    // 작은 음각 원통(시각적으로만 표시)
-    const keyD = shankD * 0.7;
-    const keyGeom = new THREE.CylinderGeometry(keyD/2, keyD/2, headH*0.6, 6);
-    const keyMat = makeMaterial('#222', 1);
-    const keyMesh = new THREE.Mesh(keyGeom, keyMat);
-    keyMesh.position.y = headH * 0.8;
-    group.add(keyMesh);
+  // v8.52: 나사산 메시 추가
+  if(threadMesh){
+    threadMesh.position.y = -shankL/2;
+    group.add(threadMesh);
   }
+
+  // v8.53: 캡스크류 음각은 buildCapHead()에서 실제 구멍으로 처리됨
 
   const part = {
     id: state.partIdCounter++, name, type: 'bolt',
     color, opacity: 1, visible: true, mesh: group,
-    params: {shankD, shankL, headD, headH, headType}
+    params: {shankD, shankL, headD, headH, headType, keyD, threadMode, customPitch, tolerance}
   };
   state.parts.push(part);
   addPartToScene(part);
@@ -7968,14 +8100,33 @@ function doNut(){
   const holeD = parseFloat(document.getElementById('nutHoleD').value);
   const outerD = parseFloat(document.getElementById('nutOuterD').value);
   const height = parseFloat(document.getElementById('nutHeight').value);
+  // v8.52: 나사산 옵션
+  const threadMode = (document.getElementById('nutThread') || {}).value || 'iso';
+  const customPitch = parseFloat((document.getElementById('nutPitch')||{}).value) || 1.0;
+  const tolerance = parseFloat((document.getElementById('nutTolerance')||{}).value) || 0;
   const color = document.getElementById('nutColor').value;
   let name = document.getElementById('nutPartName').value.trim() || ('너트_' + state.partIdCounter);
   if(isNaN(holeD) || isNaN(outerD) || isNaN(height)){toast('수치를 확인하세요'); return}
   if(holeD >= outerD){toast('구멍은 외경보다 작아야 합니다'); return}
 
-  // 육각 외형 - 구멍을 위해 ExtrudeGeometry with hole 사용
+  // v8.52: 나사산이 있으면 구멍은 공차 적용된 더 큰 골 반경(=볼트 외경 + 공차)
+  //         + 안쪽에 나사산 메시 (산이 안쪽으로 돌출)
+  // 너트의 구멍 = 볼트 외경 + 공차 (헐겁게 들어가도록)
+  // 너트의 나사 산 반경(안쪽 가장 돌출된 곳) = 볼트 골 반경 + 공차*0.5 (살짝 헐겁)
   const outerR = outerD / 2;
-  const holeR = holeD / 2;
+  let bore = (holeD + tolerance) / 2;  // 너트 통구멍 반경
+  let nutThreadOuter = bore;  // 너트 안쪽 산 반경
+  let nutThreadRoot = bore;
+  let pitch = 0;
+  if(threadMode !== 'none'){
+    pitch = (threadMode === 'iso') ? isoPitchFor(holeD) : customPitch;
+    // 너트 구멍 자체는 명목 + 공차 (볼트가 헐겁게 들어가도록)
+    bore = (holeD + tolerance) / 2;
+    // 너트 안쪽 나사산: 산이 안쪽으로 (소경=볼트 골+공차*0.5, 대경=볼트 외경 위치 = 너트 통구멍)
+    nutThreadRoot = bore;  // 통구멍 반경 (= 큰 쪽)
+    nutThreadOuter = (holeD - 1.0825 * pitch + tolerance * 0.5) / 2;  // 안쪽 돌출(작은 쪽)
+  }
+  const holeR = bore;  // 헥스 단면 빼기에 쓸 구멍 반경
 
   const hexShape = new THREE.Shape();
   for(let i = 0; i < 6; i++){
@@ -7999,19 +8150,33 @@ function doNut(){
   geom.translate(0, height/2, 0);
 
   const mat = makeMaterial(color, 1);
-  const mesh = new THREE.Mesh(geom, mat);
+  const body = new THREE.Mesh(geom, mat);
+  const group = new THREE.Group();
+  group.add(body);
+  // v8.52: 너트 내부 나사산 메시 (안쪽으로 산이 튀어나옴)
+  // createThreadMesh에서 outerR(큰)이 산이지만, 너트 안쪽 나사산은 안쪽이 산
+  // → outerR=nutThreadRoot(통구멍 큰 쪽), rootR=nutThreadOuter(안쪽 작은 쪽) 로 호출하면 normal이 안쪽 향함
+  // 함수는 outerR > rootR 가정이므로, root=작은(안쪽 산), outer=큰(통구멍 골)으로 호출
+  if(threadMode !== 'none' && pitch > 0){
+    const nutThread = createThreadMesh(nutThreadRoot, nutThreadOuter, height, pitch, mat, true, 24);
+    if(nutThread){
+      // ExtrudeGeometry와 동일한 Y 정렬: 가운데
+      nutThread.position.y = height / 2;
+      group.add(nutThread);
+    }
+  }
 
   const part = {
     id: state.partIdCounter++, name, type: 'nut',
-    color, opacity: 1, visible: true, mesh,
-    params: {holeD, outerD, height}
+    color, opacity: 1, visible: true, mesh: group,
+    params: {holeD, outerD, height, threadMode, customPitch, tolerance}
   };
   state.parts.push(part);
   addPartToScene(part);
   renderPartsList(); updateInfo();
   closeModal('nutModal'); switchMode('model'); fitView();
-  pushHistory(); // v4.6
-  toast('✅ 너트 생성: ' + name);
+  pushHistory();
+  toast('✅ 너트 생성: ' + name + (threadMode!=='none'?' · 나사산 P'+pitch+'mm':''));
 }
 
 function doSpring(){
@@ -9224,39 +9389,73 @@ function rebuildText3D(pdata){
 
 function rebuildBolt(pdata){
   const {shankD, shankL, headD, headH, headType} = pdata.params;
+  // v8.52: 저장 데이터에 나사산 정보 (없으면 'none')
+  const threadMode = pdata.params.threadMode || 'none';
+  const customPitch = pdata.params.customPitch || 1.0;
+  const tolerance = pdata.params.tolerance || 0;
+  // v8.53: 캡 키 사이즈 (없으면 shankD * 0.6 폴백)
+  const keyD = (pdata.params.keyD !== undefined) ? pdata.params.keyD : (shankD * 0.6);
   const group = new THREE.Group();
   const mat = makeMaterial(pdata.color, pdata.opacity);
-  let headGeom;
-  if(headType === 'hex') headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 6);
-  else if(headType === 'round'){
-    const dome = new THREE.SphereGeometry(headD/2, 32, 16, 0, Math.PI*2, 0, Math.PI/2);
-    const domeMesh = new THREE.Mesh(dome, mat);
-    domeMesh.position.y = headH/2;
-    group.add(domeMesh);
-    headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 32);
-  } else headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 32);
-  const headMesh = new THREE.Mesh(headGeom, mat);
-  headMesh.position.y = headH/2;
-  group.add(headMesh);
-  const shankGeom = new THREE.CylinderGeometry(shankD/2, shankD/2, shankL, 32);
+  // 머리
+  if(headType === 'cap'){
+    // v8.53: 캡스크류 — 진짜 육각 렌치 구멍
+    const capHead = buildCapHead(headD, headH, keyD, tolerance, mat);
+    group.add(capHead);
+  } else {
+    let headGeom;
+    if(headType === 'hex') headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 6);
+    else if(headType === 'round'){
+      const dome = new THREE.SphereGeometry(headD/2, 32, 16, 0, Math.PI*2, 0, Math.PI/2);
+      const domeMesh = new THREE.Mesh(dome, mat);
+      domeMesh.position.y = headH/2;
+      group.add(domeMesh);
+      headGeom = new THREE.CylinderGeometry(headD/2, headD/2, headH, 32);
+    }
+    const headMesh = new THREE.Mesh(headGeom, mat);
+    headMesh.position.y = headH/2;
+    group.add(headMesh);
+  }
+  // v8.52: 나사부
+  let shankCoreR, threadMesh = null;
+  if(threadMode === 'none'){
+    shankCoreR = (shankD - tolerance) / 2;
+  } else {
+    const P = (threadMode === 'iso') ? isoPitchFor(shankD) : customPitch;
+    shankCoreR = (shankD - 1.0825 * P) / 2;
+    const shankOuterR = (shankD - tolerance) / 2;
+    threadMesh = createThreadMesh(shankOuterR, shankCoreR, shankL, P, mat, true, 24);
+  }
+  const shankGeom = new THREE.CylinderGeometry(shankCoreR, shankCoreR, shankL, 32);
   const shankMesh = new THREE.Mesh(shankGeom, mat);
   shankMesh.position.y = -shankL/2;
   group.add(shankMesh);
-  if(headType === 'cap'){
-    const keyD = shankD * 0.7;
-    const keyGeom = new THREE.CylinderGeometry(keyD/2, keyD/2, headH*0.6, 6);
-    const keyMat = makeMaterial('#222', 1);
-    const keyMesh = new THREE.Mesh(keyGeom, keyMat);
-    keyMesh.position.y = headH * 0.8;
-    group.add(keyMesh);
+  if(threadMesh){
+    threadMesh.position.y = -shankL/2;
+    group.add(threadMesh);
   }
+  // v8.53: 캡 음각은 buildCapHead에서 처리됨, 추가 처리 없음
   group.visible = pdata.visible;
   return {...pdata, mesh: group};
 }
 
 function rebuildNut(pdata){
   const {holeD, outerD, height} = pdata.params;
-  const outerR = outerD / 2, holeR = holeD / 2;
+  // v8.52: 저장 데이터에 나사산 정보
+  const threadMode = pdata.params.threadMode || 'none';
+  const customPitch = pdata.params.customPitch || 1.0;
+  const tolerance = pdata.params.tolerance || 0;
+  const outerR = outerD / 2;
+  let bore, nutThreadOuter, nutThreadRoot, pitch = 0;
+  if(threadMode === 'none'){
+    bore = holeD / 2;
+  } else {
+    pitch = (threadMode === 'iso') ? isoPitchFor(holeD) : customPitch;
+    bore = (holeD + tolerance) / 2;
+    nutThreadRoot = bore;
+    nutThreadOuter = (holeD - 1.0825 * pitch + tolerance * 0.5) / 2;
+  }
+  const holeR = bore;
   const hexShape = new THREE.Shape();
   for(let i = 0; i < 6; i++){
     const a = i * Math.PI / 3 + Math.PI/6;
@@ -9272,9 +9471,18 @@ function rebuildNut(pdata){
   geom.rotateX(-Math.PI/2);
   geom.translate(0, height/2, 0);
   const mat = makeMaterial(pdata.color, pdata.opacity);
-  const mesh = new THREE.Mesh(geom, mat);
-  mesh.visible = pdata.visible;
-  return {...pdata, mesh};
+  const body = new THREE.Mesh(geom, mat);
+  const group = new THREE.Group();
+  group.add(body);
+  if(threadMode !== 'none' && pitch > 0){
+    const nutThread = createThreadMesh(nutThreadRoot, nutThreadOuter, height, pitch, mat, true, 24);
+    if(nutThread){
+      nutThread.position.y = height / 2;
+      group.add(nutThread);
+    }
+  }
+  group.visible = pdata.visible;
+  return {...pdata, mesh: group};
 }
 
 function rebuildSpring(pdata){

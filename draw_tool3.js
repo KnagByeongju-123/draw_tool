@@ -298,6 +298,7 @@ const state = {
   xOrigin: 0,       // v8.25: X축 표시 기준점(mm) — 표시 X = 실제 X − xOrigin, 입력 X는 + xOrigin로 변환 (음수도 가능)
   tangentSnap: false,  // v8.24: 라이브 접선 스냅 - 원/호 드래그 시 가까운 선에 자동 접선
   fineGrid: null,      // v8.34: 정밀 격자 {anchor:{x,y}, step:0.1, range:30} or null (Ctrl 누름 + 점 선택 시)
+  angleLineMode: null, // v8.37: 각선 모드 {anchor, anchorIdx, angleRad, angleDeg, previewWp} or null
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
   autoPopup: true, // v6.2: 도형 클릭 시 위치/크기/회전 입력 팝업 자동 표시
@@ -526,6 +527,60 @@ function redrawSketch(){
   drawPenLabels();
   // v8.5: 박스 선택 미리보기
   if(state.boxSelect) sk3DrawBoxSelectPreview(state.boxSelect);
+  // v8.37: 각선 모드 가이드 + 미리보기
+  if(state.angleLineMode){
+    const al = state.angleLineMode;
+    const a = worldToScreen(al.anchor.x, al.anchor.y);
+    const cs = Math.cos(al.angleRad), sn = Math.sin(al.angleRad);
+    // 무한 가이드선 (anchor에서 각도 방향, 양방향 화면 끝까지)
+    const big = 100000;
+    const farX = al.anchor.x + cs*big, farY = al.anchor.y + sn*big;
+    const farX2 = al.anchor.x - cs*big, farY2 = al.anchor.y - sn*big;
+    const sFar = worldToScreen(farX, farY);
+    const sFar2 = worldToScreen(farX2, farY2);
+    skCtx.save();
+    skCtx.strokeStyle = 'rgba(46, 204, 113, 0.5)';
+    skCtx.lineWidth = 1;
+    skCtx.setLineDash([6, 4]);
+    skCtx.beginPath();
+    skCtx.moveTo(sFar2.x, sFar2.y);
+    skCtx.lineTo(sFar.x, sFar.y);
+    skCtx.stroke();
+    skCtx.setLineDash([]);
+    // 미리보기 선 (anchor → previewWp)
+    if(al.previewWp){
+      const pv = worldToScreen(al.previewWp.x, al.previewWp.y);
+      skCtx.strokeStyle = '#27ae60';
+      skCtx.lineWidth = 2;
+      skCtx.beginPath();
+      skCtx.moveTo(a.x, a.y);
+      skCtx.lineTo(pv.x, pv.y);
+      skCtx.stroke();
+      // 미리보기 끝점
+      skCtx.fillStyle = '#27ae60';
+      skCtx.beginPath();
+      skCtx.arc(pv.x, pv.y, 5, 0, Math.PI*2);
+      skCtx.fill();
+      skCtx.fillStyle = '#fff';
+      skCtx.beginPath();
+      skCtx.arc(pv.x, pv.y, 2.5, 0, Math.PI*2);
+      skCtx.fill();
+      // 길이 라벨
+      const lenAbs = Math.abs(al.previewWp.length || 0);
+      skCtx.fillStyle = '#27ae60';
+      skCtx.font = 'bold 12px Consolas';
+      const midX = (a.x + pv.x) / 2;
+      const midY = (a.y + pv.y) / 2;
+      skCtx.fillText(lenAbs.toFixed(2) + 'mm @ ' + al.angleDeg + '°', midX + 6, midY - 6);
+    }
+    // anchor 마커
+    skCtx.strokeStyle = '#e74c3c';
+    skCtx.lineWidth = 2;
+    skCtx.beginPath();
+    skCtx.arc(a.x, a.y, 6, 0, Math.PI*2);
+    skCtx.stroke();
+    skCtx.restore();
+  }
   // v8.12: OSNAP 마커 — 현재 마우스가 스냅된 곳에 종류별 아이콘 표시
   if(state._lastSnapKind && state._penPreviewWp){
     sk3DrawSnapMarker(state._penPreviewWp.x, state._penPreviewWp.y, state._lastSnapKind);
@@ -718,6 +773,90 @@ window.sk3AddOriginPoint = function(){
   if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
   toast('● 원점 (0, 0)에 점 P' + state.penCur + ' 추가');
   if(typeof skCmdLog === 'function') skCmdLog('  ● 원점 점 P' + state.penCur + ' 추가 (0, 0)', 'sys');
+};
+
+// ─── v8.37: 각선 — 선택된 점에서 각도 유지하며 연장선 그리기 ───
+// 사용 흐름:
+//   1) 점 선택 (penCur 설정)
+//   2) 📐 각선 버튼 클릭 → 각도(°) 입력
+//   3) 마우스 이동 → 그 방향으로만 미리보기 진행
+//   4) 좌클릭 → 새 점 추가 + 선 생성
+//   5) ESC → 취소
+window.sk3StartAngleLine = function(){
+  if(state.mode !== 'sketch'){ toast('스케치 모드에서만 가능'); return; }
+  if(state.penCur < 0 || !state.penPoints[state.penCur]){
+    toast('📐 각선 — 먼저 점을 선택하세요 (점 클릭 또는 ⊕원점)');
+    return;
+  }
+  const anchor = state.penPoints[state.penCur];
+  const aStr = prompt('📐 각선 — 각도 입력\n\n수평(동) 기준 반시계 방향 (°)\n· 0=오른쪽 →\n· 90=위 ↑\n· 180=왼쪽 ←\n· 270=아래 ↓\n· 45=우상↗, 135=좌상↖\n· 수식 가능 (=45*2, 90/2, =-30)\n\n· 마우스 이동 후 좌클릭으로 길이 결정\n· ESC=취소', '0');
+  if(aStr === null) return;
+  const cleaned = String(aStr).replace(/[^0-9+\-*/.()]/g, '');
+  let deg;
+  try { deg = Function('"use strict";return (' + cleaned + ')')(); }
+  catch(e){ toast('각도 수식 오류'); return; }
+  if(!isFinite(deg)){ toast('유효한 각도 필요'); return; }
+  state.angleLineMode = {
+    anchorIdx: state.penCur,
+    anchor: {x: anchor.x, y: anchor.y},
+    angleRad: deg * Math.PI / 180,
+    angleDeg: deg,
+    previewWp: null
+  };
+  if(typeof setTool === 'function') setTool('select');
+  toast('📐 각선 모드 ON: ' + deg + '° — 마우스 이동 후 클릭으로 길이 결정 (ESC=취소)');
+  if(typeof skCmdLog === 'function') skCmdLog('  📐 각선 모드: P' + state.penCur + ' 기준 ' + deg + '°', 'sys');
+  redrawSketch();
+};
+
+// 각선 모드: 마우스 위치를 angle 직선으로 투영한 점 반환
+window.sk3AngleProject = function(wp){
+  if(!state.angleLineMode) return null;
+  const al = state.angleLineMode;
+  const cs = Math.cos(al.angleRad), sn = Math.sin(al.angleRad);
+  const dx = wp.x - al.anchor.x;
+  const dy = wp.y - al.anchor.y;
+  const t = dx*cs + dy*sn;  // anchor에서 단위벡터 방향으로의 부호 거리
+  return {x: al.anchor.x + cs*t, y: al.anchor.y + sn*t, length: t};
+};
+
+// 각선 모드 종료 (확정/취소)
+window.sk3CommitAngleLine = function(wp){
+  if(!state.angleLineMode) return false;
+  const al = state.angleLineMode;
+  const proj = sk3AngleProject(wp);
+  if(!proj || Math.abs(proj.length) < 0.05){
+    toast('📐 길이가 너무 작아 취소 (anchor와 거의 같은 위치)');
+    state.angleLineMode = null;
+    redrawSketch();
+    return true;
+  }
+  pushHistory();
+  // 새 펜점 + 선
+  state.penPoints.push({x: proj.x, y: proj.y});
+  const newIdx = state.penPoints.length - 1;
+  state.shapes.push({
+    type: 'line',
+    x1: al.anchor.x, y1: al.anchor.y,
+    x2: proj.x, y2: proj.y,
+    color: '#000000', lineWidth: 2
+  });
+  state.penCur = newIdx;
+  const lenMm = Math.abs(proj.length);
+  toast('📐 각선 추가: ' + al.angleDeg + '°, 길이 ' + lenMm.toFixed(2) + 'mm → P' + newIdx);
+  if(typeof skCmdLog === 'function') skCmdLog('  📐 각선 완료: ' + al.angleDeg + '° · 길이 ' + lenMm.toFixed(2) + 'mm · P' + al.anchorIdx + '→P' + newIdx, 'sys');
+  state.angleLineMode = null;
+  redrawSketch(); updateInfo();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  return true;
+};
+
+window.sk3CancelAngleLine = function(){
+  if(!state.angleLineMode) return false;
+  state.angleLineMode = null;
+  redrawSketch();
+  toast('✗ 각선 취소');
+  return true;
 };
 
 // ─── v8.33: 지름좌표 → 원점 양쪽에 점 2개 추가 ─────────────────
@@ -1261,6 +1400,16 @@ skCanvas.addEventListener('mousedown', (e)=>{
   const sy = e.clientY - rect.top;
   let wp = screenToWorld(sx, sy);
   wp = snapPoint(wp);
+
+  // v8.37: 각선 모드 진행 중이면 좌클릭으로 확정
+  if(state.angleLineMode && e.button === 0){
+    e.preventDefault();
+    // 마우스의 각도-투영 위치에 새 점 추가
+    const proj = sk3AngleProject(wp);
+    if(proj) sk3CommitAngleLine({x: proj.x, y: proj.y});
+    else sk3CancelAngleLine();
+    return;
+  }
   
   // v8.14: 휠 클릭(중간) — 점 위면 자동 연결, 빈 곳이면 패닝
   if(e.button === 1){
@@ -1541,6 +1690,20 @@ skCanvas.addEventListener('mousemove', (e)=>{
     state.panX = panStart.panX + (sx - panStart.x);
     state.panY = panStart.panY + (sy - panStart.y);
     redrawSketch();
+    return;
+  }
+  // v8.37: 각선 모드 — 마우스 따라 미리보기 업데이트
+  if(state.angleLineMode){
+    let wp = screenToWorld(sx, sy);
+    wp = snapPoint(wp);
+    const proj = sk3AngleProject(wp);
+    if(proj){
+      state.angleLineMode.previewWp = {x: proj.x, y: proj.y, length: proj.length};
+      redrawSketch();
+      const lenAbs = Math.abs(proj.length);
+      document.getElementById('footCoord').textContent =
+        `📐 각선: ${state.angleLineMode.angleDeg}° · 길이 ${lenAbs.toFixed(2)}mm · 끝점 (${dispX(proj.x).toFixed(2)}, ${proj.y.toFixed(2)}) — 클릭 확정 · ESC 취소`;
+    }
     return;
   }
   // v8.11~v8.12: 점 드래그 진행 — 일정 거리 이동했을 때만 실제로 점 이동
@@ -9805,6 +9968,11 @@ document.addEventListener('keydown', (e)=>{
       if(state.measureFirst){ state.measureFirst = null; setStat('📏 첫 점 취소 — 다시 첫 점을 클릭'); return; }
       toggleMeasureMode(); return;
     }
+    // v8.37: 각선 모드 진행 중이면 취소
+    if(state.angleLineMode){
+      sk3CancelAngleLine();
+      return;
+    }
     // v8.16: 도형 드래그 진행 중이면 원위치 복원
     if(state.dragShape){
       const ds = state.dragShape;
@@ -10412,8 +10580,7 @@ function sk3ExecuteCmd(raw) {
   if (!raw) {
     if (_lastCmd) { skCmdLog('명령 반복: ' + _lastCmd, 'user'); sk3ExecuteCmd(_lastCmd); }
     return;
-  }
-  if (_cmdHistory[0] !== raw) _cmdHistory.unshift(raw);
+  }  if (_cmdHistory[0] !== raw) _cmdHistory.unshift(raw);
   if (_cmdHistory.length > 50) _cmdHistory.pop();
   _cmdHistIdx = -1;
 
@@ -11780,6 +11947,9 @@ function sk3ExecuteCmd(raw) {
 
   skCmdLog("  ⚠ '" + raw + "' 알 수 없는 명령 — ? 입력으로 도움말", 'err');
 }
+
+// v8.39: 도구바 onclick에서 호출 가능하도록 window에 노출
+window.sk3ExecuteCmd = sk3ExecuteCmd;
 
 function initCmdBar() {
   if (document.getElementById('sk3CmdBar')) return;

@@ -7766,6 +7766,112 @@ window.sk3TangentTwoLines = function(){
   if(typeof skCmdLog === 'function') skCmdLog('  ⊙ 두선 접선: 원 (' + oldCx.toFixed(2) + ',' + oldCy.toFixed(2) + ') → (' + newCx.toFixed(2) + ',' + newCy.toFixed(2) + ') r=' + r, 'sys');
 };
 
+// ─── v8.27: 겹친 선 통합 (collinear merge) ──────────────────
+// 같은 직선 위에 있고 구간이 겹치거나 닿는 line들을 1개로 합침
+// - 완전 동일 / 역방향 / 부분 겹침 / 끝점 닿음 / 포함 관계 모두 처리
+// - 색상·굵기 다른 선들은 합치되 첫 번째 선 기준 (다르면 토스트로 알림)
+// - 펜점은 그대로 유지 (사용자 의도 점일 수 있음)
+window.sk3MergeOverlappingLines = function(silent){
+  if(state.mode !== 'sketch'){ toast('스케치 모드에서만 가능'); return 0; }
+  // 작업 대상: 모든 line (선택과 무관 — 전체 정리)
+  // 단, 선택된 도형이 있으면 선택된 line만 대상으로
+  const useSelection = state.selectedShapes && state.selectedShapes.size > 0;
+  const lineEntries = [];   // {origIdx, s}
+  const keepOthers = [];
+  state.shapes.forEach((s, idx) => {
+    const inSel = useSelection ? state.selectedShapes.has(idx) : true;
+    if(s.type === 'line' && inSel){
+      lineEntries.push({origIdx: idx, s: JSON.parse(JSON.stringify(s))});
+    } else {
+      keepOthers.push(s);
+    }
+  });
+  if(lineEntries.length < 2){
+    if(!silent) toast('통합할 선이 부족 (line ' + lineEntries.length + '개)' + (useSelection?' 선택된 것 중':''));
+    return 0;
+  }
+
+  const tol = 0.01;       // 좌표 일치 tolerance (mm)
+  const tolNormal = 0.05; // 직선 위 판정 tolerance (mm) — 약간 풀어서 사용자가 손으로 그은 선도 흡수
+
+  function tryMerge(A, B){
+    const dx = A.x2-A.x1, dy = A.y2-A.y1, len = Math.hypot(dx,dy);
+    if(len < tol) return null;
+    const ux = dx/len, uy = dy/len;
+    function distN(px, py){ return Math.abs(-uy*(px-A.x1) + ux*(py-A.y1)); }
+    if(distN(B.x1, B.y1) > tolNormal) return null;
+    if(distN(B.x2, B.y2) > tolNormal) return null;
+    function tOf(px, py){ return ux*(px-A.x1) + uy*(py-A.y1); }
+    const tB1 = tOf(B.x1, B.y1), tB2 = tOf(B.x2, B.y2);
+    const tBmin = Math.min(tB1, tB2), tBmax = Math.max(tB1, tB2);
+    // 겹치거나 닿는지: [0,len]과 [tBmin,tBmax]
+    if(tBmax < -tol || tBmin > len + tol) return null;
+    const newMin = Math.min(0, tBmin), newMax = Math.max(len, tBmax);
+    return {
+      x1: A.x1 + ux*newMin, y1: A.y1 + uy*newMin,
+      x2: A.x1 + ux*newMax, y2: A.y1 + uy*newMax
+    };
+  }
+
+  // 반복적으로 가까운 한 쌍씩 합치기 (변화 없을 때까지)
+  let changed = true, iterations = 0, mergedCount = 0;
+  let colorMismatchCount = 0;
+  while(changed && iterations < 500){
+    changed = false; iterations++;
+    outer: for(let i = 0; i < lineEntries.length; i++){
+      for(let j = i + 1; j < lineEntries.length; j++){
+        const A = lineEntries[i].s, B = lineEntries[j].s;
+        const m = tryMerge(A, B);
+        if(m){
+          // 색상/굵기 다르면 카운트만 (첫 번째 선 기준 유지)
+          if((A.color || '#000000') !== (B.color || '#000000') ||
+             (A.lineWidth || 2) !== (B.lineWidth || 2)){
+            colorMismatchCount++;
+          }
+          // i를 새 선으로 갱신 (색상/굵기는 A 유지)
+          lineEntries[i].s = {
+            type: 'line',
+            x1: m.x1, y1: m.y1, x2: m.x2, y2: m.y2,
+            color: A.color, lineWidth: A.lineWidth, fillColor: A.fillColor
+          };
+          // j 제거
+          lineEntries.splice(j, 1);
+          changed = true;
+          mergedCount++;
+          break outer;
+        }
+      }
+    }
+  }
+
+  if(mergedCount === 0){
+    if(!silent) toast('🧬 통합 대상 없음 (겹친 선 발견 안 됨)');
+    return 0;
+  }
+  pushHistory();
+  // useSelection이면 원본 도형 중 선택된 line만 제거하고 합쳐진 결과 추가
+  // useSelection이 아니면 전체 line을 합쳐진 것으로 교체
+  if(useSelection){
+    // 선택된 line의 원래 인덱스 모음
+    const selLineIdxSet = new Set();
+    state.shapes.forEach((s, idx) => {
+      if(s.type === 'line' && state.selectedShapes.has(idx)) selLineIdxSet.add(idx);
+    });
+    state.shapes = state.shapes.filter((s, idx) => !selLineIdxSet.has(idx));
+    lineEntries.forEach(e => state.shapes.push(e.s));
+    state.selectedShapes.clear();
+  } else {
+    state.shapes = keepOthers.concat(lineEntries.map(e => e.s));
+    state.selectedShapes.clear();
+  }
+  redrawSketch(); updateInfo();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  const msg = '🧬 겹친 선 ' + mergedCount + '쌍 통합' + (colorMismatchCount > 0 ? ' (색상/굵기 다른 ' + colorMismatchCount + '쌍은 첫 선 기준)' : '');
+  if(!silent) toast(msg);
+  if(typeof skCmdLog === 'function') skCmdLog('  🧬 겹친 선 통합: ' + mergedCount + '쌍' + (useSelection ? ' (선택 대상)' : ' (전체)') + (colorMismatchCount?' · 색상다름 '+colorMismatchCount:''), 'sys');
+  return mergedCount;
+};
+
 function newProject(){
   if(!confirm('새 프로젝트를 시작하시겠습니까?\n저장되지 않은 작업은 사라집니다.')) return;
   state.shapes = [];
@@ -10928,6 +11034,18 @@ function sk3ExecuteCmd(raw) {
     _lastCmd = raw; return;
   }
 
+  // ─── v8.27: 통합 (겹친 선 1개로) ─────────────────────────
+  // 명령: 통합 / MERGE / 합치기
+  if(key === '통합' || key === 'MERGE' || key === '합치기'){
+    if(typeof window.sk3MergeOverlappingLines === 'function'){
+      const merged = window.sk3MergeOverlappingLines(true); // silent=true, toast 안 띄움
+      skCmdLog('  🧬 통합: ' + merged + '쌍 통합', 'sys');
+    } else {
+      skCmdLog('  ⚠ 통합 기능을 사용할 수 없음', 'err');
+    }
+    _lastCmd = raw; return;
+  }
+
 
   // ─── 호 N R [시계|반시계] 각 A | 교점 ──────────────────
   if(key === '호' && toks.length >= 3){
@@ -11572,6 +11690,7 @@ function initCmdKeyboard() {
       { l:'만남',         t:'만남 ',      ex:'만남 N1 N2 → 두 선을 무한연장한 교점에 번호' },
       { l:'🏷 라벨 자동', action: () => sk3ExecuteCmd('라벨'), ex:'🏷 라벨없는 모든 선 끝점에 자동 P번호 부여' },
       { l:'🧹 정리',      t:'정리 ',      ex:'🧹 정리 0.1 → 점 전체 + ≤0.1mm 짧은 선 일괄 삭제' },
+      { l:'🧬 통합(겹친선)', action: () => sk3ExecuteCmd('통합'), ex:'🧬 겹친 선/포함된 선/끝점 닿은 collinear 선을 1개로 통합' },
       { l:'🖊 외곽선',    action: () => sk3ExecuteCmd('외곽선'), ex:'🖊 선택된 선들의 끝점에 자동 라벨 (선택후 클릭)' },
       { l:'🎨 채움',      action: () => sk3ExecuteCmd('채움'),    ex:'🎨 선택된 도형(사각형/원)에 채움 색상 입력 (선택후 클릭)' },
       { l:'🧽 쓸어지우기',action: () => sk3ExecuteCmd('쓸어지우기'), ex:'🧽 도구 활성화 → 캔버스 드래그로 박스 안 도형 일괄 삭제' },

@@ -12211,6 +12211,26 @@ function initCmdKeyboard() {
     // 기존 change/input 리스너 발화
     calc.target.dispatchEvent(new Event('input', {bubbles: true}));
     calc.target.dispatchEvent(new Event('change', {bubbles: true}));
+
+    // v8.29: 속성 패널 input이면 도형/점에 자동 반영 (속성의 "적용" 버튼 자동 클릭)
+    const id = calc.target.id;
+    const SHAPE_IDS = ['sk3p1x','sk3p1y','sk3p2x','sk3p2y','sk3cx','sk3cy','sk3r','sk3sd','sk3ed','sk3color','sk3lw'];
+    if(SHAPE_IDS.indexOf(id) >= 0){
+      if(typeof window.sk3ApplySelProp === 'function'){
+        try { window.sk3ApplySelProp(); } catch(e){}
+      }
+    } else if(id === 'sk3pxv' || id === 'sk3pyv'){
+      // 점 적용: 현재 펜점(state.penCur)이 타겟
+      if(typeof window.sk3ApplyPointProp === 'function' &&
+         typeof state !== 'undefined' && state.penCur >= 0){
+        try { window.sk3ApplyPointProp(state.penCur); } catch(e){}
+      }
+    }
+    // 도구바 X기준 input
+    if(id === 'xOriginInput' && typeof window.sk3SetXOrigin === 'function'){
+      try { window.sk3SetXOrigin(); } catch(e){}
+    }
+
     sk3CalcCancel();
   };
 

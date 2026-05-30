@@ -4663,7 +4663,8 @@ function showTransformHandles(part){
   const center = bb.getCenter(new THREE.Vector3());
   const size = bb.getSize(new THREE.Vector3());
   const maxSize = Math.max(size.x, size.y, size.z, 10);
-  const dot = maxSize * 0.045;     // 핸들 점 반지름
+  const dot = maxSize * 0.030;     // v8.54: 사이즈 조절자 크기 축소 (0.045 → 0.030)
+  const moveDot = maxSize * 0.040; // v8.54: 이동 핸들은 약간 크게 (구별)
   const bottomY = center.y - size.y/2;
   const topY = center.y + size.y/2;
   const WHITE = 0xffffff;
@@ -4772,6 +4773,53 @@ function showTransformHandles(part){
   group.add(makeRotIcon('z', 0x4488dd,
     {x: 0, y: -size.y/2 - maxSize*0.08, z: size.z/2 + maxSize*0.30},
     {x: -Math.PI/2}));
+
+  // ── v8.54: Y축 이동 핸들 (위/아래 양방향 화살표) ──
+  // 바운딩박스 우측 면 중앙에 세로 화살표 (Tinkercad/Fusion 스타일)
+  function makeMoveArrow(axis, color, posOffset, dirSign){
+    const grp = new THREE.Group();
+    const arrowH = maxSize * 0.18;
+    // 양방향: 위/아래 화살촉 + 가운데 stem
+    // stem
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(moveDot*0.18, moveDot*0.18, arrowH, 8),
+      new THREE.MeshBasicMaterial({color, depthTest:false})
+    );
+    stem.renderOrder = 1001;
+    grp.add(stem);
+    // 위 화살촉
+    const tipUp = new THREE.Mesh(
+      new THREE.ConeGeometry(moveDot*0.55, moveDot*1.1, 12),
+      new THREE.MeshBasicMaterial({color, depthTest:false})
+    );
+    tipUp.position.y = arrowH/2 + moveDot*0.55;
+    tipUp.userData._handle = {type:'move', axis:axis, dir:+1};
+    tipUp.renderOrder = 1002;
+    grp.add(tipUp);
+    // 아래 화살촉
+    const tipDn = new THREE.Mesh(
+      new THREE.ConeGeometry(moveDot*0.55, moveDot*1.1, 12),
+      new THREE.MeshBasicMaterial({color, depthTest:false})
+    );
+    tipDn.position.y = -arrowH/2 - moveDot*0.55;
+    tipDn.rotation.z = Math.PI;
+    tipDn.userData._handle = {type:'move', axis:axis, dir:-1};
+    tipDn.renderOrder = 1002;
+    grp.add(tipDn);
+    // 충돌용 투명 캡슐 (클릭 영역 확장)
+    const hit = new THREE.Mesh(
+      new THREE.CylinderGeometry(moveDot*0.9, moveDot*0.9, arrowH*1.5, 8),
+      new THREE.MeshBasicMaterial({transparent:true, opacity:0, depthTest:false, depthWrite:false})
+    );
+    hit.userData._handle = {type:'move', axis:axis, dir:0};
+    hit.renderOrder = 1000;
+    grp.add(hit);
+    grp.position.set(center.x + posOffset.x, center.y + posOffset.y, center.z + posOffset.z);
+    return grp;
+  }
+  // Y축 이동 핸들 — 좌측에 배치 (회전 핸들과 겹치지 않도록)
+  group.add(makeMoveArrow('y', 0x44dd44,
+    {x: -size.x/2 - maxSize*0.22, y: 0, z: 0}));
 
   transformState.handleGroup = group;
   scene.add(group);

@@ -4781,40 +4781,40 @@ function showTransformHandles(part){
     {x: -Math.PI/2}));
 
   // ── v8.54: Y축 이동 핸들 (위/아래 양방향 화살표) ──
-  // 바운딩박스 우측 면 중앙에 세로 화살표 (Tinkercad/Fusion 스타일)
+  // v8.57: 색상은 Y축(=수직) 색깔 = 파랑으로
+  // v8.58: 위치를 부품 위쪽으로 (가장 직관적) + 더 크고 잘 보이게
   function makeMoveArrow(axis, color, posOffset, dirSign){
     const grp = new THREE.Group();
-    const arrowH = maxSize * 0.18;
+    const arrowH = maxSize * 0.25;  // 더 크게
     // 양방향: 위/아래 화살촉 + 가운데 stem
-    // stem
     const stem = new THREE.Mesh(
-      new THREE.CylinderGeometry(moveDot*0.18, moveDot*0.18, arrowH, 8),
+      new THREE.CylinderGeometry(moveDot*0.25, moveDot*0.25, arrowH, 10),
       new THREE.MeshBasicMaterial({color, depthTest:false})
     );
     stem.renderOrder = 1001;
     grp.add(stem);
     // 위 화살촉
     const tipUp = new THREE.Mesh(
-      new THREE.ConeGeometry(moveDot*0.55, moveDot*1.1, 12),
+      new THREE.ConeGeometry(moveDot*0.70, moveDot*1.3, 14),
       new THREE.MeshBasicMaterial({color, depthTest:false})
     );
-    tipUp.position.y = arrowH/2 + moveDot*0.55;
+    tipUp.position.y = arrowH/2 + moveDot*0.65;
     tipUp.userData._handle = {type:'move', axis:axis, dir:+1};
     tipUp.renderOrder = 1002;
     grp.add(tipUp);
     // 아래 화살촉
     const tipDn = new THREE.Mesh(
-      new THREE.ConeGeometry(moveDot*0.55, moveDot*1.1, 12),
+      new THREE.ConeGeometry(moveDot*0.70, moveDot*1.3, 14),
       new THREE.MeshBasicMaterial({color, depthTest:false})
     );
-    tipDn.position.y = -arrowH/2 - moveDot*0.55;
+    tipDn.position.y = -arrowH/2 - moveDot*0.65;
     tipDn.rotation.z = Math.PI;
     tipDn.userData._handle = {type:'move', axis:axis, dir:-1};
     tipDn.renderOrder = 1002;
     grp.add(tipDn);
     // 충돌용 투명 캡슐 (클릭 영역 확장)
     const hit = new THREE.Mesh(
-      new THREE.CylinderGeometry(moveDot*0.9, moveDot*0.9, arrowH*1.5, 8),
+      new THREE.CylinderGeometry(moveDot*1.1, moveDot*1.1, arrowH*1.8, 8),
       new THREE.MeshBasicMaterial({transparent:true, opacity:0, depthTest:false, depthWrite:false})
     );
     hit.userData._handle = {type:'move', axis:axis, dir:0};
@@ -4823,9 +4823,10 @@ function showTransformHandles(part){
     grp.position.set(center.x + posOffset.x, center.y + posOffset.y, center.z + posOffset.z);
     return grp;
   }
-  // Y축 이동 핸들 — 좌측에 배치 (회전 핸들과 겹치지 않도록)
-  group.add(makeMoveArrow('y', 0x44dd44,
-    {x: -size.x/2 - maxSize*0.22, y: 0, z: 0}));
+  // v8.58: Y이동(=수직 이동) 핸들 — 부품 위쪽 중앙에 배치 (가장 직관적, Tinkercad 스타일)
+  // 색상: 수직축 색(파랑, v8.57 swap 반영)
+  group.add(makeMoveArrow('y', 0x3366ff,
+    {x: 0, y: size.y/2 + maxSize*0.28, z: 0}));
 
   transformState.handleGroup = group;
   scene.add(group);
@@ -5119,20 +5120,20 @@ function handleDrag(e){
       transformState._rotStart = Math.atan2(transformState.dragStart.y - cy, transformState.dragStart.x - cx);
       transformState._rotInitialQuat = p.mesh.quaternion.clone();
       // v8.55: 핸들 축(x/y/z)을 카메라 기준 회전축으로 매핑
-      //   x 핸들 → 카메라 right (화면 가로축 기준 회전, 위/아래로 기울이기)
-      //   y 핸들 → 카메라 up    (화면 세로축 기준 회전, 좌/우로 돌리기)
-      //   z 핸들 → 카메라 forward (화면 깊이축 기준 회전, 시계/반시계)
       const right = new THREE.Vector3();
       const up = new THREE.Vector3();
       const forward = new THREE.Vector3();
       camera.matrixWorld.extractBasis(right, up, forward);
-      // forward는 카메라가 -Z를 바라봄 → 우리가 원하는 시야 방향은 -forward
       forward.negate();
       let axis;
       if(h.axis === 'x') axis = right;
       else if(h.axis === 'y') axis = up;
       else axis = forward;
       transformState._rotWorldAxis = axis.normalize();
+      // v8.58: 디버그 — 어떤 축으로 회전 시작했는지 표시
+      const ax = transformState._rotWorldAxis;
+      setStat('↻ 회전 시작 (' + h.axis.toUpperCase() + ' 핸들) 축=(' +
+        ax.x.toFixed(2) + ',' + ax.y.toFixed(2) + ',' + ax.z.toFixed(2) + ')');
     }
     const angleNow = Math.atan2(e.clientY - cy, e.clientX - cx);
     let delta = angleNow - transformState._rotStart;

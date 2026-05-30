@@ -3180,6 +3180,10 @@ window.sk3UpdateSelProp = function(){
         <div class="prop-row"><label>외곽색</label><input type="color" id="sk3fillStroke" value="${s.stroke||'#000000'}"></div>
         <div class="prop-row"><label>외곽두께</label><input type="number" step="0.5" id="sk3fillStrokeW" value="${s.strokeWidth||1.5}" min="0.5"></div>
         <button onclick="sk3ApplyFillProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
+        <div style="display:flex;gap:4px;margin-top:6px">
+          <button onclick="sk3FillToExtrude()" style="flex:1;background:#9b59b6;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;font-weight:bold" title="이 채움을 3D 돌출로 변환 (모드 자동 전환)">🟦 돌출</button>
+          <button onclick="sk3FillToRevolve()" style="flex:1;background:#3498db;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;font-weight:bold" title="이 채움을 3D 회전체로 변환 (모드 자동 전환)">🌀 회전체</button>
+        </div>
         <button onclick="sk3DeleteSelectedFill()" style="width:100%;margin-top:4px;background:#c0392b;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">🗑 채움 삭제</button>
         <div style="font-size:10px;color:#888;margin-top:6px">점 ${s.vertices.length}개 · 면적 ${area.toFixed(2)}mm²</div>`;
     } else {
@@ -5369,6 +5373,12 @@ function shapeToThreeShape(s){
     for(let i=1;i<s.points.length;i++) shape.lineTo(s.points[i].x, s.points[i].y);
     shape.closePath();
     return shape;
+  } else if(s.type === 'fill' && Array.isArray(s.vertices) && s.vertices.length >= 3){
+    // v8.47: 채움 객체 → THREE.Shape (돌출/회전체용 단면)
+    shape.moveTo(s.vertices[0].x, s.vertices[0].y);
+    for(let i=1; i<s.vertices.length; i++) shape.lineTo(s.vertices[i].x, s.vertices[i].y);
+    shape.closePath();
+    return shape;
   }
   return null;
 }
@@ -5557,6 +5567,9 @@ function doRevolve(){
       points.push({x: s.x2, y: s.y1});
       points.push({x: s.x2, y: s.y2});
       points.push({x: s.x1, y: s.y2});
+    } else if(s.type === 'fill' && Array.isArray(s.vertices)){
+      // v8.47: 채움 객체 — 폴리곤 정점 그대로 단면으로 사용
+      s.vertices.forEach(v => points.push({x: v.x, y: v.y}));
     }
   });
   
@@ -8679,6 +8692,44 @@ window.sk3ApplyFillProp = function(){
   }
   redrawSketch(); updateInfo();
   toast('✓ 채움 속성 적용');
+};
+
+// v8.47: 채움 → 3D 돌출 변환 (모드 전환 + 돌출 모달 자동 열기)
+window.sk3FillToExtrude = function(){
+  if(!state.selectedShapes || state.selectedShapes.size !== 1){
+    toast('채움 객체를 먼저 선택하세요');
+    return;
+  }
+  const idx = [...state.selectedShapes][0];
+  const s = state.shapes[idx];
+  if(!s || s.type !== 'fill'){ toast('채움 객체를 선택하세요'); return; }
+  // 3D 모드로 전환
+  if(state.mode === 'sketch' && typeof setMode === 'function'){
+    setMode('model');
+  }
+  // doExtrude는 state.selectedShapes를 대상으로 (그대로 유지됨)
+  setTimeout(() => {
+    if(typeof openExtrudeModal === 'function') openExtrudeModal();
+    toast('🟦 채움 → 돌출: 높이/방향 입력 후 [돌출] 클릭');
+  }, 120);
+};
+
+// v8.47: 채움 → 3D 회전체 변환
+window.sk3FillToRevolve = function(){
+  if(!state.selectedShapes || state.selectedShapes.size !== 1){
+    toast('채움 객체를 먼저 선택하세요');
+    return;
+  }
+  const idx = [...state.selectedShapes][0];
+  const s = state.shapes[idx];
+  if(!s || s.type !== 'fill'){ toast('채움 객체를 선택하세요'); return; }
+  if(state.mode === 'sketch' && typeof setMode === 'function'){
+    setMode('model');
+  }
+  setTimeout(() => {
+    if(typeof openRevolveModal === 'function') openRevolveModal();
+    toast('🌀 채움 → 회전체: 회전축/각도 입력 후 [회전] 클릭');
+  }, 120);
 };
 
 // v8.45: 선택된 채움 객체 삭제 (속성 패널 버튼)

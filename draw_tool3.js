@@ -1796,16 +1796,17 @@ function sk3FilletV2Calc(L1, L2, R){
   // 호 시작/끝 각도 (C 기준)
   const aS = Math.atan2(t1.y - C.y, t1.x - C.x);
   const aE = Math.atan2(t2.y - C.y, t2.x - C.x);
-  // 가상 교점 I가 호 안에 들어오면 반전 (긴 호 대신 짧은 호 보장)
-  function inArcCCW(a, s, e){
-    let ds = e - s; while(ds < 0) ds += 2*Math.PI;
-    let da = a - s; while(da < 0) da += 2*Math.PI;
-    return da < ds;
-  }
-  const aI = Math.atan2(I.y - C.y, I.x - C.x);
-  let startAngle = aS, endAngle = aE;
-  if(inArcCCW(aI, aS, aE)){
-    // 가상 교점이 aS→aE CCW 호 안 → 반대 방향 사용
+  // v8.20 FIX: 항상 짧은 호 보장 (|dA| ≤ π)
+  // 이전 로직(inArcCCW로 swap)이 반대로 동작해 긴 호가 그려져
+  // "잘려야 할 부분(코너 안쪽)이 살아남고 외각 쪽이 잘리는" 결함이 있었음
+  // 필렛 호는 항상 두 접점 사이의 짧은 곡선 = 코너 안쪽으로 볼록
+  let dA = aE - aS;
+  while(dA > Math.PI) dA -= 2*Math.PI;
+  while(dA < -Math.PI) dA += 2*Math.PI;
+  let startAngle, endAngle;
+  if(dA >= 0){
+    startAngle = aS; endAngle = aE;
+  } else {
     startAngle = aE; endAngle = aS;
   }
 

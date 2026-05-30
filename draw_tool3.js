@@ -3909,14 +3909,16 @@ function initThree(){
   scene.add(gridHelper);
   axesHelper = new THREE.AxesHelper(60);
   // v8.3: 축 색상 — X=빨강, Y=연두, Z=파랑 (표준 RGB 매핑)
+  // v8.57: 사용자 요청 — Y(위쪽)와 Z(깊이)의 표시 색상 swap (Y=파랑, Z=연두)
+  //   내부 Three.js 축은 그대로 (Y는 여전히 위), 색상 라벨만 CAD 컨벤션에 맞게
   {
     const cX = new THREE.Color(0xff3333); // X 빨강
-    const cY = new THREE.Color(0x88ff66); // Y 연두
-    const cZ = new THREE.Color(0x3366ff); // Z 파랑
+    const cY = new THREE.Color(0x3366ff); // Y (위쪽) → 파랑
+    const cZ = new THREE.Color(0x88ff66); // Z (깊이) → 연두
     const colors = new Float32Array([
       cX.r, cX.g, cX.b,  cX.r, cX.g, cX.b,   // X축 두 점
-      cY.r, cY.g, cY.b,  cY.r, cY.g, cY.b,   // Y축 두 점
-      cZ.r, cZ.g, cZ.b,  cZ.r, cZ.g, cZ.b    // Z축 두 점
+      cY.r, cY.g, cY.b,  cY.r, cY.g, cY.b,   // Y축(위쪽) 두 점 — 파랑
+      cZ.r, cZ.g, cZ.b,  cZ.r, cZ.g, cZ.b    // Z축(깊이) 두 점 — 연두
     ]);
     axesHelper.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     axesHelper.material.vertexColors = true;

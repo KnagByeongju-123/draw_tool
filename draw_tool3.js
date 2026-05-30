@@ -4806,36 +4806,37 @@ function showTransformHandles(part){
   // v8.58: 위치를 부품 위쪽으로 (가장 직관적) + 더 크고 잘 보이게
   function makeMoveArrow(axis, color, posOffset, dirSign){
     const grp = new THREE.Group();
-    const arrowH = maxSize * 0.25;  // 더 크게
+    const mv = moveDot * 0.333;      // v8.63: 화살표 전체 원본의 1/3로 축소
+    const arrowH = maxSize * 0.083;  // v8.63: 본체 길이도 1/3 (0.25 → 0.083)
     // 양방향: 위/아래 화살촉 + 가운데 stem
     const stem = new THREE.Mesh(
-      new THREE.CylinderGeometry(moveDot*0.25, moveDot*0.25, arrowH, 10),
+      new THREE.CylinderGeometry(mv*0.25, mv*0.25, arrowH, 10),
       new THREE.MeshBasicMaterial({color, depthTest:false})
     );
     stem.renderOrder = 1001;
     grp.add(stem);
     // 위 화살촉
     const tipUp = new THREE.Mesh(
-      new THREE.ConeGeometry(moveDot*0.70, moveDot*1.3, 14),
+      new THREE.ConeGeometry(mv*0.70, mv*1.3, 14),
       new THREE.MeshBasicMaterial({color, depthTest:false})
     );
-    tipUp.position.y = arrowH/2 + moveDot*0.65;
+    tipUp.position.y = arrowH/2 + mv*0.65;
     tipUp.userData._handle = {type:'move', axis:axis, dir:+1};
     tipUp.renderOrder = 1002;
     grp.add(tipUp);
     // 아래 화살촉
     const tipDn = new THREE.Mesh(
-      new THREE.ConeGeometry(moveDot*0.70, moveDot*1.3, 14),
+      new THREE.ConeGeometry(mv*0.70, mv*1.3, 14),
       new THREE.MeshBasicMaterial({color, depthTest:false})
     );
-    tipDn.position.y = -arrowH/2 - moveDot*0.65;
+    tipDn.position.y = -arrowH/2 - mv*0.65;
     tipDn.rotation.z = Math.PI;
     tipDn.userData._handle = {type:'move', axis:axis, dir:-1};
     tipDn.renderOrder = 1002;
     grp.add(tipDn);
     // 충돌용 투명 캡슐 (클릭 영역) — v8.60: 높이조절 핸들과 안 겹치게 화살표 본체 범위로 한정
     const hit = new THREE.Mesh(
-      new THREE.CylinderGeometry(moveDot*1.0, moveDot*1.0, arrowH*1.15, 8),
+      new THREE.CylinderGeometry(mv*1.4, mv*1.4, arrowH*1.6, 8),
       new THREE.MeshBasicMaterial({transparent:true, opacity:0, depthTest:false, depthWrite:false})
     );
     hit.userData._handle = {type:'move', axis:axis, dir:0};

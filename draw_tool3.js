@@ -4420,6 +4420,7 @@ function setupRaycastClick(dom){
       const h = transformState.draggingHandle;
       const wasRotate = (h && h.type === 'rotate');
       const wasScale = (h && h.type === 'scale');
+      const wasMove = (h && h.type === 'move');
       const p = transformState.activePart;
       transformState.draggingHandle = null;
       transformState._rotStart = null;
@@ -4440,9 +4441,8 @@ function setupRaycastClick(dom){
           }
         }
       }
-      // v2.5: 크기 변경 종료 시 HUD 숨김 + 최종 크기 알림
+      // v2.5: 크기 변경 종료 시 - v8.64: HUD를 클릭 가능 상태로 유지(직접 입력)
       if(wasScale){
-        hideScaleHud();
         if(p && p.mesh){
           p.mesh.updateMatrixWorld(true);
           const bb = new THREE.Box3().setFromObject(p.mesh);
@@ -4450,15 +4450,21 @@ function setupRaycastClick(dom){
           if(h.axis === 'corner'){
             toast('📐 크기 = ' + sz.x.toFixed(1) + ' × ' + sz.y.toFixed(1) + ' × ' + sz.z.toFixed(1) + ' mm');
             setStat('비례 크기 변경 완료: ' + sz.x.toFixed(1) + ' × ' + sz.y.toFixed(1) + ' × ' + sz.z.toFixed(1) + ' mm');
+            unitHudPersist('scale', 'XYZ', sz.x);
           } else {
             const axisChar = h.axis.slice(1);
             const finalMM = sz[axisChar];
             toast('📐 ' + axisChar.toUpperCase() + ' 크기 = ' + finalMM.toFixed(1) + ' mm');
             setStat('크기 변경 완료: ' + axisChar.toUpperCase() + '축 ' + finalMM.toFixed(1) + ' mm');
+            unitHudPersist('scale', axisChar, finalMM);
           }
         }
         // 핸들 BB 재계산을 위해 다시 보이기
         if(p) showTransformHandles(p);
+      }
+      // v8.64: 위치 이동 종료 시 HUD를 클릭 가능 상태로 유지(직접 입력)
+      if(wasMove && p && p.mesh){
+        unitHudPersist('move', h.axis, p.mesh.position[h.axis]);
       }
       transformState._scaleStartBB = null;
       transformState._scaleStartPos = null;
@@ -4984,6 +4990,8 @@ function handleDrag(e){
     }
     // v3.3: 우측 속성 패널 위치/크기 실시간 갱신
     refreshPropPanelTransform(p);
+    // v8.64: 위치 HUD 실시간 표시 (상단부)
+    showMoveHud(h.axis, p.mesh.position[h.axis], p.mesh.position[h.axis] - transformState.dragStartPos[h.axis], state.moveSnap > 0);
   } else if(h.type === 'scale'){
     // v5.6: 코너 핸들 = 3축 균등(비례) 스케일 (팅커캐드 모서리 핸들)
     if(h.axis === 'corner'){
@@ -9749,6 +9757,7 @@ function showRotHud(axis, currentRad, deltaRad, snapped){
   if(angSpan) angSpan.style.display = '';
   hud.classList.remove('clickable'); // v4.0: 드래그 중엔 클릭 통과
   _rotHudActiveAxis = axis;
+  _hudMode = 'rotate'; // v8.64
   if(_rotHudPersistTimer){ clearTimeout(_rotHudPersistTimer); _rotHudPersistTimer = null; }
   const axisName = {x:'X축', y:'Y축', z:'Z축'}[axis] || axis;
   const axisColor = {x:'#ff6666', y:'#66ff66', z:'#66aaff'}[axis] || '#f39c12';
@@ -9779,8 +9788,12 @@ function hideRotHud(){
 //   _rotHudAxis는 마지막에 변경된 축 기억 → 클릭 시 입력값을 이 축에 적용
 let _rotHudPersistTimer = null;
 let _rotHudActiveAxis = 'y';
+// v8.64: HUD를 회전/크기/위치 3종 모드로 공용 사용
+let _hudMode = 'rotate';      // 'rotate' | 'scale' | 'move'
+let _hudUnitAxis = 'y';       // scale/move 시 대상 축 ('x'|'y'|'z'|'XYZ')
 function rotHudPersist(axis, currentRad){
   _rotHudActiveAxis = axis;
+  _hudMode = 'rotate'; // v8.64
   const hud = document.getElementById('rotHud');
   if(!hud) return;
   hud.classList.add('show');
@@ -9802,14 +9815,24 @@ function onRotHudClick(event){
   const angSpan = document.getElementById('rotHudAngle');
   const inp = document.getElementById('rotHudInput');
   if(!angSpan || !inp) return;
-  // 현재 부품의 해당 축 각도를 가져와 입력창에 채움
+  inp.value = '';
+  // v8.64: 모드별 현재값 프리필
   const id = state.selectedPartId;
   const p = state.parts.find(x => x.id === id);
-  let curDeg = 0;
-  if(p && p.mesh){
-    curDeg = p.mesh.rotation[_rotHudActiveAxis] * 180 / Math.PI;
+  if(_hudMode === 'rotate'){
+    let curDeg = 0;
+    if(p && p.mesh) curDeg = p.mesh.rotation[_rotHudActiveAxis] * 180 / Math.PI;
+    inp.value = curDeg.toFixed(1);
+  } else if(p && p.mesh){
+    if(_hudMode === 'scale'){
+      p.mesh.updateMatrixWorld(true);
+      const sz = new THREE.Box3().setFromObject(p.mesh).getSize(new THREE.Vector3());
+      const axc = (_hudUnitAxis === 'XYZ') ? 'x' : _hudUnitAxis;
+      inp.value = sz[axc].toFixed(1);
+    } else if(_hudMode === 'move'){
+      inp.value = p.mesh.position[_hudUnitAxis].toFixed(1);
+    }
   }
-  inp.value = curDeg.toFixed(1);
   angSpan.style.display = 'none';
   inp.style.display = '';
   setTimeout(() => { inp.focus(); inp.select(); }, 0);
@@ -9843,15 +9866,38 @@ function applyRotHudInput(){
   const id = state.selectedPartId;
   const p = state.parts.find(x => x.id === id);
   if(p && p.mesh){
-    p.mesh.rotation[_rotHudActiveAxis] = v * Math.PI / 180;
+    if(_hudMode === 'rotate'){
+      p.mesh.rotation[_rotHudActiveAxis] = v * Math.PI / 180;
+      angSpan.textContent = v.toFixed(1) + '°';
+      toast('↻ ' + _rotHudActiveAxis.toUpperCase() + '축 = ' + v.toFixed(1) + '°');
+      setStat('회전 직접 입력: ' + _rotHudActiveAxis.toUpperCase() + '축 ' + v.toFixed(1) + '°');
+    } else if(_hudMode === 'scale'){
+      // 절대 크기(mm) 설정 — 중심 고정, 해당 축 스케일을 목표 mm에 맞춤
+      const tgt = Math.max(0.5, v);
+      p.mesh.updateMatrixWorld(true);
+      const sz0 = new THREE.Box3().setFromObject(p.mesh).getSize(new THREE.Vector3());
+      if(_hudUnitAxis === 'XYZ'){
+        const f = tgt / Math.max(0.001, sz0.x);
+        p.mesh.scale.multiplyScalar(f);
+      } else {
+        const axc = _hudUnitAxis;
+        const f = tgt / Math.max(0.001, sz0[axc]);
+        p.mesh.scale[axc] *= f;
+      }
+      angSpan.textContent = tgt.toFixed(1) + ' mm';
+      toast('📐 ' + _hudUnitAxis.toUpperCase() + ' 크기 = ' + tgt.toFixed(1) + ' mm');
+      setStat('크기 직접 입력: ' + _hudUnitAxis.toUpperCase() + ' ' + tgt.toFixed(1) + ' mm');
+    } else if(_hudMode === 'move'){
+      // 절대 위치(mm) 설정
+      p.mesh.position[_hudUnitAxis] = v;
+      angSpan.textContent = v.toFixed(1) + ' mm';
+      toast('📍 ' + _hudUnitAxis.toUpperCase() + ' 위치 = ' + v.toFixed(1) + ' mm');
+      setStat('위치 직접 입력: ' + _hudUnitAxis.toUpperCase() + ' ' + v.toFixed(1) + ' mm');
+    }
     syncRotPropPanel(p);
     if(transformState.activePart === p) showTransformHandles(p);
     updateDimLabels();
     refreshPropPanelTransform(p);
-    // HUD 텍스트 업데이트
-    angSpan.textContent = v.toFixed(1) + '°';
-    toast('↻ ' + _rotHudActiveAxis.toUpperCase() + '축 = ' + v.toFixed(1) + '°');
-    setStat('회전 직접 입력: ' + _rotHudActiveAxis.toUpperCase() + '축 ' + v.toFixed(1) + '°');
   }
   inp.style.display = 'none';
   angSpan.style.display = '';
@@ -9867,7 +9913,9 @@ function applyRotHudInput(){
 function showScaleHud(axisChar, currentMM, deltaMM, snapped){
   const hud = document.getElementById('rotHud');
   if(!hud) return;
-  // v4.0: 크기 HUD는 클릭 입력 대상 아님 → clickable 제거, 입력창 숨김
+  _hudMode = 'scale';      // v8.64
+  _hudUnitAxis = axisChar; // v8.64
+  // v4.0: 크기 HUD는 드래그 중엔 클릭 입력 대상 아님 → clickable 제거, 입력창 숨김
   hud.classList.remove('clickable');
   const _inp = document.getElementById('rotHudInput');
   const _ang = document.getElementById('rotHudAngle');
@@ -9888,6 +9936,44 @@ function showScaleHud(axisChar, currentMM, deltaMM, snapped){
 function hideScaleHud(){
   const hud = document.getElementById('rotHud');
   if(hud){ hud.classList.remove('show'); hud.classList.remove('clickable'); }
+}
+
+// v8.64: 위치(이동) 실시간 HUD - rotHud 요소 재활용
+function showMoveHud(axisChar, currentMM, deltaMM, snapped){
+  const hud = document.getElementById('rotHud');
+  if(!hud) return;
+  _hudMode = 'move';
+  _hudUnitAxis = axisChar;
+  hud.classList.remove('clickable');
+  const _inp = document.getElementById('rotHudInput');
+  const _ang = document.getElementById('rotHudAngle');
+  if(_inp) _inp.style.display = 'none';
+  if(_ang) _ang.style.display = '';
+  const axisName = {x:'X 위치(좌우)', y:'높이(상하)', z:'Z 위치(앞뒤)'}[axisChar] || axisChar;
+  const axisColor = {x:'#ff8888', y:'#88aaff', z:'#88ff88'}[axisChar] || '#f39c12';
+  document.getElementById('rotHudAxis').textContent = '📍 ' + axisName;
+  document.getElementById('rotHudAxis').style.color = axisColor;
+  document.getElementById('rotHudAngle').textContent = currentMM.toFixed(1) + ' mm';
+  document.getElementById('rotHudAngle').style.color = axisColor;
+  document.getElementById('rotHudDelta').textContent =
+    'Δ ' + (deltaMM >= 0 ? '+' : '') + deltaMM.toFixed(1) + ' mm' + (snapped ? '  [SNAP]' : '');
+  hud.style.borderColor = axisColor;
+  hud.classList.add('show');
+  setStat('📍 ' + axisName + ': ' + currentMM.toFixed(1) + ' mm  (Δ ' + (deltaMM >= 0 ? '+' : '') + deltaMM.toFixed(1) + ' mm)');
+}
+
+// v8.64: 크기/위치 드래그 종료 후 HUD를 클릭 가능 상태로 유지 → 직접 입력
+function unitHudPersist(mode, axisChar, curMM){
+  _hudMode = mode;
+  _hudUnitAxis = axisChar;
+  const hud = document.getElementById('rotHud');
+  if(!hud) return;
+  document.getElementById('rotHudAngle').textContent = curMM.toFixed(1) + ' mm';
+  document.getElementById('rotHudDelta').textContent = '✏️ 여기 클릭 = 직접 입력  /  ESC = 닫기';
+  hud.classList.add('show');
+  hud.classList.add('clickable');
+  if(_rotHudPersistTimer) clearTimeout(_rotHudPersistTimer);
+  _rotHudPersistTimer = setTimeout(() => { hideScaleHud(); _rotHudPersistTimer = null; }, 8000);
 }
 // 속성 패널 회전값 동기화 (드래그 중에도)
 function syncRotPropPanel(part){

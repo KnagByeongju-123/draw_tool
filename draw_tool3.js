@@ -1293,6 +1293,9 @@ function sk3FindShapeAt(wp){
     } else if(s.type === 'arc'){
       const d = Math.hypot(wp.x-s.cx, wp.y-s.cy);
       if(Math.abs(d - s.r) < tol) return {idx:i, s:s};
+    } else if(s.type === 'fill' && s.vertices && s.vertices.length >= 3){
+      // v8.51: 채움 객체 — 폴리곤 내부 클릭 시 hit
+      if(_fillInPolygon(wp, s.vertices)) return {idx:i, s:s};
     }
   }
   return null;
@@ -1721,6 +1724,20 @@ skCanvas.addEventListener('mousedown', (e)=>{
   // v8.45: 채움 모드 ON + 좌클릭 → 자동 boundary trace 후 채움
   if(state.fillModeOn && e.button === 0){
     e.preventDefault();
+    // v8.51: 기존 채움 객체 위 클릭이면 채움 모드 OFF + 그 객체 선택 (이동/삭제 가능하도록)
+    for(let i = state.shapes.length - 1; i >= 0; i--){
+      const s = state.shapes[i];
+      if(s.type === 'fill' && s.vertices && _fillInPolygon(wp, s.vertices)){
+        sk3ToggleFillMode();  // 모드 OFF
+        // 그 객체 단일 선택
+        state.selectedShapes.clear();
+        state.selectedShapes.add(i);
+        redrawSketch(); updateInfo();
+        if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+        toast('🎨 채움 모드 OFF · 채움 객체 선택 (드래그=이동, Del=삭제)');
+        return;
+      }
+    }
     sk3FillAtClick(wp);
     return;
   }
@@ -2093,6 +2110,9 @@ skCanvas.addEventListener('mousemove', (e)=>{
         cur.x2 = orig.x2 + dx; cur.y2 = orig.y2 + dy;
       } else if(orig.type === 'circle' || orig.type === 'arc'){
         cur.cx = orig.cx + dx; cur.cy = orig.cy + dy;
+      } else if(orig.type === 'fill' && Array.isArray(orig.vertices)){
+        // v8.51: 채움 객체 — 모든 정점을 평행 이동
+        cur.vertices = orig.vertices.map(v => ({x: v.x + dx, y: v.y + dy}));
       }
     });
 
@@ -8961,6 +8981,26 @@ function newProject(){
   const _xoi = document.getElementById('xOriginInput');
   if(_xoi) _xoi.value = '0';
   if(typeof updateXOriginIndicator === 'function') updateXOriginIndicator();
+  // v8.50: v8.34~v8.45에서 추가된 모드/상태들도 모두 초기화
+  state.bgImage = null;
+  state._bgImgTemp = null;
+  state.angleLineMode = null;
+  state.sweepConnect = null;
+  state.sweepConnectModeOn = false;
+  state.sweepRadius = 0.5;
+  state.fillModeOn = false;
+  state.fineGrid = null;
+  state._sweepHoverWp = null;
+  state._penPreviewWp = null;
+  state._lastSnapKind = null;
+  state.tangentSnap = false;
+  // 모드 토글 버튼들 색 원복
+  ['btn-sweep', 'btn-fillmode', 'btn-tangentsnap', 'btn-angleline'].forEach(id => {
+    const b = document.getElementById(id);
+    if(b) b.style.background = '';
+  });
+  // 도구 모드도 select로 초기화
+  if(typeof setTool === 'function') setTool('select');
   state.parts.forEach(p => removePartFromScene(p));
   state.parts = [];
   state.selectedPartId = null;
@@ -8972,11 +9012,15 @@ function newProject(){
   if(_zrpNew) _zrpNew.style.display = 'none';
   const _ssp = document.getElementById('sk3SelProp');
   if(_ssp) _ssp.style.display = 'none';
+  // v8.50: 캔버스 강제 clear (3D 모드에서 newProject 클릭 후 2D 돌아갔을 때 잔상 방지)
+  if(typeof skCanvas !== 'undefined' && skCtx){
+    skCtx.clearRect(0, 0, skCanvas.width, skCanvas.height);
+  }
   renderPartsList();
   redrawSketch();
   updateInfo();
   pushHistory(); // v4.6: 새 프로젝트 빈 상태 시드
-  toast('📄 새 프로젝트 — 도형/펜점/히스토리 모두 초기화');
+  toast('📄 새 프로젝트 — 도형/펜점/모드/히스토리 모두 초기화');
 }
 
 function saveProject(){

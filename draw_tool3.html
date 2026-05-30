@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.21 - 전체선택(Ctrl+A) + 펜점 자동정리 + 새파일 완전초기화</title>
+<title>tool3 v8.22 - 스케치 메뉴 정리 (선/사각형/원/호 제거)</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.21</h1>
+  <h1>📐 tool3 v8.22</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -213,10 +213,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
   <div class="menu">
     <div class="menu-title">스케치<span class="arrow">▼</span></div>
     <div class="menu-dropdown">
-      <div class="menu-item" onclick="setTool('line')"><span class="ico">📏</span>선<span class="shortcut">L</span></div>
-      <div class="menu-item" onclick="setTool('rect')"><span class="ico">⬜</span>사각형<span class="shortcut">R</span></div>
-      <div class="menu-item" onclick="setTool('circle')"><span class="ico">⭕</span>원<span class="shortcut">C</span></div>
-      <div class="menu-item" onclick="setTool('arc')"><span class="ico">⌒</span>호<span class="shortcut">A</span></div>
+      <!-- v8.22: 선/사각형/원/호 메뉴 제거 (도구바·키보드·명령창으로 일원화) -->
       <div class="menu-item" onclick="setTool('fillet')"><span class="ico">⌣R</span>필렛<span class="shortcut">F</span></div>
       <!-- v8.17: 가상교점 필렛/모따기 -->
       <div class="menu-item" onclick="sk3NewFilletV2()"><span class="ico">🌀</span>신규 필렛 V2 (가상교점)<span class="shortcut">2선 선택</span></div>

@@ -3181,8 +3181,11 @@ window.sk3UpdateSelProp = function(){
         <div class="prop-row"><label>외곽두께</label><input type="number" step="0.5" id="sk3fillStrokeW" value="${s.strokeWidth||1.5}" min="0.5"></div>
         <button onclick="sk3ApplyFillProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
         <div style="display:flex;gap:4px;margin-top:6px">
-          <button onclick="sk3FillToExtrude()" style="flex:1;background:#9b59b6;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;font-weight:bold" title="이 채움을 3D 돌출로 변환 (모드 자동 전환)">🟦 돌출</button>
-          <button onclick="sk3FillToRevolve()" style="flex:1;background:#3498db;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;font-weight:bold" title="이 채움을 3D 회전체로 변환 (모드 자동 전환)">🌀 회전체</button>
+          <button onclick="sk3FillToExtrude()" style="flex:2;background:#9b59b6;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer;font-weight:bold" title="🟦 돌출: 9각/다각형 부품에 적합. 단면 모양 그대로 Z방향 두께를 줘서 각진 부품 생성">🟦 돌출 (권장)</button>
+          <button onclick="sk3FillToRevolve()" style="flex:1;background:#3498db;color:#fff;border:none;padding:5px;border-radius:4px;cursor:pointer;font-size:11px" title="🌀 회전체: 회전대칭 부품(디스크/링/씰)용. 다각형은 회전 시 둥글게 됨">🌀 회전체</button>
+        </div>
+        <div style="font-size:9px;color:#999;margin-top:3px;line-height:1.4">
+          💡 다각형(9각 등) → <b style="color:#bd9eff">돌출</b>이 형태 유지. 회전체는 회전대칭으로 둥글게 됨
         </div>
         <button onclick="sk3DeleteSelectedFill()" style="width:100%;margin-top:4px;background:#c0392b;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">🗑 채움 삭제</button>
         <div style="font-size:10px;color:#888;margin-top:6px">점 ${s.vertices.length}개 · 면적 ${area.toFixed(2)}mm²</div>`;
@@ -8756,6 +8759,16 @@ window.sk3FillToRevolve = function(){
   const idx = [...state.selectedShapes][0];
   const s = state.shapes[idx];
   if(!s || s.type !== 'fill'){ toast('채움 객체를 선택하세요'); return; }
+  // v8.49: 채움 객체 회전체 변환 — 자주 의도와 다른 결과 → 확인 dialog
+  const ok = confirm(
+    '🌀 채움 → 회전체 변환\n\n' +
+    '⚠ 회전체는 회전축 360° 회전 → 결과는 항상 둥근 (회전대칭) 형상\n' +
+    '   9각형 → 둥근 디스크/도넛 (9각 형태 사라짐)\n\n' +
+    '· 9각형 같은 각진 부품을 원한다면 🟦 돌출이 적합\n' +
+    '· 회전체는 디스크/축/씰/링 등 회전대칭 부품에 적합\n\n' +
+    '계속 진행하시겠습니까?'
+  );
+  if(!ok) return;
   if(state.mode === 'sketch' && typeof setMode === 'function'){
     setMode('model');
   }

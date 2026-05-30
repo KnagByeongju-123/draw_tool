@@ -2525,15 +2525,17 @@ window.sk3UpdateSelProp = function(){
       connected.sort((a,b) => a.deg - b.deg);
       linesHtml = '<div style="font-size:10px;color:#aac8ff;margin-top:6px;border-top:1px solid #333;padding-top:5px"><b>📐 연결된 선 ' + connected.length + '개</b> (P' + i + '에서 나가는 방향)<br><span style="color:#666;font-size:9px">각도/길이 수정 → 다른 끝점이 이동</span></div>';
       connected.forEach((c, k) => {
+        // v8.31: input에 메타데이터 임베드 (계산기 자동 적용용)
+        const metaJson = JSON.stringify({pointIdx:i, shapeIdx:c.shapeIdx, fixedEnd:c.endIs, connIdx:k}).replace(/"/g,'&quot;');
         linesHtml += '<div style="margin-top:4px;padding:4px;background:#1f2530;border:1px solid #2e3a45;border-radius:3px">' +
           '<div style="display:flex;gap:4px;align-items:center;font-size:10px;color:#bbb">' +
             '<span style="width:28px;color:#f39c12">↗각</span>' +
-            '<input type="number" step="0.01" id="sk3conn_deg_' + k + '" value="' + c.deg.toFixed(2) + '" style="flex:1;width:60px;background:#0a0e14;color:#f39c12;border:1px solid #444;border-radius:3px;padding:2px 4px;font-size:10px">' +
+            '<input type="number" step="0.01" id="sk3conn_deg_' + k + '" data-conn-meta="' + metaJson + '" value="' + c.deg.toFixed(2) + '" style="flex:1;width:60px;background:#0a0e14;color:#f39c12;border:1px solid #444;border-radius:3px;padding:2px 4px;font-size:10px">' +
             '<span style="color:#666">°</span>' +
           '</div>' +
           '<div style="display:flex;gap:4px;align-items:center;margin-top:3px;font-size:10px;color:#bbb">' +
             '<span style="width:28px;color:#aac8ff">길이</span>' +
-            '<input type="number" step="0.01" id="sk3conn_len_' + k + '" value="' + c.len.toFixed(2) + '" style="flex:1;width:60px;background:#0a0e14;color:#aac8ff;border:1px solid #444;border-radius:3px;padding:2px 4px;font-size:10px">' +
+            '<input type="number" step="0.01" id="sk3conn_len_' + k + '" data-conn-meta="' + metaJson + '" value="' + c.len.toFixed(2) + '" style="flex:1;width:60px;background:#0a0e14;color:#aac8ff;border:1px solid #444;border-radius:3px;padding:2px 4px;font-size:10px">' +
             '<span style="color:#666">mm</span>' +
           '</div>' +
           '<div style="font-size:9px;color:#666;margin-top:2px">현재 끝점: (' + dispX(c.ex).toFixed(2) + ', ' + c.ey.toFixed(2) + ')</div>' +
@@ -12289,7 +12291,18 @@ function initCmdKeyboard() {
         try { window.sk3ApplyPointProp(state.penCur); } catch(e){}
       }
     }
-    // v8.30: 연결된 선 각도/길이 input은 자동 적용 안 함 (선 단위 적용 버튼이 별도 있음)
+    // v8.31: 연결된 선 각도/길이 input 자동 적용 (계산기 적용 시 원복 버그 수정)
+    // id 형식: sk3conn_deg_N or sk3conn_len_N
+    // sk3conn_deg/len 모두 같은 메타데이터를 사용하므로 짝꿍 input의 값 그대로 두고 적용 함수 호출
+    const connMatch = id && id.match(/^sk3conn_(deg|len)_(\d+)$/);
+    if(connMatch && calc.target.dataset.connMeta){
+      try {
+        const meta = JSON.parse(calc.target.dataset.connMeta);
+        if(typeof window.sk3ApplyConnectedLine === 'function'){
+          window.sk3ApplyConnectedLine(meta.pointIdx, meta.shapeIdx, meta.fixedEnd, meta.connIdx);
+        }
+      } catch(e){}
+    }
     // 도구바 X기준 input
     if(id === 'xOriginInput' && typeof window.sk3SetXOrigin === 'function'){
       try { window.sk3SetXOrigin(); } catch(e){}

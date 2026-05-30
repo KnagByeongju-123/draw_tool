@@ -8041,11 +8041,11 @@ function buildCapHead(headD, headH, keyD, tolerance, mat){
   const upperGeom = new THREE.ExtrudeGeometry(outer, {
     depth: holeH, bevelEnabled: false, curveSegments: 32
   });
-  // ExtrudeGeometry는 +Z 방향. -90° X축 회전 → -Y로 깊이가 됨
+  // ExtrudeGeometry는 +Z로 depth만큼. rotateX(-90°) 후 → +Y로 0~holeH 범위가 됨
   upperGeom.rotateX(-Math.PI / 2);
-  // 회전 후 0 ~ -holeH 범위로 깊이 → 우리는 solidH ~ headH 범위에 두고 싶음
-  // translate(0, headH, 0)하면 (headH - holeH) ~ headH 범위 = solidH ~ headH ✓
-  upperGeom.translate(0, headH, 0);
+  // v8.66: 윗부분(육각 구멍)을 solidH~headH 구간에 안착 (이전 headH 평행이동은 머리 위로 떠버렸음)
+  //   아래 solid 원기둥(0~solidH)이 구멍 바닥을 막아 → 위로 열린 블라인드 렌치 구멍 완성
+  upperGeom.translate(0, solidH, 0);
   const upperMesh = new THREE.Mesh(upperGeom, mat);
   grp.add(upperMesh);
   return grp;

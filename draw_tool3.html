@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.31 - 계산기 자동 적용: 연결된 선 각도/길이</title>
+<title>tool3 v8.33 - 축선 제거 + 지름좌표 양쪽 점 추가</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.31</h1>
+  <h1>📐 tool3 v8.33</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -222,6 +222,8 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <div class="menu-item" onclick="sk3TangentTwoLines()"><span class="ico">⊙</span>원을 두 선에 접선 (반지름 유지)<span class="shortcut">원+2선 선택</span></div>
       <!-- v8.27: 겹친 선 통합 -->
       <div class="menu-item" onclick="sk3MergeOverlappingLines()"><span class="ico">🧬</span>겹친 선 통합 (collinear merge)<span class="shortcut">선택 또는 전체</span></div>
+      <!-- v8.33: 지름좌표 → 양쪽 점 추가 -->
+      <div class="menu-item" onclick="sk3PromptDiameter()"><span class="ico">⌀</span>지름좌표 (양쪽 점 추가)</div>
       <div class="menu-sep"></div>
       <div class="menu-item" onclick="setTool('select')"><span class="ico">👆</span>선택<span class="shortcut">S</span></div>
       <div class="menu-item" onclick="sk3SelectAll()"><span class="ico">🔘</span>전체 선택<span class="shortcut">Ctrl+A</span></div>
@@ -328,23 +330,17 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <button id="btn-diameter" onclick="sk3ToggleDiameter()" title="직경좌표: 회전체 단면용 (Cx,Cy)+직경 표시">⌀ 직경</button>
     <button id="btn-thickness" onclick="sk3SetThickness()" title="소재 두께 입력 (mm) — 명령: 두께 N1 N2 좌/우">⚙ 두께</button>
     <button id="btn-wconnect" onclick="sk3ToggleWheelConnect()" title="휠클릭 연결: ON 후 점 2개에 휠클릭(가운데 버튼)으로 선 생성">⚡ 연결</button>
-    <button id="btn-continuous" onclick="sk3ToggleContinuous()" title="연속선: ON=펜 클릭 시 이전 점과 자동 선 연결, OFF=점만 추가">⛓ 연속선</button>
+    <!-- v8.32: 연속선 버튼 제거 -->
   </div>
   <div class="group sketch-only">
     <label>스냅:</label>
-    <button id="btn-gridsnap" class="active" onclick="toggleGridSnap()" title="격자 스냅">⊞</button>
+    <!-- v8.32: 격자 스냅 토글 버튼 제거 (격자 크기 입력은 유지) -->
+    <label style="color:#888;font-size:11px">격자</label>
     <input type="number" id="gridSize" value="10" min="1" max="100" step="1" style="width:45px" title="격자 크기(mm). 더블클릭하면 🧮 계산기 모달" data-sk3-no-calc="1" ondblclick="sk3CalcOpen(this)">
     <!-- v8.24: 라이브 접선 스냅 -->
     <button id="btn-tangentsnap" onclick="toggleTangentSnap()" title="🪐 라이브 접선 스냅: 원/호 드래그 중 가까운 선에 자동 접선 (선을 따라 미끄러짐)">🪐</button>
   </div>
-  <!-- v8.25: X축 표시 기준점 — 표시 X가 이 값에서부터 0으로 계산됨 (음수도 가능) -->
-  <div class="group sketch-only" id="xOriginGroup">
-    <label title="X축 표시 기준점(mm). 입력값 만큼 X축이 좌/우로 이동한 것처럼 표시·입력됨">X기준:</label>
-    <input type="number" id="xOriginInput" value="0" step="0.1" style="width:60px" title="X축 기준점(mm). 음수 가능. 더블클릭하면 🧮 계산기 모달. 직접 -30, =50/2 같은 수식도 입력 OK" data-sk3-no-calc="1" ondblclick="sk3CalcOpen(this)">
-    <button id="btn-xOriginApply" onclick="sk3SetXOrigin()" title="입력값을 X 기준점으로 설정 (Enter도 동작)">적용</button>
-    <button id="btn-xOriginReset" onclick="sk3ResetXOrigin()" title="X 기준 0으로 초기화" style="padding:2px 6px">⟲</button>
-    <span id="xOriginIndicator" style="color:#888;font-size:10px;margin-left:4px"></span>
-  </div>
+  <!-- v8.32: X기준 입력 그룹 제거 -->
   <div class="group sketch-only">
     <label>색상:</label>
     <input type="color" id="sketchColor" value="#000000">
@@ -1112,6 +1108,8 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <button class="sk3calcbtn sk3calc-num" data-k=".">.</button>
       <button class="sk3calcbtn sk3calc-eq" data-k="=">=</button>
       <button class="sk3calcbtn sk3calc-apply" onclick="sk3CalcApply()">적용</button>
+      <!-- v8.33: 지름좌표 변환 — 양쪽 대칭 점 추가 -->
+      <button class="sk3calcbtn sk3calc-diam" onclick="sk3CalcDiameter()" style="grid-column:span 5" title="현재 표시값을 지름으로 보고 원점 양쪽에 ±반지름 점 2개 추가">⌀ 지름좌표 (양쪽 점 추가)</button>
     </div>
   </div>
 </div>
@@ -1130,6 +1128,8 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 .sk3calc-eq:hover{background:#4a8ae4}
 .sk3calc-apply{background:#27ae60;color:#fff;font-weight:bold}
 .sk3calc-apply:hover{background:#2bc070}
+.sk3calc-diam{background:#8b3a8b;color:#fff;font-weight:bold;margin-top:4px}
+.sk3calc-diam:hover{background:#a04aa0}
 </style>
 
 <script src="draw_tool3.js"></script>

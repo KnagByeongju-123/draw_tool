@@ -681,7 +681,46 @@ window.sk3TogglePenCoord = function(){
   if(btn) btn.style.background = state.penShowCoord ? '#a04030' : '';
 };
 
-// 직경좌표 모드 토글
+// ─── v8.33: 지름좌표 → 원점 양쪽에 점 2개 추가 ─────────────────
+// 입력값 D(지름) → 원점(0,0) 기준 ±D/2 X축 양쪽에 점 추가
+// 이미 같은 좌표에 펜점이 있으면 재사용 (중복 방지)
+window.sk3AddDiameterPoints = function(D, cx, cy){
+  if(!isFinite(D) || D <= 0){ toast('유효한 지름 필요 (>0)'); return null; }
+  if(typeof cx !== 'number') cx = 0;
+  if(typeof cy !== 'number') cy = 0;
+  const r = D / 2;
+  const left  = {x: cx - r, y: cy};
+  const right = {x: cx + r, y: cy};
+  pushHistory();
+  const tol = 0.01;
+  function findOrAdd(p){
+    let idx = state.penPoints.findIndex(pp => Math.abs(pp.x-p.x)<tol && Math.abs(pp.y-p.y)<tol);
+    if(idx < 0){ state.penPoints.push({x:p.x, y:p.y}); idx = state.penPoints.length - 1; }
+    return idx;
+  }
+  const li = findOrAdd(left);
+  const ri = findOrAdd(right);
+  state.penCur = ri;  // 오른쪽 점을 현재 점으로
+  redrawSketch(); updateInfo();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  toast('⌀ 지름좌표 D=' + D + 'mm → 양쪽 점 추가 (±' + r + ', ' + cy + ')');
+  if(typeof skCmdLog === 'function') skCmdLog('  ⌀ 지름좌표 D=' + D + ' → P' + li + '(' + left.x + ',' + left.y + '), P' + ri + '(' + right.x + ',' + right.y + ')', 'sys');
+  return {leftIdx: li, rightIdx: ri};
+};
+
+// 지름좌표 prompt 모달 (메뉴/단축키 진입용)
+window.sk3PromptDiameter = function(){
+  const dStr = prompt('⌀ 지름좌표 — 양쪽 대칭 점 추가\n\n지름 D (mm) 입력:\n· 수식 가능 (=10+5, 100/2, 30+5)\n· 결과: 원점에서 ±D/2 거리에 점 2개', '10');
+  if(dStr === null) return;
+  const cleaned = String(dStr).replace(/[^0-9+\-*/.()]/g, '');
+  let v;
+  try { v = Function('"use strict";return (' + cleaned + ')')(); }
+  catch(e){ toast('수식 오류'); return; }
+  if(!isFinite(v) || v <= 0){ toast('유효한 지름 필요'); return; }
+  sk3AddDiameterPoints(v);
+};
+
+// 직경좌표 모드 토글 (라벨 표시용 - 별도 기능)
 window.sk3ToggleDiameter = function(){
   if(state.penDiameterMode){
     state.penDiameterMode = null;
@@ -949,49 +988,19 @@ function drawGrid(){
 }
 
 function drawAxes(){
+  // v8.33: X축/Y축 선 제거 — 원점(0,0)에 작은 점만 표시
   const o = worldToScreen(0, 0);
-  // 빨간 가로축(실제 Y=0)
-  skCtx.strokeStyle = '#d04040';
-  skCtx.lineWidth = 1.5;
-  skCtx.beginPath();
-  skCtx.moveTo(0, o.y);
-  skCtx.lineTo(skCanvas.width, o.y);
-  skCtx.stroke();
-  // 파란 세로축(X=0)
-  skCtx.strokeStyle = '#4080d0';
-  skCtx.beginPath();
-  skCtx.moveTo(o.x, 0);
-  skCtx.lineTo(o.x, skCanvas.height);
-  skCtx.stroke();
+  skCtx.save();
+  // 십자 가이드 (살짝 보이게)
   skCtx.fillStyle = '#000';
   skCtx.beginPath();
   skCtx.arc(o.x, o.y, 3, 0, Math.PI*2);
   skCtx.fill();
-  skCtx.fillStyle = '#d04040';
-  skCtx.font = 'bold 12px Consolas';
-  skCtx.fillText('X+', skCanvas.width - 22, o.y - 4);
-  skCtx.fillStyle = '#4080d0';
-  skCtx.fillText('Y+ (X_실제=0)', o.x + 4, 14);
-
-  // v8.25: X 기준선 (xOrigin) 표시 - 0이 아닐 때 주황 세로 점선으로
-  const xo = state.xOrigin || 0;
-  if(Math.abs(xo) > 1e-9){
-    const oX = worldToScreen(xo, 0);
-    skCtx.save();
-    skCtx.strokeStyle = '#f39c12';
-    skCtx.lineWidth = 1.2;
-    skCtx.setLineDash([6, 4]);
-    skCtx.beginPath();
-    skCtx.moveTo(oX.x, 0);
-    skCtx.lineTo(oX.x, skCanvas.height);
-    skCtx.stroke();
-    skCtx.setLineDash([]);
-    skCtx.fillStyle = '#f39c12';
-    skCtx.font = 'bold 11px Consolas';
-    skCtx.fillText('X_표시=0 (실제X=' + xo + ')', oX.x + 4, 28);
-    skCtx.fillText('▼ 기준', oX.x + 4, skCanvas.height - 8);
-    skCtx.restore();
-  }
+  // 미세한 원점 라벨
+  skCtx.fillStyle = '#888';
+  skCtx.font = '10px Consolas';
+  skCtx.fillText('(0,0)', o.x + 5, o.y - 5);
+  skCtx.restore();
 }
 
 function drawShape(s, selected){
@@ -7667,7 +7676,8 @@ function toggleAxes(){
 
 function toggleGridSnap(){
   state.gridSnap = !state.gridSnap;
-  document.getElementById('btn-gridsnap').classList.toggle('active', state.gridSnap);
+  const btn = document.getElementById('btn-gridsnap');
+  if(btn) btn.classList.toggle('active', state.gridSnap);
   toast('격자스냅 ' + (state.gridSnap ? 'ON' : 'OFF'));
 }
 
@@ -11115,6 +11125,18 @@ function sk3ExecuteCmd(raw) {
     _lastCmd = raw; return;
   }
 
+  // ─── v8.33: 지름좌표 / DIAM N (원점 양쪽에 점) ──────────
+  // 사용: 지름 100  /  DIAM 50  /  지름좌표 25
+  if(key === '지름' || key === '지름좌표' || key === 'DIAM' || key === 'DIA'){
+    if(toks.length < 2){ skCmdLog('  ⚠ 사용: 지름 D (예: 지름 100)', 'err'); _lastCmd = raw; return; }
+    const D = evalSk3Expr(toks[1]);
+    if(!isFinite(D) || D <= 0){ skCmdLog('  ⚠ 유효한 지름 필요 (>0)', 'err'); _lastCmd = raw; return; }
+    if(typeof window.sk3AddDiameterPoints === 'function'){
+      window.sk3AddDiameterPoints(D);
+    }
+    _lastCmd = raw; return;
+  }
+
 
   // ─── 호 N R [시계|반시계] 각 A | 교점 ──────────────────
   if(key === '호' && toks.length >= 3){
@@ -12260,6 +12282,18 @@ function initCmdKeyboard() {
   window.sk3CalcCancel = function(){
     $('sk3CalcOverlay').style.display = 'none';
     calc.target = null;
+  };
+
+  // v8.33: 지름좌표 변환 — 현재 표시값을 지름으로 보고 양쪽 점 추가
+  window.sk3CalcDiameter = function(){
+    if(calc.display === 'Error'){ return; }
+    if(calc.pendingOp){ press('='); }
+    const v = parseFloat(calc.display);
+    if(!isFinite(v) || v <= 0){ alert('유효한 지름 필요 (>0)'); return; }
+    if(typeof window.sk3AddDiameterPoints === 'function'){
+      window.sk3AddDiameterPoints(v);
+    }
+    sk3CalcCancel();
   };
 
   window.sk3CalcApply = function(){

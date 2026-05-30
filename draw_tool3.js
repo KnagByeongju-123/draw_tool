@@ -297,6 +297,7 @@ const state = {
   yOrigin: 0,       // (deprecated v8.25 — 호환을 위해 유지, 사용 안 함)
   xOrigin: 0,       // v8.25: X축 표시 기준점(mm) — 표시 X = 실제 X − xOrigin, 입력 X는 + xOrigin로 변환 (음수도 가능)
   tangentSnap: false,  // v8.24: 라이브 접선 스냅 - 원/호 드래그 시 가까운 선에 자동 접선
+  fineGrid: null,      // v8.34: 정밀 격자 {anchor:{x,y}, step:0.1, range:30} or null (Ctrl 누름 + 점 선택 시)
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
   autoPopup: true, // v6.2: 도형 클릭 시 위치/크기/회전 입력 팝업 자동 표시
@@ -350,6 +351,23 @@ function screenToWorld(sx, sy){
 // v8.11: snapPoint = 객체 스냅(OSNAP) — 점/끝점/중점/중심/직각·수평 가이드에 붙기
 //   격자 스냅은 별도 (state.gridSnap이 true일 때만)
 function snapPoint(p){
+  // v8.34: 정밀 격자 스냅 (최우선) — anchor 기준 ±range 내에 들어오면 step 단위로
+  if(state.fineGrid){
+    const fg = state.fineGrid;
+    const dx = p.x - fg.anchor.x;
+    const dy = p.y - fg.anchor.y;
+    if(Math.abs(dx) <= fg.range && Math.abs(dy) <= fg.range){
+      // 표시 격자가 자동 폴백된 경우 그 step에 맞춰 스냅
+      const stepPx = fg.step * state.pixelsPerMm;
+      let s = fg.step;
+      if(stepPx < 1.5){ s = 0.5; if(s * state.pixelsPerMm < 1.5) s = 1.0; if(s * state.pixelsPerMm < 1.5) s = 5.0; }
+      state._lastSnapKind = '🟡정밀' + s + 'mm';
+      return {
+        x: fg.anchor.x + Math.round(dx/s)*s,
+        y: fg.anchor.y + Math.round(dy/s)*s
+      };
+    }
+  }
   // 1) 격자 스냅 (옵션, 기본 OFF)
   let result = p;
   if(state.gridSnap){
@@ -988,6 +1006,8 @@ function drawGrid(){
 }
 
 function drawAxes(){
+  // v8.34: 정밀 격자 (Ctrl 누름 + 점 선택 시)
+  drawFineGrid();
   // v8.33: X축/Y축 선 제거 — 원점(0,0)에 작은 점만 표시
   const o = worldToScreen(0, 0);
   skCtx.save();
@@ -1000,6 +1020,73 @@ function drawAxes(){
   skCtx.fillStyle = '#888';
   skCtx.font = '10px Consolas';
   skCtx.fillText('(0,0)', o.x + 5, o.y - 5);
+  skCtx.restore();
+}
+
+// v8.34: 정밀 격자 그리기 — anchor 기준 ±range mm 범위에 step 간격 격자
+function drawFineGrid(){
+  if(!state.fineGrid) return;
+  const fg = state.fineGrid;
+  const stepPx = fg.step * state.pixelsPerMm;
+  // 화면에서 너무 작아 의미 없으면 자동으로 더 큰 간격으로 폴백 (0.5 → 1.0 → 5.0)
+  let step = fg.step;
+  let sp = stepPx;
+  if(sp < 1.5){
+    step = 0.5; sp = step * state.pixelsPerMm;
+    if(sp < 1.5){ step = 1.0; sp = step * state.pixelsPerMm; }
+    if(sp < 1.5){ step = 5.0; sp = step * state.pixelsPerMm; }
+  }
+  // 픽셀 범위 계산
+  const cTL = worldToScreen(fg.anchor.x - fg.range, fg.anchor.y + fg.range);
+  const cBR = worldToScreen(fg.anchor.x + fg.range, fg.anchor.y - fg.range);
+  const x0 = Math.max(0, cTL.x), x1 = Math.min(skCanvas.width, cBR.x);
+  const y0 = Math.max(0, cTL.y), y1 = Math.min(skCanvas.height, cBR.y);
+  if(x1 <= x0 || y1 <= y0) return;
+  // 영역 배경(살짝 어둡게)
+  skCtx.save();
+  skCtx.fillStyle = 'rgba(240, 200, 50, 0.04)';
+  skCtx.fillRect(x0, y0, x1-x0, y1-y0);
+  // 격자선 — 매 N번째마다 진하게
+  const aS = worldToScreen(fg.anchor.x, fg.anchor.y);
+  skCtx.lineWidth = 0.5;
+  const N = Math.round(fg.range * 2 / step);  // 격자 줄 수
+  for(let i = -N/2; i <= N/2; i++){
+    const xPx = aS.x + i * sp;
+    if(xPx < x0 - 1 || xPx > x1 + 1) continue;
+    // 매 10번째(=1mm)는 강조, 매 5번째(=0.5mm)는 중간, 나머지는 흐리게
+    const major = (i % 10 === 0);
+    const mid = (!major && i % 5 === 0);
+    skCtx.strokeStyle = major ? 'rgba(255,180,30,0.65)' :
+                         mid ? 'rgba(255,180,30,0.35)' :
+                                'rgba(255,180,30,0.15)';
+    skCtx.beginPath();
+    skCtx.moveTo(xPx, y0); skCtx.lineTo(xPx, y1);
+    skCtx.stroke();
+  }
+  for(let i = -N/2; i <= N/2; i++){
+    const yPx = aS.y - i * sp;  // Y는 화면 좌표 반전
+    if(yPx < y0 - 1 || yPx > y1 + 1) continue;
+    const major = (i % 10 === 0);
+    const mid = (!major && i % 5 === 0);
+    skCtx.strokeStyle = major ? 'rgba(255,180,30,0.65)' :
+                         mid ? 'rgba(255,180,30,0.35)' :
+                                'rgba(255,180,30,0.15)';
+    skCtx.beginPath();
+    skCtx.moveTo(x0, yPx); skCtx.lineTo(x1, yPx);
+    skCtx.stroke();
+  }
+  // anchor 표시 (빨강 십자)
+  skCtx.strokeStyle = '#e74c3c';
+  skCtx.lineWidth = 1.5;
+  skCtx.beginPath();
+  skCtx.moveTo(aS.x - 6, aS.y); skCtx.lineTo(aS.x + 6, aS.y);
+  skCtx.moveTo(aS.x, aS.y - 6); skCtx.lineTo(aS.x, aS.y + 6);
+  skCtx.stroke();
+  // 우상단 안내
+  skCtx.fillStyle = 'rgba(255,180,30,0.9)';
+  skCtx.font = 'bold 11px Consolas';
+  skCtx.fillText('⊞ 정밀격자 ' + step + 'mm · ±' + fg.range + 'mm · 스냅 ON',
+    Math.min(x0 + 6, skCanvas.width - 200), y0 + 14);
   skCtx.restore();
 }
 
@@ -9505,6 +9592,33 @@ function toggleBlenderKeys(){
 document.addEventListener('keydown', (e)=>{
   if(e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
 
+  // v8.34: Ctrl 단독 누름 + 점 선택 시 정밀 격자 ON
+  if(e.key === 'Control' && state.mode === 'sketch' && !state.fineGrid){
+    let anchor = null;
+    if(state.penCur >= 0 && state.penPoints[state.penCur]){
+      anchor = {x: state.penPoints[state.penCur].x, y: state.penPoints[state.penCur].y};
+    } else if(state.selectedShapes && state.selectedShapes.size === 1){
+      // 단일 선택 도형의 중심/시작점 사용
+      const idx = [...state.selectedShapes][0];
+      const s = state.shapes[idx];
+      if(s){
+        if(s.type === 'line' || s.type === 'rect') anchor = {x: s.x1, y: s.y1};
+        else if(s.type === 'circle' || s.type === 'arc') anchor = {x: s.cx, y: s.cy};
+      }
+    }
+    if(anchor){
+      state.fineGrid = {anchor, step: 0.1, range: 30};
+      redrawSketch();
+      // 토스트 안내 (한 번만)
+      if(typeof toast === 'function' && !state._fineGridToastShown){
+        toast('⊞ 정밀격자 ON (0.1mm·±30mm) — 마우스 자동 스냅 · Ctrl 떼면 해제');
+        state._fineGridToastShown = true;
+      }
+    }
+    // Ctrl을 다른 단축키에서도 쓰므로 preventDefault 안 함
+    return;
+  }
+
   // v6.5: Tab = 편집 모드 진입/종료 (3D 모드)
   if(e.key === 'Tab' && state.mode === 'model'){
     e.preventDefault();
@@ -9742,6 +9856,24 @@ document.addEventListener('keydown', (e)=>{
 document.getElementById('gridSize').addEventListener('change', (e)=>{
   state.gridSize = Math.max(1, parseFloat(e.target.value) || 10);
   redrawSketch();
+});
+
+// v8.34: Ctrl 떼면 정밀 격자 OFF
+document.addEventListener('keyup', (e)=>{
+  if(e.key === 'Control' && state.fineGrid){
+    state.fineGrid = null;
+    state._lastSnapKind = null;
+    redrawSketch();
+  }
+});
+
+// 창 포커스 이탈 시에도 정밀 격자 해제 (Ctrl이 안 떨어진 상태로 멈춤 방지)
+window.addEventListener('blur', () => {
+  if(state.fineGrid){
+    state.fineGrid = null;
+    state._lastSnapKind = null;
+    redrawSketch();
+  }
 });
 
 // v8.25: X기준 입력란 - Enter 키 + 초기 인디케이터 + change 자동 적용

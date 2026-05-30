@@ -303,6 +303,7 @@ const state = {
   sweepConnect: null,  // v8.44: 스윕 연결 진행 상태 {R, lastWp, hoverWp, visitedIdx:Set, orderedIdx:[], newLines:[]} (드래그 중에만 활성)
   sweepConnectModeOn: false,  // v8.44: 스윕 연결 모드 토글 (true면 마우스 드래그 시작 시 sweepConnect 시작)
   sweepRadius: 0.5,    // v8.44: 스윕 연결 원 반경 (mm). 휠로 0.1~5mm 조절
+  fillModeOn: false,   // v8.45: 채움 모드 ON/OFF (닫힌 영역 클릭 시 자동 채움)
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
   autoPopup: true, // v6.2: 도형 클릭 시 위치/크기/회전 입력 팝업 자동 표시
@@ -530,7 +531,13 @@ function redrawSketch(){
   }
   if(state.showGrid) drawGrid();
   if(state.showAxes) drawAxes();
-  state.shapes.forEach((s, idx)=> drawShape(s, state.selectedShapes.has(idx)));
+  // v8.45: 채움 객체를 다른 도형보다 먼저 (아래 레이어로) 그림
+  state.shapes.forEach((s, idx) => {
+    if(s.type === 'fill') drawShape(s, state.selectedShapes.has(idx));
+  });
+  state.shapes.forEach((s, idx) => {
+    if(s.type !== 'fill') drawShape(s, state.selectedShapes.has(idx));
+  });
   if(state.drawing) drawPreview();
   drawPenLabels();
   // v8.5: 박스 선택 미리보기
@@ -1520,6 +1527,40 @@ function drawFineGrid(){
 }
 
 function drawShape(s, selected){
+  // v8.45: 채움 객체는 폴리곤 면 + 선택적 외곽선
+  if(s.type === 'fill'){
+    if(!s.vertices || s.vertices.length < 3) return;
+    skCtx.save();
+    skCtx.fillStyle = s.color || '#ffe599';
+    skCtx.beginPath();
+    s.vertices.forEach((v, i) => {
+      const sp = worldToScreen(v.x, v.y);
+      if(i === 0) skCtx.moveTo(sp.x, sp.y);
+      else skCtx.lineTo(sp.x, sp.y);
+    });
+    skCtx.closePath();
+    skCtx.fill();
+    // 외곽선 옵션
+    if(s.stroke && (s.strokeWidth || 0) > 0){
+      skCtx.strokeStyle = s.stroke;
+      skCtx.lineWidth = s.strokeWidth;
+      skCtx.stroke();
+    }
+    // 선택 시 dashed 강조 + 꼭짓점 핸들
+    if(selected){
+      skCtx.setLineDash([6, 4]);
+      skCtx.strokeStyle = '#ff0000';
+      skCtx.lineWidth = 1.5;
+      skCtx.stroke();
+      skCtx.setLineDash([]);
+      s.vertices.forEach(v => {
+        const sp = worldToScreen(v.x, v.y);
+        drawHandle(sp.x, sp.y);
+      });
+    }
+    skCtx.restore();
+    return;
+  }
   skCtx.strokeStyle = selected ? '#ff0000' : (s.color || '#000');
   skCtx.lineWidth = (s.lineWidth || 2);
   skCtx.fillStyle = s.fillColor || 'rgba(100,150,200,0.1)';
@@ -1674,6 +1715,13 @@ skCanvas.addEventListener('mousedown', (e)=>{
   if(state.sweepConnectModeOn && e.button === 0){
     e.preventDefault();
     sk3SweepStart(wp);
+    return;
+  }
+
+  // v8.45: 채움 모드 ON + 좌클릭 → 자동 boundary trace 후 채움
+  if(state.fillModeOn && e.button === 0){
+    e.preventDefault();
+    sk3FillAtClick(wp);
     return;
   }
 
@@ -3111,6 +3159,29 @@ window.sk3UpdateSelProp = function(){
         <div class="prop-row"><label>색상</label><input type="color" id="sk3color" value="${s.color||'#000000'}"></div>
         <button onclick="sk3ApplySelProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
         <div style="font-size:10px;color:#888;margin-top:4px">호 폭: ${arcSweep.toFixed(1)}° · 호 길이: ${arcLen.toFixed(2)}mm</div>`;
+    } else if(s.type === 'fill'){
+      // v8.45: 채움 객체 속성
+      title.textContent = '🎨 채움 (fill)';
+      const area = (function(){
+        let a = 0;
+        for(let i=0, j=s.vertices.length-1; i<s.vertices.length; j=i++){
+          a += (s.vertices[j].x+s.vertices[i].x)*(s.vertices[j].y-s.vertices[i].y);
+        }
+        return Math.abs(a)/2;
+      })();
+      html = `
+        <div class="prop-row"><label>채움색</label><input type="color" id="sk3fillColor" value="${s.color||'#ffe599'}"></div>
+        <div class="prop-row"><label>외곽선</label>
+          <select id="sk3fillStrokeOn" style="background:#1a1a1a;color:#fff;border:1px solid #444">
+            <option value="0" ${(!s.stroke||(s.strokeWidth||0)<=0)?'selected':''}>없음</option>
+            <option value="1" ${(s.stroke&&(s.strokeWidth||0)>0)?'selected':''}>표시</option>
+          </select>
+        </div>
+        <div class="prop-row"><label>외곽색</label><input type="color" id="sk3fillStroke" value="${s.stroke||'#000000'}"></div>
+        <div class="prop-row"><label>외곽두께</label><input type="number" step="0.5" id="sk3fillStrokeW" value="${s.strokeWidth||1.5}" min="0.5"></div>
+        <button onclick="sk3ApplyFillProp()" style="width:100%;margin-top:6px;background:#27ae60;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">적용</button>
+        <button onclick="sk3DeleteSelectedFill()" style="width:100%;margin-top:4px;background:#c0392b;color:#fff;border:none;padding:6px;border-radius:4px;cursor:pointer">🗑 채움 삭제</button>
+        <div style="font-size:10px;color:#888;margin-top:6px">점 ${s.vertices.length}개 · 면적 ${area.toFixed(2)}mm²</div>`;
     } else {
       title.textContent = '? ' + s.type;
       html = '<div style="font-size:10px;color:#888">이 도형은 속성 편집을 지원하지 않습니다.</div>';
@@ -3322,6 +3393,11 @@ function selectShapeAt(wp, addToSel){
     } else if(s.type === 'arc'){
       const d = Math.sqrt((wp.x-s.cx)**2 + (wp.y-s.cy)**2);
       hit = Math.abs(d - s.r) < tol;
+    } else if(s.type === 'fill'){
+      // v8.45: 채움 객체 — 폴리곤 내부 클릭으로 선택
+      if(s.vertices && s.vertices.length >= 3){
+        hit = _fillInPolygon(wp, s.vertices);
+      }
     }
     if(hit){
       if(state.selectedShapes.has(i)) state.selectedShapes.delete(i);
@@ -8460,6 +8536,203 @@ window.sk3TangentTwoLines = function(){
 // - 완전 동일 / 역방향 / 부분 겹침 / 끝점 닿음 / 포함 관계 모두 처리
 // - 색상·굵기 다른 선들은 합치되 첫 번째 선 기준 (다르면 토스트로 알림)
 // - 펜점은 그대로 유지 (사용자 의도 점일 수 있음)
+// ─── v8.45: 닫힌 영역 자동 채움 (Face boundary trace) ──────────
+// 평면 그래프(planar subdivision)에서 클릭 위치를 둘러싸는 가장 작은 face를 찾아 폴리곤 채움
+// 동작: 채움 도구 ON → 닫힌 영역 클릭 → 자동 boundary trace → 채움 객체 생성
+//
+// 채움 객체 구조:
+//   {type:'fill', vertices:[{x,y},...], color:'#...', stroke:null|'#...', strokeWidth:0|N, id}
+//
+// 알고리즘:
+//   1. 모든 line endpoint를 unique node로 (tolerance 0.01mm)
+//   2. 각 line은 양방향 directed edge 두 개, 각 노드의 edges를 각도순 정렬
+//   3. 클릭점 +X ray cast → 가장 가까운 line 찾기
+//   4. 그 line의 두 방향 directed edge 모두 trace 시도 (next CCW edge)
+//   5. point-in-polygon 검증 + 면적 최소인 것 채택 (내부 face)
+
+function _fillBuildPlanarGraph(){
+  const nodes = [];
+  const edges = [];
+  const tol = 0.01;
+  function nFor(x, y){
+    let i = nodes.findIndex(n => Math.abs(n.x-x)<tol && Math.abs(n.y-y)<tol);
+    if(i<0){ nodes.push({x, y, edges:[]}); i = nodes.length-1; }
+    return i;
+  }
+  state.shapes.forEach((s, lidx) => {
+    if(s.type !== 'line') return;
+    const a = nFor(s.x1, s.y1);
+    const b = nFor(s.x2, s.y2);
+    if(a === b) return;
+    const ang = Math.atan2(nodes[b].y - nodes[a].y, nodes[b].x - nodes[a].x);
+    const ia = edges.length, ib = ia + 1;
+    edges.push({from:a, to:b, angle:ang,         twin:ib, lineIdx:lidx});
+    edges.push({from:b, to:a, angle:ang+Math.PI, twin:ia, lineIdx:lidx});
+    nodes[a].edges.push(ia);
+    nodes[b].edges.push(ib);
+  });
+  nodes.forEach(n => n.edges.sort((x,y) => edges[x].angle - edges[y].angle));
+  return {nodes, edges};
+}
+
+function _fillNextCCW(g, ei){
+  const e = g.edges[ei];
+  const node = g.nodes[e.to];
+  const tw = e.twin;
+  const pos = node.edges.indexOf(tw);
+  if(pos < 0) return -1;
+  const nextPos = (pos + 1) % node.edges.length;
+  return node.edges[nextPos];
+}
+
+function _fillTraceFace(g, startEi){
+  const path = [g.edges[startEi].from];
+  let cur = startEi;
+  let safety = 1000;
+  while(safety-- > 0){
+    const e = g.edges[cur];
+    path.push(e.to);
+    if(e.to === path[0]) return path.slice(0, -1);
+    const nx = _fillNextCCW(g, cur);
+    if(nx < 0 || nx === startEi) return null;
+    cur = nx;
+  }
+  return null;
+}
+
+function _fillRayCastLine(g, click){
+  const seen = new Set();
+  let bestX = Infinity, bestLine = -1;
+  g.edges.forEach((e) => {
+    if(seen.has(e.lineIdx)) return;
+    seen.add(e.lineIdx);
+    const a = g.nodes[e.from], b = g.nodes[e.to];
+    const ymin = Math.min(a.y, b.y), ymax = Math.max(a.y, b.y);
+    if(click.y < ymin - 1e-9 || click.y > ymax + 1e-9) return;
+    if(Math.abs(b.y - a.y) < 1e-9) return;  // 수평선 skip
+    const t = (click.y - a.y) / (b.y - a.y);
+    if(t < -1e-9 || t > 1 + 1e-9) return;
+    const x = a.x + t * (b.x - a.x);
+    if(x < click.x - 1e-9) return;
+    if(x < bestX){ bestX = x; bestLine = e.lineIdx; }
+  });
+  return bestLine;
+}
+
+function _fillInPolygon(p, poly){
+  let inside = false;
+  for(let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    if(((yi > p.y) !== (yj > p.y)) &&
+       (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+function _fillPolyArea(poly){
+  let a = 0;
+  for(let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    a += (poly[j].x + poly[i].x) * (poly[j].y - poly[i].y);
+  }
+  return Math.abs(a) / 2;
+}
+
+window.sk3FindFaceAt = function(clickWp){
+  const g = _fillBuildPlanarGraph();
+  if(g.nodes.length === 0) return null;
+  const lineIdx = _fillRayCastLine(g, clickWp);
+  if(lineIdx < 0) return null;
+  const eis = [];
+  g.edges.forEach((e, ei) => { if(e.lineIdx === lineIdx) eis.push(ei); });
+  const candidates = [];
+  eis.forEach(ei => {
+    const path = _fillTraceFace(g, ei);
+    if(path && path.length >= 3){
+      const poly = path.map(i => ({x: g.nodes[i].x, y: g.nodes[i].y}));
+      if(_fillInPolygon(clickWp, poly)) candidates.push(poly);
+    }
+  });
+  if(candidates.length === 0) return null;
+  candidates.sort((a, b) => _fillPolyArea(a) - _fillPolyArea(b));
+  return candidates[0];
+};
+
+// v8.45: 선택된 채움 객체 속성 적용 (속성 패널)
+window.sk3ApplyFillProp = function(){
+  if(!state.selectedShapes || state.selectedShapes.size !== 1) return;
+  const idx = [...state.selectedShapes][0];
+  const s = state.shapes[idx];
+  if(!s || s.type !== 'fill') return;
+  pushHistory();
+  const c = document.getElementById('sk3fillColor');
+  if(c) s.color = c.value;
+  const strokeOn = document.getElementById('sk3fillStrokeOn');
+  const strokeC = document.getElementById('sk3fillStroke');
+  const strokeW = document.getElementById('sk3fillStrokeW');
+  if(strokeOn && strokeOn.value === '1'){
+    s.stroke = strokeC ? strokeC.value : '#000000';
+    s.strokeWidth = strokeW ? parseFloat(strokeW.value) || 1.5 : 1.5;
+  } else {
+    s.stroke = null;
+    s.strokeWidth = 0;
+  }
+  redrawSketch(); updateInfo();
+  toast('✓ 채움 속성 적용');
+};
+
+// v8.45: 선택된 채움 객체 삭제 (속성 패널 버튼)
+window.sk3DeleteSelectedFill = function(){
+  if(!state.selectedShapes || state.selectedShapes.size !== 1) return;
+  const idx = [...state.selectedShapes][0];
+  const s = state.shapes[idx];
+  if(!s || s.type !== 'fill') return;
+  if(!confirm('🗑 이 채움을 삭제할까요?')) return;
+  pushHistory();
+  state.shapes.splice(idx, 1);
+  state.selectedShapes.clear();
+  redrawSketch(); updateInfo();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+  toast('🗑 채움 삭제');
+};
+
+// 채움 모드 토글
+window.sk3ToggleFillMode = function(){
+  if(state.mode !== 'sketch'){ toast('스케치 모드에서만 가능'); return; }
+  state.fillModeOn = !state.fillModeOn;
+  const btn = document.getElementById('btn-fillmode');
+  if(btn) btn.style.background = state.fillModeOn ? '#27ae60' : '';
+  if(state.fillModeOn){
+    if(typeof setTool === 'function' && state.tool !== 'select') setTool('select');
+    toast('🎨 채움 모드 ON — 닫힌 영역 내부를 클릭하면 자동 채움 (Esc=종료)');
+  } else {
+    toast('🎨 채움 모드 OFF');
+  }
+};
+
+// 클릭 위치 → 닫힌 영역 자동 채움
+window.sk3FillAtClick = function(wp){
+  const poly = window.sk3FindFaceAt(wp);
+  if(!poly){
+    toast('⚠ 닫힌 영역 찾기 실패 — ⊞ 교차로 분할 후 다시 시도하거나, 선이 끊어진 곳을 확인하세요');
+    return false;
+  }
+  pushHistory();
+  const fillColor = (document.getElementById('fillColor') || {}).value || '#ffe599';
+  state.shapes.push({
+    type: 'fill',
+    vertices: poly,
+    color: fillColor,
+    stroke: null,
+    strokeWidth: 0
+  });
+  redrawSketch(); updateInfo();
+  toast('🎨 채움 추가 (' + poly.length + '점, 면적 ' + _fillPolyArea(poly).toFixed(2) + 'mm²)');
+  if(typeof skCmdLog === 'function') skCmdLog('  🎨 채움: ' + poly.length + '점 폴리곤 · ' + fillColor, 'sys');
+  return true;
+};
+
+
 window.sk3MergeOverlappingLines = function(silent){
   if(state.mode !== 'sketch'){ toast('스케치 모드에서만 가능'); return 0; }
   // 작업 대상: 모든 line (선택과 무관 — 전체 정리)
@@ -10243,7 +10516,16 @@ document.addEventListener('keydown', (e)=>{
       return;
     }
     if(e.key === 'y' || e.key === 'Y'){e.preventDefault(); redo(); return}
-    if(e.key === 's'){e.preventDefault(); saveProject(); return}
+    if(e.key === 's' || e.key === 'S'){
+      e.preventDefault();
+      // v8.46: Shift 누르면 스케치 모드에서 SVG 저장
+      if(e.shiftKey && state.mode === 'sketch'){
+        if(typeof window.sk3ExportSVG === 'function') window.sk3ExportSVG();
+      } else {
+        saveProject();
+      }
+      return;
+    }
     if(e.key === 'o'){e.preventDefault(); document.getElementById('fileInput').click(); return}
     if(e.key === 'n'){e.preventDefault(); newProject(); return}
     // v8.19: Ctrl+C 복사 (스케치 모드 + 도형 선택 시만, 그 외 기본 동작 허용)
@@ -10284,6 +10566,11 @@ document.addEventListener('keydown', (e)=>{
     // v8.37: 각선 모드 진행 중이면 취소
     if(state.angleLineMode){
       sk3CancelAngleLine();
+      return;
+    }
+    // v8.45: 채움 모드 ON이면 종료
+    if(state.fillModeOn){
+      sk3ToggleFillMode();
       return;
     }
     // v8.16: 도형 드래그 진행 중이면 원위치 복원
@@ -13265,4 +13552,132 @@ window.sk3ToggleBgImage = function(){
   state.bgImage.visible = !state.bgImage.visible;
   redrawSketch();
   toast('🖼 배경 ' + (state.bgImage.visible ? 'ON' : 'OFF'));
+};
+
+// ─── v8.46: 스케치 SVG 저장 ─────────────────────────────────────
+// 모든 도형(line/rect/circle/arc/fill) + 채움 객체를 SVG로 출력
+// 단위: mm (사용자 환경 정밀도 그대로)
+// 좌표계: SVG는 Y+가 아래쪽이므로 Y 좌표 반전 + viewBox로 사용자 좌표 그대로 보존
+window.sk3ExportSVG = function(){
+  if(state.mode !== 'sketch'){ toast('스케치 모드에서만 SVG 저장 가능'); return; }
+  if(state.shapes.length === 0){ toast('⚠ 저장할 도형이 없습니다'); return; }
+
+  // 1) 모든 도형의 bbox 계산
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  function expand(x, y){
+    if(x < minX) minX = x; if(x > maxX) maxX = x;
+    if(y < minY) minY = y; if(y > maxY) maxY = y;
+  }
+  state.shapes.forEach(s => {
+    if(s.type === 'line'){ expand(s.x1, s.y1); expand(s.x2, s.y2); }
+    else if(s.type === 'rect'){
+      expand(Math.min(s.x1,s.x2), Math.min(s.y1,s.y2));
+      expand(Math.max(s.x1,s.x2), Math.max(s.y1,s.y2));
+    } else if(s.type === 'circle'){
+      expand(s.cx - s.r, s.cy - s.r);
+      expand(s.cx + s.r, s.cy + s.r);
+    } else if(s.type === 'arc'){
+      // 단순화: 원 전체 bbox (정확한 호 bbox는 angle wrap 처리 필요)
+      expand(s.cx - s.r, s.cy - s.r);
+      expand(s.cx + s.r, s.cy + s.r);
+    } else if(s.type === 'fill'){
+      (s.vertices||[]).forEach(v => expand(v.x, v.y));
+    }
+  });
+  if(!isFinite(minX)){ toast('⚠ 도형 bbox 계산 실패'); return; }
+  // 여백
+  const pad = 2;
+  minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+  const W = maxX - minX;
+  const H = maxY - minY;
+
+  // 2) SVG 헤더
+  // Y 반전을 위해 viewBox에서 minY를 -maxY로 두고 transform("scale(1, -1)")
+  // 가독성: viewBox는 minX, -maxY, W, H로 설정하고 모든 좌표 그대로 사용 (Y는 -y로 적용)
+  // 더 단순: <g transform="scale(1,-1)"> wrapper 사용 → 모든 좌표 그대로 작성, SVG가 자동 Y반전
+  const lines = [];
+  lines.push('<?xml version="1.0" encoding="UTF-8" standalone="no"?>');
+  lines.push('<svg xmlns="http://www.w3.org/2000/svg" version="1.1"');
+  lines.push('  width="' + W.toFixed(3) + 'mm" height="' + H.toFixed(3) + 'mm"');
+  lines.push('  viewBox="' + minX.toFixed(3) + ' ' + (-maxY).toFixed(3) + ' ' + W.toFixed(3) + ' ' + H.toFixed(3) + '">');
+  lines.push('  <title>tool3 sketch export</title>');
+  lines.push('  <desc>Generated by tool3 v8.46 — width=' + W.toFixed(2) + 'mm height=' + H.toFixed(2) + 'mm</desc>');
+  lines.push('  <g transform="scale(1,-1)" stroke-linecap="round" stroke-linejoin="round" fill-rule="evenodd">');
+
+  // 3) 채움 먼저 (가장 아래 레이어)
+  state.shapes.forEach(s => {
+    if(s.type !== 'fill') return;
+    if(!s.vertices || s.vertices.length < 3) return;
+    const pts = s.vertices.map(v => v.x.toFixed(3) + ',' + v.y.toFixed(3)).join(' ');
+    const stroke = (s.stroke && (s.strokeWidth||0) > 0)
+      ? ' stroke="' + s.stroke + '" stroke-width="' + s.strokeWidth + '"'
+      : ' stroke="none"';
+    lines.push('    <polygon points="' + pts + '" fill="' + (s.color || '#ffe599') + '"' + stroke + ' />');
+  });
+
+  // 4) 도형
+  state.shapes.forEach(s => {
+    if(s.type === 'line'){
+      lines.push('    <line x1="' + s.x1.toFixed(3) + '" y1="' + s.y1.toFixed(3) +
+                 '" x2="' + s.x2.toFixed(3) + '" y2="' + s.y2.toFixed(3) +
+                 '" stroke="' + (s.color||'#000') + '" stroke-width="' + (s.lineWidth||1) + '" fill="none" />');
+    } else if(s.type === 'rect'){
+      const x = Math.min(s.x1, s.x2);
+      const y = Math.min(s.y1, s.y2);
+      const w = Math.abs(s.x2 - s.x1);
+      const h = Math.abs(s.y2 - s.y1);
+      lines.push('    <rect x="' + x.toFixed(3) + '" y="' + y.toFixed(3) +
+                 '" width="' + w.toFixed(3) + '" height="' + h.toFixed(3) +
+                 '" stroke="' + (s.color||'#000') + '" stroke-width="' + (s.lineWidth||1) + '" fill="none" />');
+    } else if(s.type === 'circle'){
+      lines.push('    <circle cx="' + s.cx.toFixed(3) + '" cy="' + s.cy.toFixed(3) +
+                 '" r="' + s.r.toFixed(3) + '" stroke="' + (s.color||'#000') +
+                 '" stroke-width="' + (s.lineWidth||1) + '" fill="none" />');
+    } else if(s.type === 'arc'){
+      // SVG arc path: M(start) A(rx,ry rot largeArc sweep) end
+      const sx = s.cx + s.r * Math.cos(s.startAngle);
+      const sy = s.cy + s.r * Math.sin(s.startAngle);
+      const ex = s.cx + s.r * Math.cos(s.endAngle);
+      const ey = s.cy + s.r * Math.sin(s.endAngle);
+      let sweep = s.endAngle - s.startAngle;
+      // -2π~2π 정규화
+      while(sweep <= -Math.PI*2) sweep += Math.PI*2;
+      while(sweep > Math.PI*2)   sweep -= Math.PI*2;
+      const largeArc = Math.abs(sweep) > Math.PI ? 1 : 0;
+      const sweepFlag = sweep > 0 ? 1 : 0;  // SVG sweep-flag (1=CCW in standard, but Y가 반전된 좌표계에서는 그대로)
+      const d = 'M ' + sx.toFixed(3) + ' ' + sy.toFixed(3) +
+                ' A ' + s.r.toFixed(3) + ' ' + s.r.toFixed(3) + ' 0 ' +
+                largeArc + ' ' + sweepFlag + ' ' +
+                ex.toFixed(3) + ' ' + ey.toFixed(3);
+      lines.push('    <path d="' + d + '" stroke="' + (s.color||'#000') +
+                 '" stroke-width="' + (s.lineWidth||1) + '" fill="none" />');
+    }
+    // fill은 위에서 처리
+  });
+
+  lines.push('  </g>');
+  lines.push('</svg>');
+  const svgText = lines.join('\n');
+
+  // 5) 다운로드
+  const blob = new Blob([svgText], {type: 'image/svg+xml;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  // 파일명: 날짜시간 포함
+  const now = new Date();
+  const ts = now.getFullYear() + ('0'+(now.getMonth()+1)).slice(-2) + ('0'+now.getDate()).slice(-2) +
+             '_' + ('0'+now.getHours()).slice(-2) + ('0'+now.getMinutes()).slice(-2);
+  a.href = url;
+  a.download = 'tool3_sketch_' + ts + '.svg';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  const counts = {line:0, rect:0, circle:0, arc:0, fill:0};
+  state.shapes.forEach(s => { if(counts[s.type] !== undefined) counts[s.type]++; });
+  toast('📐 SVG 저장: ' + W.toFixed(1) + '×' + H.toFixed(1) + 'mm · ' +
+        '선' + counts.line + '/사각' + counts.rect + '/원' + counts.circle +
+        '/호' + counts.arc + '/채움' + counts.fill);
+  if(typeof skCmdLog === 'function') skCmdLog('  📐 SVG 저장: tool3_sketch_' + ts + '.svg · ' + W.toFixed(1) + '×' + H.toFixed(1) + 'mm', 'sys');
 };

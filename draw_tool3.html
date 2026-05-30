@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.44 - 스윕 연결 (원이 점들을 지나가며 순서대로 연결)</title>
+<title>tool3 v8.46 - 스케치 SVG 저장</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.44</h1>
+  <h1>📐 tool3 v8.46</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -208,6 +208,8 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
       <div class="menu-sep"></div>
       <div class="menu-item" onclick="exportSTL()"><span class="ico">📦</span>STL 내보내기 (선택 부품)</div>
       <div class="menu-item" onclick="exportImage()"><span class="ico">🖼️</span>이미지 저장(PNG)</div>
+      <!-- v8.46: 스케치 SVG 저장 -->
+      <div class="menu-item sketch-only" onclick="sk3ExportSVG()"><span class="ico">📐</span>스케치 SVG 저장<span class="shortcut">Ctrl+Shift+S</span></div>
     </div>
   </div>
   <div class="menu">
@@ -351,7 +353,10 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
   <!-- v8.32: X기준 입력 그룹 제거 -->
   <div class="group sketch-only">
     <label>색상:</label>
-    <input type="color" id="sketchColor" value="#000000">
+    <input type="color" id="sketchColor" value="#000000" title="선/도형 그리기 색상">
+    <!-- v8.45: 채움 색상 picker (별도) -->
+    <label style="margin-left:6px">채움:</label>
+    <input type="color" id="fillColor" value="#ffe599" title="🎨 채움 색상 — 닫힌 영역 클릭 시 사용">
   </div>
   <!-- v8.39: 자주 쓰는 편집 액션 — 명령 키보드 편집 탭에서 도구바로 승격 -->
   <div class="group sketch-only" style="border-left:1px solid #444;padding-left:8px">
@@ -360,7 +365,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <button onclick="sk3ExecuteCmd('정리')" title="🧹 정리: 펜점 전체 + 0.1mm 이하 짧은 선 일괄 삭제 (선택적 인자: 정리 0.5)" style="background:#5a3a8a">🧹 정리</button>
     <button onclick="sk3MergeOverlappingLines()" title="🧬 통합: 겹친/포함/끝점 닿은 collinear 선들을 1개로 합침" style="background:#3a8a5a">🧬 통합</button>
     <button onclick="sk3ExecuteCmd('외곽선')" title="🖊 외곽선: 선택된 선들의 끝점에 자동 라벨" style="background:#8a5a3a">🖊 외곽선</button>
-    <button onclick="sk3ExecuteCmd('채움')" title="🎨 채움: 선택된 도형(사각/원)에 채움 색상 입력" style="background:#8a3a5a">🎨 채움</button>
+    <button id="btn-fillmode" onclick="sk3ToggleFillMode()" title="🎨 자동 채움: 토글 ON 후 닫힌 영역 클릭 → 자동 boundary 찾아 채움 객체 생성 (색상은 도구바 '채움' 선택기). 클릭 위치를 둘러싸는 가장 작은 폐곡선을 자동 추적." style="background:#8a3a5a">🎨 채움</button>
     <button onclick="sk3ExecuteCmd('쓸어지우기')" title="🧽 쓸어지우기: 도구 활성화 후 드래그로 박스 안 도형 일괄 삭제" style="background:#8a3a3a">🧽 쓸기</button>
   </div>
   <!-- v8.38: 선 두께 input은 model-only로 분리 (스케치 모드에서 숨김) -->

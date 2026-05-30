@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.40 - 도형 변경 후 펜점 자동 동기화</title>
+<title>tool3 v8.41 - 3D 도형 팔레트 스케치 모드에서 숨김</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.40</h1>
+  <h1>📐 tool3 v8.41</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -466,7 +466,8 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 
   <div class="prop-panel">
     <!-- v2.4: 팅커캐드 스타일 도형 팔레트 (원클릭 즉시 추가) -->
-    <div class="shape-palette">
+    <!-- v8.41: 3D 모형 팔레트는 스케치 모드에서 숨김 -->
+    <div class="shape-palette model-only">
       <div class="shape-palette-title">
         <span>🎲 기본 도형</span>
         <span style="font-size:9px;color:#888;font-weight:normal">드래그→캔버스에 놓기</span>

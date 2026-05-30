@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>tool3 v8.43 - 배경 도면 이미지 (실측 사이즈)</title>
+<title>tool3 v8.44 - 스윕 연결 (원이 점들을 지나가며 순서대로 연결)</title>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -190,7 +190,7 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
 <body>
 
 <header>
-  <h1>📐 tool3 v8.43</h1>
+  <h1>📐 tool3 v8.44</h1>
   <span class="ver">v8.0 - 텍스트모드 통합 · 커맨드바 + ⌨ 명령 키보드 + 한붓그리기/편집/연장/절교</span>
   <span class="mode-badge" id="modeBadge">스케처 모드</span>
   <span class="stat" id="statText">준비됨</span>
@@ -333,6 +333,8 @@ footer .coord{color:#0f0;font-family:Consolas,monospace}
     <button id="btn-bgimage" onclick="sk3OpenBgImageModal()" title="🖼 배경 도면 이미지 — 실측 사이즈로 캔버스에 깔아 위에 그리기" style="background:#5a4a2a;color:#f0c878;font-weight:bold">🖼 배경</button>
     <!-- v8.37: 각선 — 선택된 점에서 각도 유지하며 드래그로 연장선 -->
     <button id="btn-angleline" onclick="sk3StartAngleLine()" title="📐 각선: 선택된 점 기준 각도(°) 입력 후 마우스 이동 → 그 방향으로만 진행 → 클릭으로 길이 확정" style="background:#2a5a3a;color:#7ae8a0;font-weight:bold">📐 각선</button>
+    <!-- v8.44: 스윕 연결 — 원이 점을 순서대로 통과하며 연결 -->
+    <button id="btn-sweep" onclick="sk3ToggleSweepConnect()" title="🪢 스윕 연결: ON 후 좌클릭+드래그 → 마우스를 따라다니는 원이 점들을 순서대로 1-2-3 연결 · 휠로 원 크기 조절(0.1~5mm)" style="background:#3a2a5a;color:#a8a0e8;font-weight:bold">🪢 스윕</button>
     <button id="btn-pencoord" onclick="sk3TogglePenCoord()" title="점좌표: 점 옆에 (X,Y) 좌표 표시 ON/OFF">📍 점좌표</button>
     <button id="btn-thickness" onclick="sk3SetThickness()" title="소재 두께 입력 (mm) — 명령: 두께 N1 N2 좌/우">⚙ 두께</button>
     <button id="btn-wconnect" onclick="sk3ToggleWheelConnect()" title="휠클릭 연결: ON 후 점 2개에 휠클릭(가운데 버튼)으로 선 생성">⚡ 연결</button>

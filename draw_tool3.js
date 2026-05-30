@@ -300,6 +300,9 @@ const state = {
   fineGrid: null,      // v8.34: 정밀 격자 {anchor:{x,y}, step:0.1, range:30} or null (Ctrl 누름 + 점 선택 시)
   bgImage: null,       // v8.43: 배경 도면 이미지 {img, widthMm, heightMm, pxW, pxH, opacity, anchor, offsetX, offsetY, visible, fileName}
   angleLineMode: null, // v8.37: 각선 모드 {anchor, anchorIdx, angleRad, angleDeg, previewWp} or null
+  sweepConnect: null,  // v8.44: 스윕 연결 진행 상태 {R, lastWp, hoverWp, visitedIdx:Set, orderedIdx:[], newLines:[]} (드래그 중에만 활성)
+  sweepConnectModeOn: false,  // v8.44: 스윕 연결 모드 토글 (true면 마우스 드래그 시작 시 sweepConnect 시작)
+  sweepRadius: 0.5,    // v8.44: 스윕 연결 원 반경 (mm). 휠로 0.1~5mm 조절
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
   autoPopup: true, // v6.2: 도형 클릭 시 위치/크기/회전 입력 팝업 자동 표시
@@ -532,6 +535,8 @@ function redrawSketch(){
   drawPenLabels();
   // v8.5: 박스 선택 미리보기
   if(state.boxSelect) sk3DrawBoxSelectPreview(state.boxSelect);
+  // v8.44: 스윕 연결 미리보기 (원 + 진행 상태)
+  if(state.sweepConnectModeOn) drawSweepConnect();
   // v8.37: 각선 모드 가이드 + 미리보기
   if(state.angleLineMode){
     const al = state.angleLineMode;
@@ -804,6 +809,184 @@ window.sk3SyncPenPointsToShapes = function(opts){
   });
   return addedCount;
 };
+
+// ─── v8.44: 스윕 연결 — 마우스 드래그로 원이 점들을 순서대로 통과하며 연결 ──
+window.sk3ToggleSweepConnect = function(){
+  if(state.mode !== 'sketch'){ toast('스케치 모드에서만 가능'); return; }
+  state.sweepConnectModeOn = !state.sweepConnectModeOn;
+  const btn = document.getElementById('btn-sweep');
+  if(btn) btn.style.background = state.sweepConnectModeOn ? '#16a085' : '';
+  if(state.sweepConnectModeOn){
+    toast('🪢 스윕 연결 ON — 좌클릭+드래그로 원이 지나가는 점들을 순서대로 연결 (휠로 원 크기 조절)');
+    if(typeof skCmdLog === 'function') skCmdLog('  🪢 스윕 연결 ON · 원 반경 ' + state.sweepRadius + 'mm', 'sys');
+    // 도형 드래그 도구를 피하려고 select 도구로
+    if(typeof setTool === 'function' && state.tool !== 'select') setTool('select');
+  } else {
+    toast('🪢 스윕 연결 OFF');
+    state.sweepConnect = null;
+    redrawSketch();
+  }
+};
+
+// 휠 이벤트로 반경 조절 (스윕 모드일 때만)
+window.sk3AdjustSweepRadius = function(deltaY){
+  // wheel up(deltaY<0) = 크게, down = 작게
+  const step = (state.sweepRadius < 0.5) ? 0.05 : (state.sweepRadius < 1.5) ? 0.1 : 0.25;
+  if(deltaY < 0) state.sweepRadius = Math.min(5.0, state.sweepRadius + step);
+  else            state.sweepRadius = Math.max(0.1, state.sweepRadius - step);
+  state.sweepRadius = Math.round(state.sweepRadius * 100) / 100;
+  if(state.sweepConnect) state.sweepConnect.R = state.sweepRadius;
+  toast('🪢 원 반경 ' + state.sweepRadius + 'mm');
+  redrawSketch();
+};
+
+// segment(a→b)와 점 p의 최단거리 + 그 위치의 t파라미터
+function _segDistAndT(p, a, b){
+  const dx = b.x-a.x, dy = b.y-a.y;
+  const lenSq = dx*dx + dy*dy;
+  if(lenSq < 1e-9) return {d: Math.hypot(p.x-a.x, p.y-a.y), t: 0};
+  let t = ((p.x-a.x)*dx + (p.y-a.y)*dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = a.x + t*dx, cy = a.y + t*dy;
+  return {d: Math.hypot(p.x-cx, p.y-cy), t};
+}
+
+// 드래그 시작 시 호출 — 스윕 연결 진행 상태 초기화
+window.sk3SweepStart = function(wp){
+  // 시작점에서 이미 원 안에 들어있는 가장 가까운 점부터 시작
+  state.sweepConnect = {
+    R: state.sweepRadius,
+    lastWp: {x: wp.x, y: wp.y},
+    hoverWp: {x: wp.x, y: wp.y},
+    visitedIdx: new Set(),
+    orderedIdx: [],
+    newLines: []
+  };
+  // 시작 즉시 안에 있는 점도 후킹
+  _sweepCheckEntries(wp, wp);
+};
+
+// 마우스 이동 시 segment(이전→현재)가 새로 지나간 점들을 순서대로 hit
+function _sweepCheckEntries(aWp, bWp){
+  const sw = state.sweepConnect;
+  if(!sw) return;
+  const R = sw.R;
+  const hits = [];
+  state.penPoints.forEach((p, idx) => {
+    if(sw.visitedIdx.has(idx)) return;
+    const r = _segDistAndT(p, aWp, bWp);
+    if(r.d <= R){
+      hits.push({idx, t: r.t});
+    }
+  });
+  // 진입 순서대로 (t 작은 것부터)
+  hits.sort((a, b) => a.t - b.t);
+  hits.forEach(h => {
+    if(sw.visitedIdx.has(h.idx)) return;
+    sw.visitedIdx.add(h.idx);
+    sw.orderedIdx.push(h.idx);
+    // 직전 점과 새 점 연결 (orderedIdx 길이 ≥ 2일 때)
+    if(sw.orderedIdx.length >= 2){
+      const prevIdx = sw.orderedIdx[sw.orderedIdx.length - 2];
+      const curIdx = h.idx;
+      // 중복 선(이미 같은 두 끝점 선이 있나) 체크
+      const p1 = state.penPoints[prevIdx], p2 = state.penPoints[curIdx];
+      if(p1 && p2){
+        const tol = 0.01;
+        const dup = state.shapes.some(s =>
+          s.type === 'line' &&
+          ((Math.abs(s.x1-p1.x)<tol && Math.abs(s.y1-p1.y)<tol && Math.abs(s.x2-p2.x)<tol && Math.abs(s.y2-p2.y)<tol) ||
+           (Math.abs(s.x1-p2.x)<tol && Math.abs(s.y1-p2.y)<tol && Math.abs(s.x2-p1.x)<tol && Math.abs(s.y2-p1.y)<tol)));
+        if(!dup){
+          const ln = {type:'line', x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y,
+            color: (document.getElementById('sketchColor')||{}).value || '#000000',
+            lineWidth: parseInt((document.getElementById('lineWidth')||{}).value) || 2};
+          state.shapes.push(ln);
+          sw.newLines.push(ln);
+        }
+      }
+    }
+  });
+}
+
+// 드래그 중 마우스 이동 시 호출 (각 mousemove마다)
+window.sk3SweepMove = function(wp){
+  const sw = state.sweepConnect;
+  if(!sw) return;
+  _sweepCheckEntries(sw.lastWp, wp);
+  sw.lastWp = {x: wp.x, y: wp.y};
+  sw.hoverWp = {x: wp.x, y: wp.y};
+  redrawSketch();
+};
+
+// 드래그 종료 시 호출 — 히스토리 기록 + 토스트
+window.sk3SweepEnd = function(){
+  const sw = state.sweepConnect;
+  if(!sw){ return; }
+  const lines = sw.newLines || [];
+  const ordered = sw.orderedIdx || [];
+  // 임시로 추가했던 선들을 일단 제거하고 pushHistory 후 다시 추가 (정상 undo 가능하도록)
+  if(lines.length > 0){
+    lines.forEach(ln => {
+      const i = state.shapes.indexOf(ln);
+      if(i >= 0) state.shapes.splice(i, 1);
+    });
+    pushHistory();
+    lines.forEach(ln => state.shapes.push(ln));
+    toast('🪢 스윕 연결: ' + ordered.length + '개 점 통과 → 선 ' + lines.length + '개 생성');
+    if(typeof skCmdLog === 'function'){
+      skCmdLog('  🪢 스윕 연결: ' + ordered.map(i => 'P'+i).join(' → ') + ' (선 ' + lines.length + '개)', 'sys');
+    }
+  } else if(ordered.length > 0){
+    toast('🪢 점 ' + ordered.length + '개 지나갔으나 새 선 없음 (이미 연결되어 있음)');
+  } else {
+    toast('🪢 지나간 점이 없습니다');
+  }
+  state.sweepConnect = null;
+  redrawSketch(); updateInfo();
+  if(typeof window.sk3UpdateSelProp === 'function') window.sk3UpdateSelProp();
+};
+
+// 그리기: 현재 마우스 위치에 원 + 진행 표시
+function drawSweepConnect(){
+  if(!state.sweepConnectModeOn) return;
+  const ctx = skCtx;
+  ctx.save();
+  // 드래그 중이 아니어도 마우스 따라 미리보기 원 표시 (대기 상태)
+  const sw = state.sweepConnect;
+  const wp = sw ? sw.hoverWp : state._sweepHoverWp;
+  if(!wp) { ctx.restore(); return; }
+  const sp = worldToScreen(wp.x, wp.y);
+  const rPx = state.sweepRadius * state.pixelsPerMm;
+  // 원 (반투명)
+  ctx.fillStyle = sw ? 'rgba(46, 204, 113, 0.22)' : 'rgba(46, 204, 113, 0.10)';
+  ctx.strokeStyle = '#27ae60';
+  ctx.lineWidth = sw ? 2 : 1;
+  ctx.beginPath();
+  ctx.arc(sp.x, sp.y, rPx, 0, Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
+  // 반경 표시
+  ctx.fillStyle = '#27ae60';
+  ctx.font = 'bold 11px Consolas';
+  ctx.fillText('R=' + state.sweepRadius + 'mm' + (sw?' · '+sw.orderedIdx.length+'점':''), sp.x + rPx + 4, sp.y - 4);
+  // 진행 중 — 지나간 점에 강조
+  if(sw && sw.orderedIdx.length > 0){
+    sw.orderedIdx.forEach((idx, k) => {
+      const p = state.penPoints[idx];
+      if(!p) return;
+      const ps = worldToScreen(p.x, p.y);
+      ctx.fillStyle = '#27ae60';
+      ctx.beginPath();
+      ctx.arc(ps.x, ps.y, 6, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px Consolas';
+      ctx.fillText(String(k+1), ps.x - 3, ps.y + 3);
+    });
+  }
+  ctx.restore();
+}
 
 // v8.36: 원점(0,0)에 펜점 추가 — 작업 시작점 빠른 표시
 window.sk3AddOriginPoint = function(){
@@ -1487,6 +1670,13 @@ skCanvas.addEventListener('mousedown', (e)=>{
   let wp = screenToWorld(sx, sy);
   wp = snapPoint(wp);
 
+  // v8.44: 스윕 연결 모드 ON + 좌클릭 → sweep 시작
+  if(state.sweepConnectModeOn && e.button === 0){
+    e.preventDefault();
+    sk3SweepStart(wp);
+    return;
+  }
+
   // v8.37: 각선 모드 진행 중이면 좌클릭으로 확정
   if(state.angleLineMode && e.button === 0){
     e.preventDefault();
@@ -1778,6 +1968,18 @@ skCanvas.addEventListener('mousemove', (e)=>{
     redrawSketch();
     return;
   }
+  // v8.44: 스윕 연결 진행 중 또는 대기 상태
+  if(state.sweepConnectModeOn){
+    let wpSw = screenToWorld(sx, sy);
+    // 스윕 중에는 OSNAP 적용하지 않음 (원이 점에 끌리면 안 됨 — 자유 이동)
+    if(state.sweepConnect){
+      sk3SweepMove(wpSw);
+    } else {
+      state._sweepHoverWp = wpSw;
+      redrawSketch();
+    }
+    return;
+  }
   // v8.37: 각선 모드 — 마우스 따라 미리보기 업데이트
   if(state.angleLineMode){
     let wp = screenToWorld(sx, sy);
@@ -1909,6 +2111,11 @@ skCanvas.addEventListener('mousemove', (e)=>{
 
 skCanvas.addEventListener('mouseup', (e)=>{
   if(isPanning){isPanning = false; panStart = null; skCanvas.style.cursor = ''; return;}
+  // v8.44: 스윕 연결 드래그 종료
+  if(state.sweepConnect){
+    sk3SweepEnd();
+    return;
+  }
   // v8.11~v8.12: 점 드래그 마침
   if(state.dragPoint){
     const dp = state.dragPoint;
@@ -2769,6 +2976,11 @@ function _skHandleDblClick(e){
 skCanvas.addEventListener('wheel', (e)=>{
   if(state.mode !== 'sketch') return;
   e.preventDefault();
+  // v8.44: 스윕 모드 ON일 때는 휠로 원 반경 조절 (줌 대신)
+  if(state.sweepConnectModeOn){
+    sk3AdjustSweepRadius(e.deltaY);
+    return;
+  }
   const rect = skCanvas.getBoundingClientRect();
   const sx = e.clientX - rect.left;
   const sy = e.clientY - rect.top;

@@ -12779,43 +12779,57 @@ function initCmdKeyboard() {
     if(calc.pendingOp){ press('='); }
     const val = parseFloat(calc.display);
     if(!isFinite(val)){ return; }
-    // step 정밀도로 반올림
-    const step = parseFloat(calc.target.step) || 0.01;
-    const decimals = Math.max(0, -Math.floor(Math.log10(step)));
-    calc.target.value = (decimals > 0 ? val.toFixed(decimals) : String(val));
-    // 기존 change/input 리스너 발화
-    calc.target.dispatchEvent(new Event('input', {bubbles: true}));
-    calc.target.dispatchEvent(new Event('change', {bubbles: true}));
 
-    // v8.29: 속성 패널 input이면 도형/점에 자동 반영 (속성의 "적용" 버튼 자동 클릭)
-    const id = calc.target.id;
+    // v8.42: 모달 열려 있는 동안 redrawSketch가 호출되면 sk3UpdateSelProp이
+    // 속성 패널 HTML을 재생성하여 calc.target이 stale reference(이미 DOM에서 제거됨)가 됨.
+    // 새로 생성된 input은 원본 도형 좌표로 렌더링되어 사용자 입력값이 무시되는 원복 버그.
+    // → ID로 live element를 재조회하여 사용
+    const liveTarget = calc.target.id ? (document.getElementById(calc.target.id) || calc.target) : calc.target;
+
+    // step 정밀도로 반올림
+    const step = parseFloat(liveTarget.step) || 0.01;
+    const decimals = Math.max(0, -Math.floor(Math.log10(step)));
+    liveTarget.value = (decimals > 0 ? val.toFixed(decimals) : String(val));
+
+    // v8.42: 이벤트 dispatch는 적용 함수 호출 후로 옮김
+    // (먼저 dispatch하면 어떤 핸들러가 redrawSketch를 트리거하여 패널 재생성 →
+    //  적용 함수가 새 input의 원본값을 읽게 됨)
+
+    // 속성 패널 input이면 도형/점에 자동 반영 (속성의 "적용" 버튼 자동 클릭)
+    const id = liveTarget.id;
     const SHAPE_IDS = ['sk3p1x','sk3p1y','sk3p2x','sk3p2y','sk3cx','sk3cy','sk3r','sk3sd','sk3ed','sk3color','sk3lw'];
+    let handled = false;
     if(SHAPE_IDS.indexOf(id) >= 0){
       if(typeof window.sk3ApplySelProp === 'function'){
-        try { window.sk3ApplySelProp(); } catch(e){}
+        try { window.sk3ApplySelProp(); handled = true; } catch(e){}
       }
     } else if(id === 'sk3pxv' || id === 'sk3pyv'){
       // 점 적용: 현재 펜점(state.penCur)이 타겟
       if(typeof window.sk3ApplyPointProp === 'function' &&
          typeof state !== 'undefined' && state.penCur >= 0){
-        try { window.sk3ApplyPointProp(state.penCur); } catch(e){}
+        try { window.sk3ApplyPointProp(state.penCur); handled = true; } catch(e){}
       }
     }
-    // v8.31: 연결된 선 각도/길이 input 자동 적용 (계산기 적용 시 원복 버그 수정)
-    // id 형식: sk3conn_deg_N or sk3conn_len_N
-    // sk3conn_deg/len 모두 같은 메타데이터를 사용하므로 짝꿍 input의 값 그대로 두고 적용 함수 호출
+    // 연결된 선 각도/길이 input 자동 적용
     const connMatch = id && id.match(/^sk3conn_(deg|len)_(\d+)$/);
-    if(connMatch && calc.target.dataset.connMeta){
+    if(connMatch && liveTarget.dataset.connMeta){
       try {
-        const meta = JSON.parse(calc.target.dataset.connMeta);
+        const meta = JSON.parse(liveTarget.dataset.connMeta);
         if(typeof window.sk3ApplyConnectedLine === 'function'){
           window.sk3ApplyConnectedLine(meta.pointIdx, meta.shapeIdx, meta.fixedEnd, meta.connIdx);
+          handled = true;
         }
       } catch(e){}
     }
     // 도구바 X기준 input
     if(id === 'xOriginInput' && typeof window.sk3SetXOrigin === 'function'){
-      try { window.sk3SetXOrigin(); } catch(e){}
+      try { window.sk3SetXOrigin(); handled = true; } catch(e){}
+    }
+
+    // 직접 적용 함수가 없는 input(예: gridSize)은 change 이벤트로 등록된 리스너에 알림
+    if(!handled){
+      liveTarget.dispatchEvent(new Event('input', {bubbles: true}));
+      liveTarget.dispatchEvent(new Event('change', {bubbles: true}));
     }
 
     sk3CalcCancel();

@@ -298,6 +298,7 @@ const state = {
   xOrigin: 0,       // v8.25: X축 표시 기준점(mm) — 표시 X = 실제 X − xOrigin, 입력 X는 + xOrigin로 변환 (음수도 가능)
   tangentSnap: false,  // v8.24: 라이브 접선 스냅 - 원/호 드래그 시 가까운 선에 자동 접선
   fineGrid: null,      // v8.34: 정밀 격자 {anchor:{x,y}, step:0.1, range:30} or null (Ctrl 누름 + 점 선택 시)
+  bgImage: null,       // v8.43: 배경 도면 이미지 {img, widthMm, heightMm, pxW, pxH, opacity, anchor, offsetX, offsetY, visible, fileName}
   angleLineMode: null, // v8.37: 각선 모드 {anchor, anchorIdx, angleRad, angleDeg, previewWp} or null
   moveSnap: 0,   // v5.2: 3D 부품 이동 스냅 단위(mm). 0=없음(자유 이동)
   rotSnap: 0,    // v5.3: 3D 부품 회전 스냅 단위(도). 0=없음(자유 회전)
@@ -520,6 +521,10 @@ function redrawSketch(){
   const w = skCanvas.width, h = skCanvas.height;
   skCtx.fillStyle = '#ffffff';
   skCtx.fillRect(0, 0, w, h);
+  // v8.43: 배경 도면 이미지 (그리드/도형보다 먼저 = 가장 아래 레이어)
+  if(state.bgImage && state.bgImage.visible && state.bgImage.img){
+    drawBgImage();
+  }
   if(state.showGrid) drawGrid();
   if(state.showAxes) drawAxes();
   state.shapes.forEach((s, idx)=> drawShape(s, state.selectedShapes.has(idx)));
@@ -1226,6 +1231,41 @@ function drawAxes(){
   skCtx.fillStyle = '#888';
   skCtx.font = '10px Consolas';
   skCtx.fillText('(0,0)', o.x + 5, o.y - 5);
+  skCtx.restore();
+}
+
+// v8.43: 배경 도면 이미지 그리기 — anchor 위치에 따라 (0,0)이 이미지 어디에 매핑되는지 결정
+function drawBgImage(){
+  const bg = state.bgImage;
+  if(!bg || !bg.img || !bg.widthMm || !bg.heightMm) return;
+  // 앵커 → 이미지 좌상단 월드 좌표(x0=좌측, y0=위쪽)
+  // 월드 좌표는 +Y가 위쪽. 이미지 좌상단 y0 (위쪽), 우하단 y0-heightMm (아래쪽)
+  let x0 = 0, y0 = 0;
+  const w = bg.widthMm, h = bg.heightMm;
+  switch(bg.anchor){
+    case 'tl': x0 = 0;    y0 = 0;     break; // 좌상단이 원점
+    case 'tr': x0 = -w;   y0 = 0;     break; // 우상단이 원점 (좌측 배치, 아래로)
+    case 'bl': x0 = 0;    y0 = h;     break; // 좌하단이 원점
+    case 'br': x0 = -w;   y0 = h;     break; // 우하단이 원점 (좌측 배치, 위로)
+    case 'mr': x0 = -w;   y0 = h/2;   break; // 우중앙이 원점 (좌측 배치, Y 중앙) — 회전체 단면용
+    case 'ml': x0 = 0;    y0 = h/2;   break; // 좌중앙이 원점 (우측 배치)
+    case 'cc': x0 = -w/2; y0 = h/2;   break; // 이미지 중앙이 원점
+    default:   x0 = -w;   y0 = h/2;          // 기본: 좌측 배치, Y 중앙
+  }
+  x0 += (bg.offsetX || 0);
+  y0 += (bg.offsetY || 0);
+  // 월드 → 스크린 좌표
+  const tl = worldToScreen(x0, y0);
+  const br = worldToScreen(x0 + w, y0 - h);
+  const sx = tl.x, sy = tl.y;
+  const sw = br.x - tl.x;
+  const sh = br.y - tl.y;
+  skCtx.save();
+  skCtx.globalAlpha = (typeof bg.opacity === 'number') ? bg.opacity : 0.5;
+  // 부드러운 다운스케일링
+  skCtx.imageSmoothingEnabled = true;
+  try { skCtx.drawImage(bg.img, sx, sy, sw, sh); } catch(e){}
+  skCtx.globalAlpha = 1;
   skCtx.restore();
 }
 
@@ -12881,3 +12921,136 @@ function initCmdKeyboard() {
   // 초기 렌더
   render();
 })();
+
+// ─── v8.43: 배경 도면 이미지 ───────────────────────────────────
+// 사용 흐름:
+//  1) 🖼 배경 버튼 → 모달
+//  2) 이미지 파일 선택 → 픽셀 크기 표시
+//  3) 도면 실측 폭(mm) 입력 → 높이는 비율 자동
+//  4) 투명도 슬라이더 + 정렬(원점 어디에 둘지) + X/Y 미세 오프셋
+//  5) 적용 → 캔버스 배경에 표시 (도형/그리드보다 아래 레이어)
+
+window.sk3OpenBgImageModal = function(){
+  const m = document.getElementById('bgImageModal');
+  if(!m) return;
+  // 기존 설정이 있으면 폼 채우기
+  if(state.bgImage){
+    const bg = state.bgImage;
+    document.getElementById('bgImgWidth').value = bg.widthMm;
+    document.getElementById('bgImgHeight').value = bg.heightMm;
+    document.getElementById('bgImgOpacity').value = Math.round(bg.opacity * 100);
+    document.getElementById('bgImgOpacityLbl').textContent = Math.round(bg.opacity * 100) + '%';
+    document.getElementById('bgImgAnchor').value = bg.anchor || 'mr';
+    document.getElementById('bgImgOffsetX').value = bg.offsetX || 0;
+    document.getElementById('bgImgOffsetY').value = bg.offsetY || 0;
+    document.getElementById('bgImgInfo').textContent = bg.fileName + ' · ' + bg.pxW + ' × ' + bg.pxH + 'px';
+    state._bgImgTemp = {img: bg.img, pxW: bg.pxW, pxH: bg.pxH, fileName: bg.fileName};
+  }
+  m.style.display = 'flex';
+};
+
+window.sk3CloseBgImageModal = function(){
+  const m = document.getElementById('bgImageModal');
+  if(m) m.style.display = 'none';
+};
+
+window.sk3LoadBgImage = function(inputEl){
+  if(!inputEl.files || inputEl.files.length === 0) return;
+  const file = inputEl.files[0];
+  if(!file.type.startsWith('image/')){
+    alert('이미지 파일만 가능합니다 (.png, .jpg, .gif, .webp)');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      state._bgImgTemp = {img, pxW: img.width, pxH: img.height, fileName: file.name};
+      document.getElementById('bgImgInfo').textContent =
+        file.name + ' · ' + img.width + ' × ' + img.height + 'px';
+      // 높이 자동 계산 (현재 폭 기준 비율 유지)
+      sk3BgImgUpdateHeight();
+    };
+    img.onerror = () => alert('이미지 로드 실패');
+    img.src = ev.target.result;
+  };
+  reader.onerror = () => alert('파일 읽기 실패');
+  reader.readAsDataURL(file);
+};
+
+// 높이 자동 계산 (자동 체크박스 ON일 때 — 폭이 변경되면 픽셀 비율로 높이 갱신)
+window.sk3BgImgUpdateHeight = function(){
+  if(!state._bgImgTemp) return;
+  const auto = document.getElementById('bgImgAuto');
+  if(!auto || !auto.checked) return;
+  const widthMm = parseFloat(document.getElementById('bgImgWidth').value);
+  if(!isFinite(widthMm) || widthMm <= 0) return;
+  const ratio = state._bgImgTemp.pxH / state._bgImgTemp.pxW;
+  const heightMm = widthMm * ratio;
+  document.getElementById('bgImgHeight').value = heightMm.toFixed(2);
+};
+
+window.sk3ApplyBgImage = function(){
+  if(!state._bgImgTemp){
+    alert('먼저 이미지 파일을 선택하세요');
+    return;
+  }
+  const widthMm = parseFloat(document.getElementById('bgImgWidth').value);
+  const heightMm = parseFloat(document.getElementById('bgImgHeight').value);
+  const opacity = (parseFloat(document.getElementById('bgImgOpacity').value) || 50) / 100;
+  const anchor = document.getElementById('bgImgAnchor').value || 'mr';
+  const offsetX = parseFloat(document.getElementById('bgImgOffsetX').value) || 0;
+  const offsetY = parseFloat(document.getElementById('bgImgOffsetY').value) || 0;
+  if(!isFinite(widthMm) || widthMm <= 0){ alert('실측 폭(mm) 필요'); return; }
+  if(!isFinite(heightMm) || heightMm <= 0){ alert('실측 높이(mm) 필요'); return; }
+  state.bgImage = {
+    img: state._bgImgTemp.img,
+    pxW: state._bgImgTemp.pxW,
+    pxH: state._bgImgTemp.pxH,
+    fileName: state._bgImgTemp.fileName,
+    widthMm, heightMm, opacity, anchor, offsetX, offsetY,
+    visible: true
+  };
+  redrawSketch();
+  sk3CloseBgImageModal();
+  toast('🖼 배경 도면 적용: ' + widthMm + ' × ' + heightMm + 'mm · 투명도 ' + Math.round(opacity*100) + '%');
+  if(typeof skCmdLog === 'function') skCmdLog('  🖼 배경 도면: ' + state.bgImage.fileName + ' · ' + widthMm + '×' + heightMm + 'mm · anchor=' + anchor, 'sys');
+};
+
+// 실시간 미리보기 (모달 안에서 값 바꾸면 즉시 캔버스에 반영)
+window.sk3PreviewBgImage = function(){
+  if(!state._bgImgTemp) return;
+  const widthMm = parseFloat(document.getElementById('bgImgWidth').value);
+  const heightMm = parseFloat(document.getElementById('bgImgHeight').value);
+  const opacity = (parseFloat(document.getElementById('bgImgOpacity').value) || 50) / 100;
+  const anchor = document.getElementById('bgImgAnchor').value || 'mr';
+  const offsetX = parseFloat(document.getElementById('bgImgOffsetX').value) || 0;
+  const offsetY = parseFloat(document.getElementById('bgImgOffsetY').value) || 0;
+  document.getElementById('bgImgOpacityLbl').textContent = Math.round(opacity*100) + '%';
+  if(!isFinite(widthMm) || widthMm <= 0 || !isFinite(heightMm) || heightMm <= 0) return;
+  state.bgImage = {
+    img: state._bgImgTemp.img,
+    pxW: state._bgImgTemp.pxW,
+    pxH: state._bgImgTemp.pxH,
+    fileName: state._bgImgTemp.fileName,
+    widthMm, heightMm, opacity, anchor, offsetX, offsetY,
+    visible: true
+  };
+  redrawSketch();
+};
+
+window.sk3RemoveBgImage = function(){
+  if(!confirm('🗑 배경 도면 제거?')) return;
+  state.bgImage = null;
+  state._bgImgTemp = null;
+  redrawSketch();
+  sk3CloseBgImageModal();
+  toast('🗑 배경 도면 제거');
+};
+
+window.sk3ToggleBgImage = function(){
+  if(!state.bgImage) return;
+  state.bgImage.visible = !state.bgImage.visible;
+  redrawSketch();
+  toast('🖼 배경 ' + (state.bgImage.visible ? 'ON' : 'OFF'));
+};

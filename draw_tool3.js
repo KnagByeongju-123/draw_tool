@@ -4655,7 +4655,18 @@ function pickHandle(e){
   }
   const hits = raycaster.intersectObjects(handleMeshes, false);
   if(hits.length === 0) return null;
-  return hits[0].object.userData._handle;
+  // v8.60: 같은 위치(near-equal distance)에서 move·scale 핸들이 겹치면 scale(크기조절) 우선
+  const best = hits[0];
+  const bestH = best.object.userData._handle;
+  if(bestH && bestH.type === 'move'){
+    for(const h of hits){
+      const info = h.object.userData._handle;
+      if(info && info.type === 'scale' && (h.distance - best.distance) < best.distance * 0.04){
+        return info;
+      }
+    }
+  }
+  return bestH;
 }
 
 function showTransformHandles(part){
@@ -4812,9 +4823,9 @@ function showTransformHandles(part){
     tipDn.userData._handle = {type:'move', axis:axis, dir:-1};
     tipDn.renderOrder = 1002;
     grp.add(tipDn);
-    // 충돌용 투명 캡슐 (클릭 영역 확장)
+    // 충돌용 투명 캡슐 (클릭 영역) — v8.60: 높이조절 핸들과 안 겹치게 화살표 본체 범위로 한정
     const hit = new THREE.Mesh(
-      new THREE.CylinderGeometry(moveDot*1.1, moveDot*1.1, arrowH*1.8, 8),
+      new THREE.CylinderGeometry(moveDot*1.0, moveDot*1.0, arrowH*1.15, 8),
       new THREE.MeshBasicMaterial({transparent:true, opacity:0, depthTest:false, depthWrite:false})
     );
     hit.userData._handle = {type:'move', axis:axis, dir:0};
@@ -4825,8 +4836,9 @@ function showTransformHandles(part){
   }
   // v8.58: Y이동(=수직 이동) 핸들 — 부품 위쪽 중앙에 배치 (가장 직관적, Tinkercad 스타일)
   // v8.59: 색상을 더 진한 파랑으로 강조 (수직 = Z = 파랑, CAD 컨벤션)
+  // v8.60: 높이조절(흰점, topY+0.12) 위로 충분히 띄워 클릭 충돌 방지 (0.28 → 0.46)
   group.add(makeMoveArrow('y', 0x2244ff,
-    {x: 0, y: size.y/2 + maxSize*0.28, z: 0}));
+    {x: 0, y: size.y/2 + maxSize*0.46, z: 0}));
 
   transformState.handleGroup = group;
   scene.add(group);

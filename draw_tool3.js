@@ -9871,25 +9871,28 @@ function syncRotPropPanel(part){
 }
 
 // v3.3: 선택 부품의 위치·크기·회전 입력값을 현재 상태로 갱신
+// v8.56: CAD 표준(Z-up) 컨벤션 — 표시는 Z-up이지만 내부 Three.js는 Y-up 유지
+//   화면 Y 입력 ↔ mesh.position.z (깊이)
+//   화면 Z 입력 ↔ mesh.position.y (높이) ← 사용자가 보는 "위쪽"
 function refreshPropPanelTransform(part){
   if(!part || !part.mesh) return;
   if(state.selectedPartId !== part.id) return;
-  // 회전 (라디안 → 도)
+  // 회전 (라디안 → 도) — Y/Z swap 표시
   const rx = document.getElementById('psRotX');
   const ry = document.getElementById('psRotY');
   const rz = document.getElementById('psRotZ');
   if(rx) rx.value = (part.mesh.rotation.x * 180/Math.PI).toFixed(1);
-  if(ry) ry.value = (part.mesh.rotation.y * 180/Math.PI).toFixed(1);
-  if(rz) rz.value = (part.mesh.rotation.z * 180/Math.PI).toFixed(1);
-  // 위치
+  if(ry) ry.value = (part.mesh.rotation.z * 180/Math.PI).toFixed(1);  // 화면 Y = 내부 Z
+  if(rz) rz.value = (part.mesh.rotation.y * 180/Math.PI).toFixed(1);  // 화면 Z = 내부 Y (높이)
+  // 위치 — Y/Z swap 표시
   const pos = part.mesh.position;
   const px = document.getElementById('propPosX');
   const py = document.getElementById('propPosY');
   const pz = document.getElementById('propPosZ');
   if(px) px.value = pos.x.toFixed(1);
-  if(py) py.value = pos.y.toFixed(1);
-  if(pz) pz.value = pos.z.toFixed(1);
-  // 크기 (월드 바운딩박스)
+  if(py) py.value = pos.z.toFixed(1);  // 화면 Y = 내부 Z
+  if(pz) pz.value = pos.y.toFixed(1);  // 화면 Z = 내부 Y (높이)
+  // 크기 (월드 바운딩박스) — Y/Z swap 표시
   part.mesh.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(part.mesh);
   const sz = bb.getSize(new THREE.Vector3());
@@ -9897,29 +9900,34 @@ function refreshPropPanelTransform(part){
   const sy = document.getElementById('propSizeY');
   const sz2 = document.getElementById('propSizeZ');
   if(sx) sx.value = sz.x.toFixed(1);
-  if(sy) sy.value = sz.y.toFixed(1);
-  if(sz2) sz2.value = sz.z.toFixed(1);
+  if(sy) sy.value = sz.z.toFixed(1);  // 화면 Y = 내부 Z
+  if(sz2) sz2.value = sz.y.toFixed(1);  // 화면 Z = 내부 Y (높이)
 }
 
 // v3.3: 입력된 위치값을 부품에 적용
+// v8.56: 화면 Z 입력 → 내부 Y, 화면 Y 입력 → 내부 Z
 function applyPropPosition(){
   const id = state.selectedPartId;
   if(!id) return;
   const part = state.parts.find(p => p.id === id);
   if(!part) return;
-  const x = parseFloat(document.getElementById('propPosX').value);
-  const y = parseFloat(document.getElementById('propPosY').value);
-  const z = parseFloat(document.getElementById('propPosZ').value);
-  if(!isNaN(x)) part.mesh.position.x = x;
-  if(!isNaN(y)) part.mesh.position.y = y;
-  if(!isNaN(z)) part.mesh.position.z = z;
+  const xIn = parseFloat(document.getElementById('propPosX').value);
+  const yIn = parseFloat(document.getElementById('propPosY').value);  // 화면 Y (깊이) → 내부 Z
+  const zIn = parseFloat(document.getElementById('propPosZ').value);  // 화면 Z (높이) → 내부 Y
+  if(!isNaN(xIn)) part.mesh.position.x = xIn;
+  if(!isNaN(yIn)) part.mesh.position.z = yIn;
+  if(!isNaN(zIn)) part.mesh.position.y = zIn;
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
-  setStat('📍 위치 변경: X=' + x.toFixed(1) + ' Y=' + y.toFixed(1) + ' Z=' + z.toFixed(1));
+  setStat('📍 위치 변경: X=' + xIn.toFixed(1) + ' Y=' + yIn.toFixed(1) + ' Z=' + zIn.toFixed(1) + ' (Z=위)');
 }
 
 // v3.3: 입력된 크기값을 부품에 적용 (해당 축 스케일 보정)
 function applyPropSize(axisChar){
+  // v8.56: 화면 Y/Z ↔ 내부 Z/Y swap (Z-up 표시 컨벤션)
+  let internalAxis = axisChar;
+  if(axisChar === 'y') internalAxis = 'z';
+  else if(axisChar === 'z') internalAxis = 'y';
   const id = state.selectedPartId;
   if(!id) return;
   const part = state.parts.find(p => p.id === id);
@@ -9934,14 +9942,13 @@ function applyPropSize(axisChar){
   part.mesh.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(part.mesh);
   const sz = bb.getSize(new THREE.Vector3());
-  const cur = sz[axisChar];
+  const cur = sz[internalAxis];
   if(cur < 0.001){ toast('현재 크기를 측정할 수 없습니다'); return; }
   const factor = newSize / cur;
   // 부품 mesh.scale에 해당 축 factor 곱하기
-  part.mesh.scale[axisChar] *= factor;
-  // 바닥(또는 워크플레인) 안착 유지: Y 크기를 키울 때 부품이 바닥을 뚫지 않도록
-  //   간단 처리: 부품의 BB 최저점이 원래 바닥에 머물도록 보정 (Y축 변경 시에만)
-  if(axisChar === 'y'){
+  part.mesh.scale[internalAxis] *= factor;
+  // 바닥 안착: 내부 Y(=화면 Z, 높이) 크기를 키울 때 부품이 바닥을 뚫지 않도록
+  if(internalAxis === 'y'){
     const oldMin = bb.min.y;
     part.mesh.updateMatrixWorld(true);
     const newBB = new THREE.Box3().setFromObject(part.mesh);
@@ -9961,17 +9968,17 @@ function applyPropRotation(){
   if(!id) return;
   const part = state.parts.find(p => p.id === id);
   if(!part) return;
-  const rx = parseFloat(document.getElementById('psRotX').value);
-  const ry = parseFloat(document.getElementById('psRotY').value);
-  const rz = parseFloat(document.getElementById('psRotZ').value);
-  if(!isNaN(rx)) part.mesh.rotation.x = rx * Math.PI / 180;
-  if(!isNaN(ry)) part.mesh.rotation.y = ry * Math.PI / 180;
-  if(!isNaN(rz)) part.mesh.rotation.z = rz * Math.PI / 180;
+  // v8.56: 화면 Y/Z ↔ 내부 Z/Y swap
+  const rxIn = parseFloat(document.getElementById('psRotX').value);
+  const ryIn = parseFloat(document.getElementById('psRotY').value);  // 화면 Y → 내부 Z
+  const rzIn = parseFloat(document.getElementById('psRotZ').value);  // 화면 Z → 내부 Y
+  if(!isNaN(rxIn)) part.mesh.rotation.x = rxIn * Math.PI / 180;
+  if(!isNaN(ryIn)) part.mesh.rotation.z = ryIn * Math.PI / 180;
+  if(!isNaN(rzIn)) part.mesh.rotation.y = rzIn * Math.PI / 180;
   if(transformState.activePart === part) showTransformHandles(part);
   updateDimLabels();
-  // 크기는 회전으로 인해 월드 BB가 바뀌므로 갱신
   refreshPropPanelTransform(part);
-  setStat('↻ 회전 변경: X=' + (isNaN(rx)?'-':rx) + '° Y=' + (isNaN(ry)?'-':ry) + '° Z=' + (isNaN(rz)?'-':rz) + '°');
+  setStat('↻ 회전 변경: X=' + (isNaN(rxIn)?'-':rxIn) + '° Y=' + (isNaN(ryIn)?'-':ryIn) + '° Z=' + (isNaN(rzIn)?'-':rzIn) + '° (Z=수직)');
 }
 
 function toast(msg){
